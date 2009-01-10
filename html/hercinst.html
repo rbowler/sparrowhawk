@@ -29,6 +29,8 @@ Hercules Version 3: Installation and Operation</TITLE>
     <p>
         <a href="#operating">Operating Procedure</a>
         <ul>
+            <li><a href="#starting">Starting Hercules</a>
+            <li><a href="#keyboard">Using the keyboard</a>
             <li><a href="#commands">Panel commands</a>
             <li><a href="#RCFILE">The .RC &nbsp;("run commands")&nbsp; file</a>
             <li><a href="#HAO">HAO &nbsp;("Hercules Automatic Operator")</a>
@@ -61,13 +63,13 @@ has instructions on his "<b>Building Hercules for Windows</b>" web page at
 <h3>Building from source - Linux and Mac OS X</h3>
 <ol>
 <li>Download the distribution file
-<a href="http://www.hercules-390.org/hercules-3.05.tar.gz">hercules-3.05.tar.gz</a>
+<a href="http://www.hercules-390.org/hercules-3.06.tar.gz">hercules-3.06.tar.gz</a>
 <br><em>Note:</em> By downloading this file you agree to the terms
     of the <a href="herclic.html">Q Public Licence</a>.
 <p>
 <li>Use these commands to unzip the distribution file:
-<pre>tar xvzf ../hercules-3.05.tar.gz
-cd hercules-3.05</pre>
+<pre>tar xvzf ../hercules-3.06.tar.gz
+cd hercules-3.06</pre>
 
 <li>Verify you have all of the correct versions of all of the
 required packages installed:
@@ -105,7 +107,7 @@ compiler and other software levels.
 <ol>
 <li>Download the RPM file you want:
 <ul>
-<li><a href="http://www.hercules-390.org/hercules-3.05-1.i686.rpm">hercules-3.05-1.i686.rpm</a>: Intel
+<li><a href="http://www.hercules-390.org/hercules-3.06-1.i686.rpm">hercules-3.06-1.i686.rpm</a>: Intel
 </ul>
 <li>Install the RPM:
 <br><code>rpm -Uvh</code> <i>RPMfile</i>
@@ -144,8 +146,12 @@ in subtle ways if the wrong optimization settings are used.</p>
 
 <ol>
 <li>Download the compressed disk image: <a
-href="http://www.hercules-390.org/hercules-3.05-tiger.dmg">hercules-3.05-tiger.dmg</a>.
-This package is a universal binary and requires OS X version 10.4 (Tiger) or later.
+href="http://www.hercules-390.org/hercules-3.06-tiger.dmg">hercules-3.06-tiger.dmg</a>
+or <a
+href="http://www.hercules-390.org/hercules-3.06-leopard.dmg">hercules-3.06-leopard.dmg</a>.
+This package is a universal binary and requires the OS X version in the
+name, either 10.4 (Tiger) or 10.5 (Leopard), or later. The Leopard version
+includes native 64-bit host support, while the Tiger version does not.
 <li>Mount the image by double-clicking on it in the Finder.
 Your web browser may have done that for you already.
 <li>Installation and use instructions are in the
@@ -157,9 +163,9 @@ to install the supplied Tunnel driver.
 <h3>Installing on Windows (without Cygwin):</h3>
 <ol>
 <li>Download the <a
-href="http://www.hercules-390.org/hercules-3.05-native.exe">self-extracting
+href="http://www.hercules-390.org/hercules-3.06-native.exe">self-extracting
 Windows archive</a> or the <a
-href="http://www.hercules-390.org/hercules-3.05-native.msi">Windows
+href="http://www.hercules-390.org/hercules-3.06-native.msi">Windows
 Installer package</a>.
 <li>If you downloaded the self-extracting archive, simply execute it to
 install Hercules on your system. If you downloaded the Windows Installer
@@ -181,7 +187,7 @@ http://www.softdevlabs.com/Hercules/hercgui-index.html</a>.
 <h3>Installing on Windows with Cygwin:</h3>
 <ol>
 <li>
-Hercules 3.05 is now supplied as prebuilt binaries only in a native Windows
+Hercules 3.06 is now supplied as prebuilt binaries only in a native Windows
 version. This version will work perfectly well under Cygwin, as well as
 native Windows, and does not require any specific version of the Cygwin
 libraries. Follow the instructions above to install the native Windows
@@ -207,14 +213,15 @@ href="cckddasd.html">this page</a>.
 
 <p><hr><a name="operating"></a>
 <h2>Operating Procedure</h2>
+<a name="starting">
 <p class="warning">
 <em>Note: If you intend to run any licensed software on your PC
 using Hercules, it is your responsibility to ensure that you do not
 violate the software vendor's licensing terms.</em>
 
-<h4>Loading a standalone program or operating system</h4>
+<h4>Starting Hercules</h4>
 <p>
-To start Hercules enter this command at the Unix shell prompt:
+To start Hercules enter this command at the Unix or Windows command prompt:
 <blockquote><code><pre>
     hercules  [ -f <em>filename</em> ]
               [ -d ]
@@ -272,6 +279,350 @@ Now you can enter an ipl command from the control panel.
 <p><br>
 <hr width="50%">
 
+<a name="keyboard">
+<h4>Using the keyboard</h4>
+<p>
+
+The main Hercules screen contains a scrollable list of messages with a command
+input area and system status line at the bottom of the screen.
+<p>
+To scroll through the messages, use either the Page Up or Page Down keys,
+the Ctrl + Up Arrow or Ctrl + Down Arrow keys, or the Home or End and/or
+the Ctrl + Home or Ctrl + End keys.
+<p>
+Important messages are highlighted in a different color (usually red) and are
+prevented from being scrolled off the screen for two minutes. If Extended Cursor
+handling is available then important messages currently at the top of the screen
+can be removed early by moving the cursor to the line containing the message
+and then pressing enter.
+<p>
+Use the Insert key to switch between insert and overlay mode when typing in
+the command input area. Use the Home and End keys to move to the first or
+last character of the command you are typing, or the use the left/right arrow keys
+to move to a specific character. Use the Escape key to erase the input area.
+<p>
+Pressing Escape when the command input area is already empty causes the screen
+to switch to the semi-graphical "New Panel" display mode, which shows the overall
+status of the system and devices.
+<p>
+When in the semi-graphical "New Panel" display mode there is no command input
+area. Instead, single character "hot keys" are used to issue some of the more
+common functions such as starting or stopping the CPU. The hot-keys are those
+which are highlighted. Pressing the '?' key displays brief help information
+on how to use the semi-graphical panel.
+<p>
+    <TABLE border=1 cellpadding=5 align="center" width="70%">
+
+      <THEAD>
+
+        <TR>
+          <TH colspan=2><big>Normal cursor handling</big>
+          </TH>
+        </TR>
+
+        <TR>
+          <TH width="25%">Key</TH>
+          <TH>Action</TH>
+        </TR>
+
+      </THEAD>
+
+      <TBODY>
+
+
+        <TR>
+          <TD>
+                    Esc
+          </TD>
+          <TD>
+                    Erases the contents of the command input area.
+                    If the command input area is already empty,
+                    switches to semi-graphical New Panel.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Del
+          </TD>
+          <TD>
+                    Deletes the character at the cursor position.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Backspace
+          </TD>
+          <TD>
+                    Erases the previous character.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Insert
+          </TD>
+          <TD>
+                    Toggles between insert mode and overlay mode.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Tab
+          </TD>
+          <TD>
+                    Attempts to complete the partial file name at the
+                    cursor position in the command input area. If more
+                    than one possible file exists, a list of matching
+                    file names is displayed.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Home
+          </TD>
+          <TD>
+                    Moves the cursor to the start of the input in the
+                    command input area. If the command input area is
+                    empty, scrolls the message area to the top.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    End
+          </TD>
+          <TD>
+                    Moves the cursor to the end of the input in the
+                    command input area.  If the command input area is
+                    empty, scrolls the message area to the bottom.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Page Up
+          </TD>
+          <TD>
+                    Scrolls the message area up one screen.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Page Down
+          </TD>
+          <TD>
+                    Scrolls the message area down one screen.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Up arrow
+          </TD>
+          <TD>
+                    Recalls previous command into the input area.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Down arrow
+          </TD>
+          <TD>
+                    Recalls next command into the input area.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Right arrow
+          </TD>
+          <TD>
+                    Moves cursor to next character of input area.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Left arrow
+          </TD>
+          <TD>
+                    Moves cursor to previous character of input area.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Ctrl + Up arrow
+          </TD>
+          <TD>
+                    Scrolls the message area up one line.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Ctrl + Down arrow
+          </TD>
+          <TD>
+                    Scrolls the message area down one line.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Ctrl + Home
+          </TD>
+          <TD>
+                    Scrolls the message area to the top.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Ctrl + End
+          </TD>
+          <TD>
+                    Scrolls the message area to the bottom.
+          </TD>
+        </TR>
+
+
+      </TBODY>
+    </TABLE>
+
+<p>
+The following additional keyboard functions are effective when the
+Hercules Extended Cursor Handling feature (OPTION_EXTCURS) is activated
+at compile time.
+At present, this feature is activated on the Windows platform only.
+<p>
+    <TABLE border=1 cellpadding=5 align="center">
+    <TABLE border=1 cellpadding=5 align="center" width="70%">
+
+      <THEAD>
+
+        <TR>
+          <TH colspan=2><big>Extended cursor handling</big>
+          </TH>
+        </TR>
+
+        <TR>
+          <TH width="25%">Key</TH>
+          <TH>Action</TH>
+        </TR>
+
+      </THEAD>
+
+      <TBODY>
+
+
+        <TR>
+          <TD>
+                    Alt + Up arrow
+          </TD>
+          <TD>
+                    Moves cursor up one row.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Alt + Down arrow
+          </TD>
+          <TD>
+                    Moves cursor down one row.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Alt + Right arrow
+          </TD>
+          <TD>
+                    Moves cursor right one column.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Alt + Left arrow
+          </TD>
+          <TD>
+                    Moves cursor left one column.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Tab
+          </TD>
+          <TD>
+                    If cursor is outside the command input area,
+                    moves cursor to the start of the input in the
+                    command input area.
+                    Otherwise behaves as described in previous table.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    Home
+          </TD>
+          <TD>
+                    If cursor is outside the command input area,
+                    moves cursor to the start of the input in the
+                    command input area.
+                    Otherwise behaves as described in previous table.
+          </TD>
+        </TR>
+
+
+        <TR>
+          <TD>
+                    End
+          </TD>
+          <TD>
+                    If cursor is outside the command input area,
+                    moves cursor to the end of the input in the
+                    command input area.
+                    Otherwise behaves as described in previous table.
+          </TD>
+        </TR>
+
+
+      </TBODY>
+    </TABLE>
+
+<p>
+<hr width="50%">
+
 <a name="commands">
 <h4>Panel commands</h4>
 <p>
@@ -283,150 +634,165 @@ panel commands.
 <p>
 <pre>
 
-    Command      Description...
-    -------      -----------------------------------------------
-    ?            list all commands
-    help         command specific help
+  Command      Description... 
+  -------      ----------------------------------------------- 
+  ?            list all commands 
+  help         command specific help
+ 
+  *            (log comment to syslog)
+ 
+  message      display message on console a la VM 
+  msg          same as message 
+  msgnoh       same as message - no header
+ 
+  hst          history of commands 
+  hao          Hercules Automatic Operator 
+  log          direct log output 
+  logopt       change log options 
+  version      display version information
+ 
+  quit         terminate the emulator 
+  exit         (synonym for 'quit')
+ 
+  cpu          define target cpu for panel display and commands
+ 
+  start        start CPU (or printer device if argument given) 
+  stop         stop CPU (or printer device if argument given)
+ 
+  startall     start all CPU's 
+  stopall      stop all CPU's
+ 
+  cf           configure current CPU online or offline 
+  cfall        configure all CPU's online or offline
+ 
+  .reply       scp command 
+  !message     scp priority messsage 
+  ssd          Signal Shutdown
+ 
+  ptt          display pthread trace
+ 
+  i            generate I/O attention interrupt for device 
+  ext          generate external interrupt 
+  restart      generate restart interrupt 
+  archmode     set architecture mode 
+  loadparm     set IPL parameter
+ 
+  ipl          IPL Normal from device xxxx 
+  iplc         IPL Clear from device xxxx 
+  sysreset     Issue SYSTEM Reset manual operation 
+  sysclear     Issue SYSTEM Clear Reset manual operation 
+  store        store CPU status at absolute zero
+ 
+  psw          display or alter program status word 
+  gpr          display or alter general purpose registers 
+  fpr          display floating point registers 
+  fpc          display floating point control register 
+  cr           display or alter control registers 
+  ar           display access registers 
+  pr           display prefix register 
+  timerint     display or set timers update interval 
+  clocks       display tod clkc and cpu timer 
+  ipending     display pending interrupts 
+  ds           display subchannel 
+  r            display or alter real storage 
+  v            display or alter virtual storage 
+  u            disassemble storage 
+  devtmax      display or set max device threads 
+  k            display cckd internal trace
+ 
+  attach       configure device 
+  detach       remove device 
+  define       rename device 
+  devinit      reinitialize device 
+  devlist      list device or all devices
+ 
+  qd           query dasd
+ 
+  automount    show/update allowable tape automount directories
+ 
+  scsimount    automatic SCSI tape mounts
+ 
+  cd           change directory 
+  pwd          print working directory 
+  sh           shell command
+ 
+  cache        cache command 
+  cckd         cckd command 
+  shrd         shrd command 
+  conkpalv     display/alter console TCP keep-alive settings 
+  quiet        toggle automatic refresh of panel display data
+ 
+  t            instruction trace 
+  t+           instruction trace on 
+  t-           instruction trace off 
+  t?           instruction trace query 
+  s            instruction stepping 
+  s+           instruction stepping on 
+  s-           instruction stepping off 
+  s?           instruction stepping query 
+  b            set breakpoint 
+  b+           set breakpoint 
+  b-           delete breakpoint 
+  g            turn off instruction stepping and start CPU
+ 
+  ostailor     trace program interrupts 
+  pgmtrace     trace program interrupts 
+  savecore     save a core image to file 
+  loadcore     load a core image file 
+  loadtext     load a text deck file
+ 
+  ldmod        load a module 
+  rmmod        delete a module 
+  lsmod        list dynamic modules 
+  lsdep        list module dependencies
+ 
+  iodelay      display or set I/O delay value 
+  ctc          enable/disable CTC debugging 
+  toddrag      display or set TOD clock drag factor 
+  panrate      display or set rate at which console refreshes 
+  msghld       display or set the timeout of held messages 
+  syncio       display syncio devices statistics 
+  maxrates     display maximum observed MIPS/SIOS rate for the
+               defined interval or define a new reporting interval
+ 
+  defsym       Define symbol 
+  script       Run a sequence of panel commands contained in a file 
+  cscript      Cancels a running script thread
+ 
+  evm          ECPS:VM Commands (Deprecated) 
+  ecpsvm       ECPS:VM Commands
+ 
+  aea          Display AEA tables 
+  aia          Display AIA fields 
+  tlb          Display TLB tables
+ 
+  sizeof       Display size of structures
+ 
+  suspend      Suspend hercules 
+  resume       Resume hercules
+ 
+  herclogo     Read a new hercules logo file
+ 
+  traceopt     Instruction trace display options
+ 
+  cmdtgt       Specify the command target
+ 
+  herc         Hercules command
+ 
+  scp          Send scp command
+ 
+  pscp         Send prio message scp command
+ 
+  sf+dev       add shadow file 
+  sf-dev       delete shadow file 
+  sfc          compress shadow files 
+  sfk          check shadow files 
+  sfd          display shadow file stats 
 
-    *            (log comment to syslog)
-
-    hst          history of commands
-    log          direct log output
-    logopt       change log options 
-    version      display version information
-
-    quit         terminate the emulator
-    exit         (synonym for 'quit')
-
-    cpu          define target cpu for panel display and commands
-
-    start        start CPU (or printer device if argument given)
-    stop         stop CPU (or printer device if argument given)
-
-    startall     start all CPU's
-    stopall      stop all CPU's
-
-    cf           configure current CPU online or offline
-    cfall        configure all CPU's online or offline
-
-    .reply       scp command
-    !message     scp priority messsage
-    ssd          Signal Shutdown
-
-    ptt          display pthread trace
-
-    i            generate I/O attention interrupt for device
-    ext          generate external interrupt
-    restart      generate restart interrupt
-    archmode     set architecture mode
-    loadparm     set IPL parameter
-
-    ipl          IPL Normal from device xxxx
-    iplc         IPL Clear from device xxxx
-    sysreset     Issue SYSTEM Reset manual operation
-    sysclear     Issue SYSTEM Clear Reset manual operation
-    store        store CPU status at absolute zero
-
-    psw          display program status word
-    gpr          display or alter general purpose registers
-    fpr          display floating point registers
-    fpc          display floating point control register
-    cr           display control registers
-    ar           display access registers
-    pr           display prefix register
-    timerint     display or set timers update interval
-    clocks       display tod clkc and cpu timer
-    ipending     display pending interrupts
-    ds           display subchannel
-    r            display or alter real storage
-    v            display or alter virtual storage
-    u            disassemble storage
-    devtmax      display or set max device threads
-    k            display cckd internal trace
-
-    attach       configure device
-    detach       remove device
-    define       rename device
-    devinit      reinitialize device
-    devlist      list device or all devices
-
-    qd           query dasd
-
-    scsimount    automatic SCSI tape mounts
-
-    cd           change directory
-    pwd          print working directory
-    sh           shell command
-
-    cache        cache command
-    cckd         cckd command
-    shrd         shrd command
-    conkpalv     display/alter console TCP keep-alive settings
-    quiet        toggle automatic refresh of panel display data
-
-    t            instruction trace
-    t+           instruction trace on
-    t-           instruction trace off
-    t?           instruction trace query
-    s            instruction stepping
-    s+           instruction stepping on
-    s-           instruction stepping off
-    s?           instruction stepping query
-    b            set breakpoint
-    b+           set breakpoint
-    b-           delete breakpoint
-    g            turn off instruction stepping and start CPU
-
-    ostailor     trace program interrupts
-    pgmtrace     trace program interrupts
-    savecore     save a core image to file
-    loadcore     load a core image file
-    loadtext     load a text deck file
-
-    ldmod        load a module
-    rmmod        delete a module
-    lsmod        list dynamic modules
-    lsdep        list module dependencies
-
-    iodelay      display or set I/O delay value
-    tt32stats    (deprecated; use 'tt32' cmd instead)
-    tt32         control/query CTCI-W32 functionality
-    toddrag      display or set TOD clock drag factor
-    panrate      display or set rate at which console refreshes
-    syncio       display syncio devices statistics
-    maxrates     display maximum observed MIPS/SIOS rate for the
-                 defined interval or define a new reporting interval
-
-    defsym       Define symbol
-    script       Run a sequence of panel commands contained in a file
-    cscript      Cancels a running script thread
-
-    evm          ECPS:VM Commands (Deprecated)
-    ecpsvm       ECPS:VM Commands
-
-    aea          Display AEA tables
-    aia          Display AIA fields
-    tlb          Display TLB tables
-
-    sizeof       Display size of structures
-
-    suspend      Suspend hercules
-    resume       Resume hercules
-
-    herclogo     Read a new hercules logo file
-
-    traceopt     Instruction trace display options
-
-    sf+dev       add shadow file
-    sf-dev       delete shadow file
-    sf=dev ..    rename shadow file
-    sfc          compress shadow files
-    sfd          display shadow file stats
-
-    t{+/-}dev    turn CCW tracing on/off
-    s{+/-}dev    turn CCW stepping on/off
-    t{+/-}CKD    turn CKD_KEY tracing on/off
-    f{+/-}adr    mark frames unusable/usable
+  t{+/-}dev    turn CCW tracing on/off 
+  s{+/-}dev    turn CCW stepping on/off 
+  t{+/-}CKD    turn CKD_KEY tracing on/off 
+  f{+/-}adr    mark frames unusable/usable 
 
 </pre>
 <p>
@@ -458,6 +824,10 @@ Press ? to obtain help in either control panel.
 Some commands also offer additional help information regarding their syntax,
 etc. Enter&nbsp; "<tt>help <i>&lt;command name&gt;</i></tt>" &nbsp; to display
 this additional help information. (Note: not every command supports help)
+<p>
+When a command is prefixed with '-', the the command will not be redisplayed at
+the console. This can be used in scripts and is also used internally when commands
+are to be invoked without being redisplayed at the panel.
 
 <p>
 <hr width="50%">
@@ -539,7 +909,7 @@ further details.
 <p>
 The associated <i>command</i> is whatever valid Hercules panel command you
 wish to issue in response to a message being issued that matches the given
-pattern <i>target</i>. 
+pattern <i>target</i>.
 
 <h5>Other commands and limitations</h5>
 <p>
@@ -550,14 +920,15 @@ the 'hao del <i>nnn</i>' command to delete the specific rule identified by <i>nn
 by their numeric value). Optionally, one may delete ALL defined or partially
 defined rules by issuing the command 'hao clear'.
 <p>
-The current implementation limits the total number of defined rules to 10. If
-you need to define more than 10 rules you will either have to build Hercules
+The current implementation limits the total number of defined rules to 64. If
+you need to define more than 64 rules you will either have to build Hercules
 for yourself (increasing the value of the HAO_MAXRULE constant in hao.c) or
 else beg one of the Hercules developers to please do it for you.
 <p>
-Note that there is currently no way to define a command whose arguments vary  
+Note that there is currently no way to define a command whose arguments vary
 based on actual message text. That is to say, there is currently no way to say
 <blockquote>
+<p>
    "Reply with the command 'devinit <i>cuu</i> filename'
    in response to message text 'HHCXXnnnI Device <i>cuu</i>
    intervention required.' where <i>cuu</i> is whatever cuu
@@ -581,12 +952,12 @@ very much applies here.
 <h2>Technical Support</h2>
 
 <P>
-For technical support, please refer our <a href="hercsupp.html">Technical Support</a> web page.
+For technical support, please see our <a href="hercsupp.html">Technical Support</a> web page.
 </P>
 
 <p><center><hr width=15% noshade><p>
 <a href="index.html"><img src="images/back.gif" border=0 alt="back"></a>
 </center>
-<p class="lastupd">Last updated $Date: 2007/06/22 12:04:39 $ $Revision: 1.47 $</p>
+<p class="lastupd">Last updated $Date: 2009/01/10 00:35:02 $ $Revision: 1.59 $</p>
 </BODY>
 </HTML>

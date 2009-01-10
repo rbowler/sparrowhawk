@@ -18,9 +18,39 @@
 # Makefile for Hercules S/370, ESA/390 and z/Architecture emulator
 # Process this file with 'automake' to produce Makefile.in
 #
-# $Id: Makefile.am,v 1.178 2007/06/02 13:46:41 rbowler Exp $
+# $Id: Makefile.am,v 1.186 2008/12/29 11:03:10 jj Exp $
 #
 # $Log: Makefile.am,v $
+# Revision 1.186  2008/12/29 11:03:10  jj
+# Move HMC disk I/O functions to scedasd.c
+#
+# Revision 1.185  2008/12/04 17:39:02  rbowler
+# Add ability to configure group name with --enable-setuid-hercifc=name
+#
+# Revision 1.184  2008/12/01 16:19:49  jj
+# Check for licensed operating systems without impairing architectural
+# compliance of IFL's
+#
+# Revision 1.183  2008/05/22 19:25:58  fish
+# Flex FakeTape support
+#
+# Revision 1.182  2008/03/25 11:41:31  fish
+# SCSI TAPE MODS part 1: groundwork: non-functional changes:
+# rename some functions, comments, general restructuring, etc.
+# New source modules awstape.c, omatape.c, hettape.c and
+# tapeccws.c added, but not yet used (all will be used in a future
+# commit though when tapedev.c code is eventually split)
+#
+# Revision 1.181  2008/03/02 22:50:35  rbowler
+# Restore tabs corrupted by previous modification
+#
+# Revision 1.180  2008/03/01 14:19:29  rbowler
+# Add new module general3.c for general-instructions-extension facility
+#
+# Revision 1.179  2008/02/19 11:49:18  ivan
+# - Move setting of CPU priority after spwaning timer thread
+# - Added support for Posix 1003.1e capabilities
+#
 # Revision 1.178  2007/06/02 13:46:41  rbowler
 # PFPO framework
 #
@@ -180,9 +210,12 @@ hdt3270_la_OBJECTS = $(am_hdt3270_la_OBJECTS)
 @OPTION_DYNAMIC_LOAD_TRUE@am_hdt3270_la_rpath = -rpath $(modexecdir)
 @OPTION_DYNAMIC_LOAD_TRUE@hdt3420_la_DEPENDENCIES =  \
 @OPTION_DYNAMIC_LOAD_TRUE@	$(am__DEPENDENCIES_2) libherct.la
-am__hdt3420_la_SOURCES_DIST = tapedev.c scsitape.c
+am__hdt3420_la_SOURCES_DIST = tapedev.c tapeccws.c awstape.c \
+	faketape.c hettape.c omatape.c scsitape.c w32stape.c
 @OPTION_DYNAMIC_LOAD_TRUE@am_hdt3420_la_OBJECTS = tapedev.lo \
-@OPTION_DYNAMIC_LOAD_TRUE@	scsitape.lo
+@OPTION_DYNAMIC_LOAD_TRUE@	tapeccws.lo awstape.lo faketape.lo \
+@OPTION_DYNAMIC_LOAD_TRUE@	hettape.lo omatape.lo scsitape.lo \
+@OPTION_DYNAMIC_LOAD_TRUE@	w32stape.lo
 hdt3420_la_OBJECTS = $(am_hdt3420_la_OBJECTS)
 @OPTION_DYNAMIC_LOAD_TRUE@am_hdt3420_la_rpath = -rpath $(modexecdir)
 @OPTION_DYNAMIC_LOAD_TRUE@hdt3505_la_DEPENDENCIES =  \
@@ -214,33 +247,35 @@ libherc_la_DEPENDENCIES = libhercs.la libhercu.la libherct.la \
 	libhercd.la decNumber/libdecNumber.la $(am__DEPENDENCIES_1)
 am__libherc_la_SOURCES_DIST = hconsole.c w32util.c strsignal.c impl.c \
 	config.c bldcfg.c panel.c history.c fillfnam.c ipl.c assist.c \
-	dat.c stack.c cpu.c vstore.c general1.c general2.c pfpo.c \
-	plo.c control.c crypto.c io.c decimal.c service.c chsc.c \
-	opcode.c diagnose.c diagmssf.c vm.c channel.c external.c \
-	float.c trace.c machchk.c vector.c xstore.c cmpsc.c sie.c \
-	qdio.c clock.c timer.c esame.c ieee.c dfp.c machdep.h \
-	httpserv.c cgibin.c loadparm.c hsccmd.c hao.c hscmisc.c sr.c \
-	w32chan.c commadpt.c console.c cardpch.c cardrdr.c sockdev.c \
-	printer.c tapedev.c scsitape.c hetlib.c ctc_lcs.c ctc_ctci.c \
-	ctcadpt.c w32ctca.c hchan.c tuntap.c qeth.c con1052c.c \
-	ecpsvm.c
+	dat.c stack.c cpu.c vstore.c general1.c general2.c general3.c \
+	pfpo.c plo.c control.c crypto.c io.c decimal.c service.c \
+	scedasd.c losc.c chsc.c opcode.c diagnose.c diagmssf.c vm.c \
+	channel.c external.c float.c trace.c machchk.c vector.c \
+	xstore.c cmpsc.c sie.c qdio.c clock.c timer.c esame.c ieee.c \
+	dfp.c machdep.h httpserv.c cgibin.c loadparm.c hsccmd.c hao.c \
+	hscmisc.c sr.c w32chan.c commadpt.c console.c cardpch.c \
+	cardrdr.c sockdev.c printer.c tapedev.c tapeccws.c sllib.c \
+	hetlib.c awstape.c faketape.c hettape.c omatape.c scsitape.c \
+	w32stape.c ctc_lcs.c ctc_ctci.c ctcadpt.c w32ctca.c hchan.c \
+	tuntap.c qeth.c con1052c.c ecpsvm.c
 am__objects_1 = w32chan.lo
 @BUILD_FTHREADS_TRUE@am__objects_2 = $(am__objects_1)
 am__objects_3 = commadpt.lo console.lo cardpch.lo cardrdr.lo \
-	sockdev.lo printer.lo tapedev.lo scsitape.lo hetlib.lo \
-	ctc_lcs.lo ctc_ctci.lo ctcadpt.lo w32ctca.lo hchan.lo \
-	tuntap.lo qeth.lo con1052c.lo
+	sockdev.lo printer.lo tapedev.lo tapeccws.lo sllib.lo \
+	hetlib.lo awstape.lo faketape.lo hettape.lo omatape.lo \
+	scsitape.lo w32stape.lo ctc_lcs.lo ctc_ctci.lo ctcadpt.lo \
+	w32ctca.lo hchan.lo tuntap.lo qeth.lo con1052c.lo
 @OPTION_DYNAMIC_LOAD_FALSE@am__objects_4 = $(am__objects_3)
 am_libherc_la_OBJECTS = hconsole.lo w32util.lo strsignal.lo impl.lo \
 	config.lo bldcfg.lo panel.lo history.lo fillfnam.lo ipl.lo \
 	assist.lo dat.lo stack.lo cpu.lo vstore.lo general1.lo \
-	general2.lo pfpo.lo plo.lo control.lo crypto.lo io.lo \
-	decimal.lo service.lo chsc.lo opcode.lo diagnose.lo \
-	diagmssf.lo vm.lo channel.lo external.lo float.lo trace.lo \
-	machchk.lo vector.lo xstore.lo cmpsc.lo sie.lo qdio.lo \
-	clock.lo timer.lo esame.lo ieee.lo dfp.lo httpserv.lo \
-	cgibin.lo loadparm.lo hsccmd.lo hao.lo hscmisc.lo sr.lo \
-	$(am__objects_2) $(am__objects_4) ecpsvm.lo
+	general2.lo general3.lo pfpo.lo plo.lo control.lo crypto.lo \
+	io.lo decimal.lo service.lo scedasd.lo losc.lo chsc.lo \
+	opcode.lo diagnose.lo diagmssf.lo vm.lo channel.lo external.lo \
+	float.lo trace.lo machchk.lo vector.lo xstore.lo cmpsc.lo \
+	sie.lo qdio.lo clock.lo timer.lo esame.lo ieee.lo dfp.lo \
+	httpserv.lo cgibin.lo loadparm.lo hsccmd.lo hao.lo hscmisc.lo \
+	sr.lo $(am__objects_2) $(am__objects_4) ecpsvm.lo
 libherc_la_OBJECTS = $(am_libherc_la_OBJECTS)
 libhercd_la_DEPENDENCIES = $(am__DEPENDENCIES_1) libhercs.la \
 	libhercu.la
@@ -321,7 +356,7 @@ dmap2hrc_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am__hercifc_SOURCES_DIST = hercifc.c
 @BUILD_HERCIFC_TRUE@am_hercifc_OBJECTS = hercifc.$(OBJEXT)
 hercifc_OBJECTS = $(am_hercifc_OBJECTS)
-@BUILD_HERCIFC_TRUE@hercifc_DEPENDENCIES = $(am__DEPENDENCIES_1)
+@BUILD_HERCIFC_TRUE@hercifc_DEPENDENCIES = $(am__DEPENDENCIES_4)
 am__herclin_SOURCES_DIST = herclin.c hdlmain.c
 @BUILD_SHARED_TRUE@am_herclin_OBJECTS = herclin.$(OBJEXT) \
 @BUILD_SHARED_TRUE@	hdlmain.$(OBJEXT)
@@ -460,6 +495,10 @@ EXEEXT = @EXEEXT@
 F77 = @F77@
 FFLAGS = @FFLAGS@
 GMSGFMT = @GMSGFMT@
+GREP = @GREP@
+HERCIFC_GROUPNAME = @HERCIFC_GROUPNAME@
+HERCIFC_GROUPSET_FALSE = @HERCIFC_GROUPSET_FALSE@
+HERCIFC_GROUPSET_TRUE = @HERCIFC_GROUPSET_TRUE@
 INSTALL_DATA = @INSTALL_DATA@
 INSTALL_LTDL_FALSE = @INSTALL_LTDL_FALSE@
 INSTALL_LTDL_TRUE = @INSTALL_LTDL_TRUE@
@@ -510,15 +549,9 @@ USE_DLLTOOL_TRUE = @USE_DLLTOOL_TRUE@
 USE_NLS = @USE_NLS@
 VERSION = @VERSION@
 XGETTEXT = @XGETTEXT@
-ac_ct_AR = @ac_ct_AR@
-ac_ct_AS = @ac_ct_AS@
 ac_ct_CC = @ac_ct_CC@
 ac_ct_CXX = @ac_ct_CXX@
-ac_ct_DLLTOOL = @ac_ct_DLLTOOL@
 ac_ct_F77 = @ac_ct_F77@
-ac_ct_OBJDUMP = @ac_ct_OBJDUMP@
-ac_ct_RANLIB = @ac_ct_RANLIB@
-ac_ct_STRIP = @ac_ct_STRIP@
 am__fastdepCC_FALSE = @am__fastdepCC_FALSE@
 am__fastdepCC_TRUE = @am__fastdepCC_TRUE@
 am__fastdepCXX_FALSE = @am__fastdepCXX_FALSE@
@@ -535,24 +568,31 @@ build_cpu = @build_cpu@
 build_os = @build_os@
 build_vendor = @build_vendor@
 datadir = @datadir@
+datarootdir = @datarootdir@
+docdir = @docdir@
+dvidir = @dvidir@
 exec_prefix = @exec_prefix@
 host = @host@
 host_alias = @host_alias@
 host_cpu = @host_cpu@
 host_os = @host_os@
 host_vendor = @host_vendor@
+htmldir = @htmldir@
 includedir = @includedir@
 infodir = @infodir@
 install_sh = @install_sh@
 libdir = @libdir@
 libexecdir = @libexecdir@
+localedir = @localedir@
 localstatedir = @localstatedir@
 mandir = @mandir@
 mkdir_p = @mkdir_p@
 modexecdir = @modexecdir@
 oldincludedir = @oldincludedir@
+pdfdir = @pdfdir@
 prefix = @prefix@
 program_transform_name = @program_transform_name@
+psdir = @psdir@
 sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 sysconfdir = @sysconfdir@
@@ -601,8 +641,15 @@ dyndev_SRC = commadpt.c  \
                      sockdev.c   \
                      printer.c   \
                      tapedev.c   \
-                     scsitape.c  \
+                     tapeccws.c  \
+                     sllib.c     \
                      hetlib.c    \
+                     awstape.c   \
+                     faketape.c  \
+                     hettape.c   \
+                     omatape.c   \
+                     scsitape.c  \
+                     w32stape.c  \
                      ctc_lcs.c   \
                      ctc_ctci.c  \
                      ctcadpt.c   \
@@ -710,7 +757,7 @@ lib_LTLIBRARIES = $(HERCLIBS2)
 @OPTION_DYNAMIC_LOAD_TRUE@hdt3270_la_SOURCES = console.c
 @OPTION_DYNAMIC_LOAD_TRUE@hdt3270_la_LDFLAGS = $(DYNMOD_LD_FLAGS)
 @OPTION_DYNAMIC_LOAD_TRUE@hdt3270_la_LIBADD = $(DYNMOD_LD_ADD)
-@OPTION_DYNAMIC_LOAD_TRUE@hdt3420_la_SOURCES = tapedev.c scsitape.c
+@OPTION_DYNAMIC_LOAD_TRUE@hdt3420_la_SOURCES = tapedev.c tapeccws.c awstape.c faketape.c hettape.c omatape.c scsitape.c w32stape.c
 @OPTION_DYNAMIC_LOAD_TRUE@hdt3420_la_LDFLAGS = $(DYNMOD_LD_FLAGS)
 @OPTION_DYNAMIC_LOAD_TRUE@hdt3420_la_LIBADD = $(DYNMOD_LD_ADD) libherct.la
 @OPTION_DYNAMIC_LOAD_TRUE@hdt3505_la_SOURCES = cardrdr.c sockdev.c
@@ -798,6 +845,7 @@ libherc_la_SOURCES = hconsole.c   \
                        vstore.c     \
                        general1.c   \
                        general2.c   \
+                       general3.c   \
                        pfpo.c       \
                        plo.c        \
                        control.c    \
@@ -805,6 +853,8 @@ libherc_la_SOURCES = hconsole.c   \
                        io.c         \
                        decimal.c    \
                        service.c    \
+                       scedasd.c    \
+                       losc.c       \
                        chsc.c       \
                        opcode.c     \
                        diagnose.c   \
@@ -911,7 +961,7 @@ hercules_DEPENDENCIES = libherc.la libhercs.la $(HDEPS)
 tools_LD_FLAGS = 
 tools_ADDLIBS = $(HERCLIBS2) $(LDADD)
 @BUILD_HERCIFC_TRUE@hercifc_SOURCES = hercifc.c
-@BUILD_HERCIFC_TRUE@hercifc_LDADD = $(LDADD)
+@BUILD_HERCIFC_TRUE@hercifc_LDADD = $(tools_ADDLIBS)
 @BUILD_HERCIFC_TRUE@hercifc_LDFLAGS = $(tools_LD_FLAGS)
 dasdinit_SOURCES = dasdinit.c
 dasdinit_LDADD = $(tools_ADDLIBS)
@@ -1033,7 +1083,6 @@ EXTRA_DIST = autoconf/config.rpath \
              build_pch.c           \
              conspawn.c            \
              getopt.c              \
-             w32stape.c            \
              herclogo.txt          \
              hercules.ico
 
@@ -1379,6 +1428,7 @@ distclean-compile:
 	-rm -f *.tab.c
 
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/assist.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/awstape.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/bldcfg.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/bootstrap.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cache.Plo@am__quote@
@@ -1429,6 +1479,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ecpsvm.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/esame.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/external.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/faketape.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/fbadasd.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/fillfnam.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/fishhang.Plo@am__quote@
@@ -1436,6 +1487,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/fthreads.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/general1.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/general2.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/general3.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/hao.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/hchan.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/hconsole.Plo@am__quote@
@@ -1448,6 +1500,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/hetinit.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/hetlib.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/hetmap.Po@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/hettape.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/hetupd.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/history.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/hostinfo.Plo@am__quote@
@@ -1465,9 +1518,11 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/loadparm.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/logger.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/logmsg.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/losc.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ltdl.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/machchk.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/memrchr.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/omatape.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/opcode.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/panel.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/parser.Plo@am__quote@
@@ -1477,6 +1532,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/pttrace.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/qdio.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/qeth.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/scedasd.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/scsitape.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/service.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/shared.Plo@am__quote@
@@ -1486,6 +1542,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/sr.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/stack.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/strsignal.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/tapeccws.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/tapecopy.Po@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/tapedev.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/tapemap.Po@am__quote@
@@ -1499,6 +1556,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/vstore.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/w32chan.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/w32ctca.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/w32stape.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/w32util.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/xstore.Plo@am__quote@
 
@@ -1954,6 +2012,7 @@ tar: dist
 
 install-exec-local:
 @SETUID_HERCIFC_TRUE@	chown root $(DESTDIR)$(bindir)/hercifc
+@HERCIFC_GROUPSET_TRUE@@SETUID_HERCIFC_TRUE@	chgrp $(HERCIFC_GROUPNAME) $(DESTDIR)$(bindir)/hercifc
 @SETUID_HERCIFC_TRUE@	chmod 0750 $(DESTDIR)$(bindir)/hercifc
 @SETUID_HERCIFC_TRUE@	chmod +s   $(DESTDIR)$(bindir)/hercifc
 @SETUID_HERCIFC_TRUE@	rm                             hercifc

@@ -1,16 +1,19 @@
 /* HOSTINFO.H   (c) Copyright "Fish" (David B. Trout), 2002-2007     */
 
 /*   Released under the Q Public License                             */
-/*      (http://www.conmicro.cx/hercules/herclic.html)               */
+/*      (http://www.hercules-390.org/herclic.html)                   */
 /*   as modifications to Hercules.                                   */
 
-// $Id: hostinfo.h,v 1.12 2007/06/23 00:04:11 ivan Exp $
+// $Id: hostinfo.h,v 1.13 2007/11/30 14:54:32 jmaynard Exp $
 
 /*-------------------------------------------------------------------*/
 /* Header file contains host system information                      */
 /*-------------------------------------------------------------------*/
 
 // $Log: hostinfo.h,v $
+// Revision 1.13  2007/11/30 14:54:32  jmaynard
+// Changed conmicro.cx to hercules-390.org or conmicro.com, as needed.
+//
 // Revision 1.12  2007/06/23 00:04:11  ivan
 // Update copyright notices to include current year (2007)
 //

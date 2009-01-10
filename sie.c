@@ -10,9 +10,21 @@
 
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 
-// $Id: sie.c,v 1.105 2007/06/23 00:04:15 ivan Exp $
+// $Id: sie.c,v 1.109 2008/08/21 18:34:48 fish Exp $
 //
 // $Log: sie.c,v $
+// Revision 1.109  2008/08/21 18:34:48  fish
+// Fix i/o-interrupt-queue race condition
+//
+// Revision 1.108  2008/04/10 10:28:03  bernard
+// Allign instruction executing to real instructions (12 unrolled instead of 8)
+//
+// Revision 1.107  2008/04/09 09:03:58  bernard
+// EXRL instruction implementation
+//
+// Revision 1.106  2007/12/10 23:12:02  gsmith
+// Tweaks to OPTION_MIPS_COUNTING processing
+//
 // Revision 1.105  2007/06/23 00:04:15  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -905,18 +917,23 @@ int     n;
             GUESTREGS->ip = GUESTREGS->inst;
 
         /* Update interception parameters in the state descriptor */
-        if(GUESTREGS->ip[0] != 0x44)
-        {
-            if(!GUESTREGS->instinvalid)
-                memcpy(STATEBK->ipa, GUESTREGS->ip, ILC(GUESTREGS->ip[0]));
-        }
-        else
+        if(GUESTREGS->ip[0] == 0x44
+#if defined(FEATURE_EXECUTE_EXTENSIONS_FACILITY)
+           || (GUESTREGS->ip[0] == 0xc6 && !(GUESTREGS->ip[1] & 0x0f))
+#endif /*defined(FEATURE_EXECUTE_EXTENSIONS_FACILITY)*/
+                                                                       )
         {
         int exilc;
             STATEBK->f |= SIE_F_EX;
             exilc = ILC(GUESTREGS->exinst[0]);
             memcpy(STATEBK->ipa, GUESTREGS->exinst, exilc);
         }
+        else
+        {
+            if(!GUESTREGS->instinvalid)
+                memcpy(STATEBK->ipa, GUESTREGS->ip, ILC(GUESTREGS->ip[0]));
+        }
+
     }
 
 }
@@ -1017,14 +1034,12 @@ int ARCH_DEP(run_sie) (REGS *regs)
                         SET_AEA_MODE(GUESTREGS);
 
                         {
-                        struct timespec waittime;
-                        struct timeval  now;
-
-                            gettimeofday(&now, NULL);
-                            waittime.tv_sec = now.tv_sec;
-                            waittime.tv_nsec = ((now.tv_usec + 3333) * 1000);
+                            struct timespec waittime;
+                            U64 now = host_tod();
+                            waittime.tv_sec = now / 1000000;
+                            waittime.tv_nsec = ((now % 1000000) + 3333) * 1000;
 #ifdef OPTION_MIPS_COUNTING
-                            regs->waittod = hw_clock();
+                            regs->waittod = now;
 #endif
                             sysblk.waiting_mask |= regs->cpubit;
                             sysblk.intowner = LOCK_OWNER_NONE;
@@ -1035,7 +1050,7 @@ int ARCH_DEP(run_sie) (REGS *regs)
                             sysblk.intowner = regs->cpuad;
                             sysblk.waiting_mask ^= regs->cpubit;
 #ifdef OPTION_MIPS_COUNTING
-                            regs->waittime += hw_clock() - regs->waittod;
+                            regs->waittime += host_tod() - regs->waittod;
                             regs->waittod = 0;
 #endif
                         }
@@ -1074,9 +1089,13 @@ int ARCH_DEP(run_sie) (REGS *regs)
                     UNROLLED_EXECUTE(GUESTREGS);
                     UNROLLED_EXECUTE(GUESTREGS);
                     UNROLLED_EXECUTE(GUESTREGS);
+                    UNROLLED_EXECUTE(GUESTREGS);
+                    UNROLLED_EXECUTE(GUESTREGS);
+                    UNROLLED_EXECUTE(GUESTREGS);
 
-                    GUESTREGS->instcount += 8;
+                    GUESTREGS->instcount += 12;
 
+                    UNROLLED_EXECUTE(GUESTREGS);
                     UNROLLED_EXECUTE(GUESTREGS);
                     UNROLLED_EXECUTE(GUESTREGS);
                     UNROLLED_EXECUTE(GUESTREGS);
@@ -1270,7 +1289,7 @@ int     zone;                           /* Zone number               */
         /* Obtain the interrupt lock */
         OBTAIN_INTLOCK(regs);
 
-        /* Test and clear pending interrupt, set condition code */
+        /* Test (but don't clear!) pending interrupt, and set condition code */
         if( ARCH_DEP(present_zone_io_interrupt) (&ioid, &ioparm,
                                                        &iointid, zone) )
 

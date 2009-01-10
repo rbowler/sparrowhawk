@@ -1,12 +1,38 @@
-// $Id: ieee-w32.h,v 1.7 2006/12/08 09:43:28 jj Exp $
+/* IEEE-W32.H   (c) Copyright Greg Smith, 2002-2008                  */
+/*              Hercules IEEE floating point definitions for Windows */
+
+// $Id: ieee-w32.h,v 1.13 2008/12/16 16:22:54 rbowler Exp $
 //
 // $Log: ieee-w32.h,v $
+// Revision 1.13  2008/12/16 16:22:54  rbowler
+// Eliminate unknown pragma warning in ieee-w32.h for VC++ Toolkit 2003
+//
+// Revision 1.12  2008/12/12 23:50:47  rbowler
+// Alternate non-asm routines in ieee-w32.h for win64
+//
+// Revision 1.11  2008/04/16 14:58:57  rbowler
+// Modify style of inline assembler to conform with machdep.h
+//
+// Revision 1.10  2008/04/16 14:26:21  rbowler
+// Add rint function for MSVC
+//
+// Revision 1.9  2008/04/15 21:30:03  rbowler
+// BFP rounding mode support
+//
+// Revision 1.8  2008/02/07 00:25:42  rbowler
+// Add a standard file identification header
+//
 // Revision 1.7  2006/12/08 09:43:28  jj
 // Add CVS message log
 //
 
 #ifndef _IEEE_W32_H
 #define _IEEE_W32_H
+
+#if defined(_MSVC_) && defined(_WIN64)
+ #include <float.h>
+ #define NO_INLINE_ASM
+#endif
 
 #if defined(_MSVC_) && (LDBL_MANT_DIG == DBL_MANT_DIG)
  #define LONG_DOUBLE_IS_SAME_AS_DOUBLE
@@ -19,6 +45,11 @@
 #undef FP_NORMAL
 #undef fpclassify
 #undef signbit
+
+/* Inform the compiler that this module manipulates the FP status word */
+#if defined(_MSVC_) && defined(_MSC_VER) && (_MSC_VER >= 1400)
+ #pragma fenv_access(on)
+#endif
 
 /* All floating-point numbers can be put in one of these categories.  */
 enum
@@ -54,6 +85,12 @@ typedef struct
     unsigned short int __unused5;
   }
 fenv_t;
+
+/* FPU control word rounding flags */
+#define FE_TONEAREST    0x0000
+#define FE_DOWNWARD     0x0400
+#define FE_UPWARD       0x0800
+#define FE_TOWARDZERO   0x0c00
 
 /* Define bits representing the exception.  We use the bit positions
    of the appropriate bits in the FPU control word.  */
@@ -219,19 +256,38 @@ fetestexcept (int excepts)
 {
   int temp;
 
-  /* Get current exceptions.  */
+#if defined(NO_INLINE_ASM)
+  /* Use CRT function to get current FPU status word */
+  unsigned int sw = _statusfp();
+  temp = (sw & _SW_INVALID) ? FE_INVALID : 0
+      | (sw & _SW_ZERODIVIDE) ? FE_DIVBYZERO : 0
+      | (sw & _SW_OVERFLOW) ? FE_OVERFLOW : 0
+      | (sw & _SW_UNDERFLOW) ? FE_UNDERFLOW : 0
+      | (sw & _SW_INEXACT) ? FE_INEXACT : 0 ;
+#else
+  /* Use assembler to get current FPU status word */
   #if defined(_MSVC_)
   __asm fnstsw temp
   #else
   __asm__ ("fnstsw %0" : "=a" (temp));
   #endif
+#endif
 
+  /* Return requested exception bits */
   return temp & excepts & FE_ALL_EXCEPT;
 }
 
 int
 feclearexcept (int excepts)
 {
+#if defined(NO_INLINE_ASM)
+  /* Use CRT function to clear all exceptions in FPU status word.
+     The function _clearfp does not allow bits to be selectively
+     cleared. However, since ieee.c only ever calls feclearexcept
+     with the argument FE_ALL_EXCEPT we clear all bits regardless */
+  _clearfp();
+#else
+  /* Use assembler to clear requested exceptions in FPU status word */
   fenv_t temp;
 
   /* Mask out unsupported bits/exceptions.  */
@@ -254,10 +310,112 @@ feclearexcept (int excepts)
   #else
   __asm__ ("fldenv %0" : : "m" (*&temp));
   #endif
+#endif
 
   /* Success.  */
   return 0;
 }
+
+/* Get current FP rounding mode */
+int
+fegetround (void)
+{
+#if defined(NO_INLINE_ASM)
+  /* Use CRT function to get the FPU control word */
+  unsigned int fcw;
+  _controlfp_s(&fcw, 0, 0);
+  return (fcw & RC_NEAR) ? FE_TONEAREST : 0
+      | (fcw & RC_CHOP) ? FE_TOWARDZERO : 0
+      | (fcw & RC_DOWN) ? FE_DOWNWARD : 0
+      | (fcw & RC_UP) ? FE_UPWARD : 0 ;
+#else
+  /* Use assembler to get the FPU control word */
+  unsigned short _cw;
+
+  /* Get the value of the FPU control word */
+  #if defined(_MSVC_)
+  __asm fnstcw _cw
+  #else
+  __asm__ ("fnstcw %0;" : "=m" (_cw));
+  #endif
+
+  /* Extract and return the rounding mode flags */
+  return _cw
+          & (FE_TONEAREST | FE_DOWNWARD | FE_UPWARD | FE_TOWARDZERO);
+#endif
+}
+
+/* Set the FP rounding mode */
+int
+fesetround (int mode)
+{
+#if defined(NO_INLINE_ASM)
+  /* Use CRT function to update the FPU control word */
+  unsigned int fcw, bits;
+  bits = (mode & FE_TONEAREST) ? RC_NEAR : 0
+      | (mode & FE_TOWARDZERO) ? RC_CHOP : 0
+      | (mode & FE_DOWNWARD) ? RC_DOWN : 0
+      | (mode & FE_UPWARD) ? RC_UP : 0 ;
+  _controlfp_s(&fcw, bits, MCW_RC);
+#else
+  /* Use assembler to update the FPU control word */
+  unsigned short _cw;
+
+  /* Return error if new rounding mode is not valid */
+  if ((mode & ~(FE_TONEAREST | FE_DOWNWARD | FE_UPWARD | FE_TOWARDZERO))
+      != 0)
+    return -1;
+
+  /* Get the current value of the FPU control word */
+  #if defined(_MSVC_)
+  __asm fnstcw _cw
+  #else
+  __asm__ volatile ("fnstcw %0;": "=m" (_cw));
+  #endif
+
+  /* Replace the rounding mode bits in the FPU control word */
+  _cw &= ~(FE_TONEAREST | FE_DOWNWARD | FE_UPWARD | FE_TOWARDZERO);
+  _cw |= mode;
+
+  /* Update the FPU control word with the new value */
+  #if defined(_MSVC_)
+  __asm fldcw _cw
+  #else
+  __asm__ volatile ("fldcw %0;" : : "m" (_cw));
+  #endif
+#endif
+
+  return 0;
+}
+
+#if !defined(HAVE_RINT) && !defined(NO_INLINE_ASM)
+/* Round to FP integer */
+double
+rint (double _x)
+{
+  double _y;
+
+  #if defined(_MSVC_)
+  __asm 
+  {
+        fld     _x
+        frndint
+        fstp    _y
+  }
+  #else
+  __asm__ volatile (
+        "fld    %1      ;\n\t"
+        "frndint        ;\n\t"
+        "fstp   %0      ;"
+        : "=m" (_y)
+        : "m" (_x)
+        );
+  #endif
+
+  return _y;
+}
+#define HAVE_RINT       1
+#endif /*!defined(HAVE_RINT) && !defined(NO_INLINE_ASM)*/
 
 #define GET_HIGH_WORD(i,d)       \
 do {                             \

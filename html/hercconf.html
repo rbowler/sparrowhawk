@@ -26,14 +26,14 @@ and how they are used.
 <table border=1><tr><td>
 <pre><code>
 
-    ####################################################
-    #     HERCULES EMULATOR CONFIGURATION FILE         #
-    #     (Note: not all parameters are shown)         #
-    ####################################################
+    ####################################################################
+    #                HERCULES EMULATOR CONTROL FILE                    #
+    #             (Note: not all parameters are shown)                 #
+    ####################################################################
 
 
     #
-    #   <a href="#system_parameters">System parameters</a>
+    #     <a href="#system_parameters">System parameters</a>
     #
 
 
@@ -52,6 +52,7 @@ and how they are used.
     <a href="#XPNDSIZE">XPNDSIZE</a>   0
     <a href="#NUMCPU">NUMCPU</a>     1
     <a href="#NUMVEC">NUMVEC</a>     1
+    <a href="#ENGINES">ENGINES</a>    CP
     <a href="#SYSEPOCH">SYSEPOCH</a>   1900
     <a href="#YROFFSET">YROFFSET</a>   -28
     <a href="#TZOFFSET">TZOFFSET</a>   -0500
@@ -68,6 +69,7 @@ and how they are used.
     <a href="#CODEPAGE">CODEPAGE</a>   default
     <a href="#CNSLPORT">CNSLPORT</a>   3270
     <a href="#CONKPALV">CONKPALV</a>   (3,1,10)
+    <a href="#LEGACYSENSEID">LEGACYSENSEID</a>   OFF
 
     <a href="#HERCPRIO">HERCPRIO</a>   0
     <a href="#TODPRIO">TODPRIO</a>    -20
@@ -81,7 +83,11 @@ and how they are used.
     <a href="#DIAG8CMD">DIAG8CMD</a>   disable
     <a href="#SHCMDOPT">SHCMDOPT</a>   disable
 
-    <a href="#DEFSYM">DEFSYM</a>     TAPEDIR "<a href="#subs">$(HOME)</a>/tapes"
+    <a href="#DEFSYM">DEFSYM</a>     TAPEDIR   "<a href="#subs">$(HOME)</a>/tapes"
+    <a href="#AUTOMOUNT">AUTOMOUNT</a>  $(TAPEDIR)
+    <a href="#AUTOMOUNT">AUTOMOUNT</a>  +/tapes
+    <a href="#AUTOMOUNT">AUTOMOUNT</a>  -/tapes/vault
+
     <a href="#MODPATH">MODPATH</a>    /usr/local/hercules
     <a href="#LDMOD">LDMOD</a>      dyncrypt
 
@@ -96,9 +102,11 @@ and how they are used.
     <a href="#IGNORE">IGNORE</a>     INCLUDE_ERRORS
     <a href="#INCLUDE">INCLUDE</a>    optdevs.cfg
 
+
     #
-    #   <a href="#device_definitions">Device definitions</a>
+    #     <a href="#device_stmts">Device statements</a>
     #
+
 
     0009      <a href="#consysc">3215-C</a>  /
 
@@ -113,6 +121,8 @@ and how they are used.
     0228.8    <a href="#3270">3270</a>    GROUP2
     0230.16   <a href="#3270">3270</a>
 
+    0000      <a href="#SYSG">SYSG</a>    SYSGCONS
+
     0120      <a href="#3380">3380</a>    <a href="#ENHSYMINC">${DASD_PATH=dasd/}</a>mvsv5r.120
     0121      <a href="#3380">3380</a>    <a href="#ENHSYMINC">${DASD_PATH=dasd/}</a>mvsv5d.121
     0122      <a href="#3380">3380</a>    <a href="#ENHSYMINC">${DASD_PATH=dasd/}</a>mvswk1.122
@@ -122,18 +132,21 @@ and how they are used.
     0141      <a href="#3370">3370</a>    syswk1.141
     0300      <a href="#3370">3370</a>    sysres.300
 
-    0400      <a href="#device_types_table">CTCT</a>    30880  192.168.100.2  30880  2048 &nbsp; &nbsp; &nbsp;
-    0401      <a href="#device_types_table">CTCT</a>    30881  192.168.100.2  30881  2048
-    0420.2    <a href="#device_types_table">CTCI</a>    192.168.200.1  192.168.200.2
-    0440.2    <a href="#device_types_table">LCS</a>     -n   /dev/net/tun   192.168.200.2
+    0400      <a href="#CTCT">CTCT</a>    30880  192.168.100.2  30880  2048 &nbsp; &nbsp; &nbsp;
+    0401      <a href="#CTCT">CTCT</a>    30881  192.168.100.2  30881  2048
+    0420.2    <a href="#CTCI">CTCI</a>    192.168.200.1  192.168.200.2
+    0440.2    <a href="#LCS">LCS</a>     -n   /dev/net/tun   192.168.200.2
 
     0580      <a href="#3420">3420</a>    /dev/nst0   # SCSI  (Linux or Windows)
     0581      <a href="#3420">3420</a>    \\.\Tape0   # SCSI  (Windows only)
-    0582      <a href="#3420">3420</a>    ickdsf.ipl
+    0582      <a href="#3420">3420</a>    ickdsf.aws  <a href="#noautomount">noautomount</a>
     0583      <a href="#3420">3420</a>    /cdrom/tapes/uaa196.tdf
     0584-0587 <a href="#3420">3420</a>    <a href="#subs">$(TAPEDIR)</a>/volumes.<a href="#subs">$(CUU)</a> maxsizeM=170 eotmargin=131072
 
     0590      <a href="#3420">3480</a>    /dev/nst0 <a href="#Quantum">--no-erg</a> <a href="#Quantum">--blkid-32</a>   # <a href="#Quantum">Quantum DLT SCSI</a>
+
+    0023      <a href="#comline">2703</a>    lport=3780 rhost=localhost rport=3781 dial=no
+
 </pre></code>
 </td></tr></table>
 </center>
@@ -150,13 +163,13 @@ and how they are used.
 <h3>System parameters</h3>
 <p>
     System parameters may appear in any order but they must precede all
-    device records.  Each system parameter must be on a separate line.
+    device statements.  Each system parameter must be on a separate line.
     The following system parameters may be specified:
 
 <dl>
 
 <a name="ARCHMODE"></a>
-<dt><code>ARCHMODE &nbsp; S/370 &#124 ESA/390 &#124 z/Arch &#124 ESAME</code>
+<dt><code>ARCHMODE &nbsp; S/370 &#124; ESA/390 &#124; z/Arch &#124; ESAME</code>
 <dd><p>
     specifies the initial architecture mode:
     <ul compact>
@@ -178,14 +191,61 @@ and how they are used.
     specifies that the ASN-and-LX-Reuse Facility (ALRF) is to be disabled
     or enabled. The default is disabled. This is a z/Architecture-only
     feature (it is always disabled for S/390 or ESA/390). Set this
-    to <code>ENABLE</code>&nbsp if the operating system supports
+    to <code>ENABLE</code>&nbsp; if the operating system supports
     this z/Architecture feature and the use of this feature is desired.
-    Set it to <code>DISABLE</code>&nbsp or do not specify anything
+    Set it to <code>DISABLE</code>&nbsp; or do not specify anything
     if the operating system doesn't support this feature, and it
     inadvertently sets CR0 bit 44 to 1, usually leading to unexpected
     program interrupt when instructions such as LASP are issued.
     <p>
     <code>ASN_AND_LX_REUSE</code> may be abbreviated as <code>ALRF</code>
+    <p>
+
+<a name="AUTOMOUNT"></a>
+<dt><code>AUTOMOUNT &nbsp; <em>[&plusmn;]directory</em></code>
+<dd><p>
+    specifies the host system directory where the guest is allowed
+    or not allowed to automatically load virtual tape volumes from.
+    Prefix allowable directories with a '+' plus sign and unallowable
+    directories with a '-' minus sign. The default prefix if neither is
+    specified is the '+' plus sign (i.e. an allowable directory).
+    <p>
+    <i><b>Caution:</b> &nbsp;Enabling this feature may have security
+    consequences depending on which allowable host system directories you
+    specify as well as how your guest operating system enforces
+    authorized use of whatever automount functionality it happens to
+    utilize.</i>
+    <p>
+    All host system virtual tape volumes to be "automounted" by the guest
+    must reside within one of the specified allowable host system directories
+    or any of its subdirectories while not also being within any of the
+    specified unallowable directories or any of their subdirectories,
+    in order for the guest-invoked automount to be accepted.
+    <p>
+    Note: specifying a disallowed automount directory does not preclude the
+    Hercules operator from manually mounting any file s/he wishes via the
+    <code>devinit</code> panel command -- even one in a currently defined
+    "disallowed" automount directory. The AUTOMOUNT statement only controls
+    guest-invoked automatic tape mounts and not manual tape mounts performed
+    by the Hercules operator.
+    <p>
+    All directories must be specified on separate statements, but as many
+    statements as needed may be specified in order to describe the desired
+    allowable/unallowable directories layout. For convenience, an
+    <code>automount</code> panel command is also provided to dynamically
+    add/remove new/existing allowable/unallowable automount
+    directories at any time.
+    <p>
+    At least one allowable directory should be defined, but defaults to the
+    current directory if one is not specifically defined (i.e. if only
+    unallowable directories are specified, the current directory then
+    becomes the only defined allowable automount directory by default).
+    <p>
+    All specified directories are always resolved to fully-qualified
+    absolute directory paths before being saved.
+    <p>
+    Refer to the description of the virtual tape device
+    '<a href="#noautomount">noautomount</a>' option for more information.
     <p>
 
 <a name="AUTO_SCSI_MOUNT"></a>
@@ -220,20 +280,95 @@ and how they are used.
     <p>
 
 <a name="CODEPAGE"></a>
-<dt><code>CODEPAGE &nbsp; <em>codepage</em></code>
+<dt><code>CODEPAGE &nbsp; <em>mapping</em></code>
 <dd><p>
-    specifies the codepage conversion table used for ASCII/EBCDIC translation.
+    specifies the codepage conversion mapping table used for ASCII/EBCDIC translation.
     <p>
 
-    "default" specifies traditional Hercules codepage. Code pages "437/037",
-    "437/500" and "850/273" are also supported.
+    <code>default</code> specifies traditional Hercules codepage mapping.
     <p>
 
-    Iconv single byte codepages may also be used (e.g. "UTF8/EBCDIC-CP-NL").
+    Other supported codepage mappings are:
+    <p>
+
+    <blockquote>
+    <table border=1 cellpadding=3>
+        <tr>
+          <th rowspan=2>Mapping</th>
+          <th colspan=2>Description</th>
+        </tr>
+        <tr>
+          <th>ASCII</th>
+          <th>EBCDIC</th>
+        </tr>
+        <tr><td align="center"><code>437/037</code></td>
+            <td>437 PC United States</td>
+            <td>037 United States/Canada</td>
+        <tr><td align="center"><code>437/500</code></td>
+            <td>437 PC United States</td>
+            <td>500 Latin 1</td>
+        </tr>
+        <tr><td align="center"><code>850/273</code></td>
+            <td>850 PC Latin 1</td>
+            <td>273 Austria/Germany</td>
+        </tr>
+        <tr><td align="center"><code>819/273</code></td>
+            <td>819 ISO-8859-1</td>
+            <td>273 Austria/Germany</td>
+        </tr>
+        <tr><td align="center"><code>819/277</code></td>
+            <td>819 ISO-8859-1</td>
+            <td>277 Denmark/Norway</td>
+        </tr>
+        <tr><td align="center"><code>819/278</code></td>
+            <td>819 ISO-8859-1</td>
+            <td>278 Finland/Sweden</td>
+        </tr>
+        <tr><td align="center"><code>819/280</code></td>
+            <td>819 ISO-8859-1</td>
+            <td>280 Italy</td>
+        </tr>
+        <tr><td align="center"><code>819/284</code></td>
+            <td>819 ISO-8859-1</td>
+            <td>284 Spain</td>
+        </tr>
+        <tr><td align="center"><code>819/285</code></td>
+            <td>819 ISO-8859-1</td>
+            <td>285 United Kingdom</td>
+        </tr>
+        <tr><td align="center"><code>819/297</code></td>
+            <td>819 ISO-8859-1</td>
+            <td>297 France</td>
+        </tr>
+        <tr><td align="center"><code>819/500</code></td>
+            <td>819 ISO-8859-1</td>
+            <td>500 International</td>
+        </tr>
+        <tr><td align="center"><code>437/1047</code></td>
+            <td>437 PC United States</td>
+            <td>1047 Open Systems Latin 1</td>
+        </tr>
+        <tr><td align="center"><code>819/1047</code></td>
+            <td>819 ISO-8859-1</td>
+            <td>1047 Open Systems Latin 1</td>
+        </tr>
+        <tr><td align="center"><code>1252/1047</code></td>
+            <td>1252 Windows Latin 1</td>
+            <td>1047 Open Systems Latin 1</td>
+        </tr>
+        <tr><td align="center"><code>850/1047</code></td>
+            <td>850 PC Latin 1</td>
+            <td>1047 Open Systems Latin 1</td>
+        </tr>
+    </table>
+    </blockquote>
+    <p>
+
+    Iconv single byte codepages may also be used (e.g. <code>UTF8/EBCDIC-CP-NL</code>).
     <p>
 
     If no codepage is specified then the environment variable HERCULES_CP
-    will be inspected. The default codepage used is "default"
+    will be inspected. The default codepage mapping is <code>default</code>.
 
     <p>
 
@@ -276,7 +411,7 @@ and how they are used.
     unresponsive TCP/IP <i>connections</i> and not idle clients.
     That is to say, your connection will <i>not</i> be terminated
     after 3 seconds of idle time. Your 3270 session can remain idle for
-    many minutes without any data being transmitted. 
+    many minutes without any data being transmitted.
     If the TCP/IP <i>stack</i> at the other end of the connection --
     not your 3270 client itself -- fails to respond to the
     internal keep-alive probe packets, then it means that the
@@ -284,7 +419,7 @@ and how they are used.
     connection. Thus, even if your 3270 client
     is completely idle, your system's TCP/IP stack itself should still respond
     to the keep-alive probes sent by the TCP/IP stack at the Hercules end
-    of the link. If it doesn't, then TCP/IP will terminate the tn3270/telnet 
+    of the link. If it doesn't, then TCP/IP will terminate the tn3270/telnet
     session which will cause Hercules to disconnect the terminal.
     <p>
     The three values can also be modified on-demand via the <code>conkpalv</code>
@@ -337,7 +472,8 @@ and how they are used.
     specifies the 2 hexadecimal digit CPU version code
     stored by the STIDP instruction.
     The default version code is FD when ARCHMODE S/370 or ARCHMODE ESA/390
-    is specified.  For the z/Architecture mode, 00 is used as default.
+    is specified.  For the z/Architecture mode, the version code is always
+    stored as 00 and the value specified here is ignored.
     <p>
 
 <a name="DEFSYM"></a>
@@ -372,7 +508,7 @@ and how they are used.
     <p>
 
 <a name="DEVTMAX"></a>
-<dt><code>DEVTMAX &nbsp; -1 &#124 0 &#124 <em>nnn</em></code>
+<dt><code>DEVTMAX &nbsp; -1 &#124; 0 &#124; <em>nnn</em></code>
 <dd><p>
     specifies the maximum number of device threads allowed.
     <p>Specify <code>-1</code> to cause 'one time only' temporary threads to be
@@ -405,12 +541,22 @@ and how they are used.
     <p>
 
 <a name="DIAG8CMD"></a>
-<dt><code>DIAG8CMD &nbsp; DISABLE &#124; ENABLE</code>
+<dt><code>DIAG8CMD &nbsp; DISABLE &#124; ENABLE [ECHO &#124; NOECHO]</code>
 <dd><p>
-    When set to <code>ENABLE</code>, commands issued through diagnose 8 will be
+    When <code>ENABLE</code> is specified, commands issued through diagnose 8 will be
     executed by hercules as hercules commands.  When set to <code>DISABLE</code>,
-    commands issued through the diagnose 8 interface will be ignored.
-    The default is <code>DISABLE</code>
+    commands issued through the diagnose 8 interface will generate a Specification
+    Exception program interrupt on the issuing CPU.
+    <p>An optional second argument can be given to request whether the commands
+    issued using the Diagnose 8 interface will be traced at the console. This may be
+    useful for programs that routinely issue panel commands using the Diagnose 8 interface.
+    When <code>ECHO</code> is specified, a message is issued as the panel is about to issue
+    the command, the command is redisplayed as if it was entered through the panel input
+    line, and a final message is issued to indicate the command completed. When <code>NOECHO</code>
+    is specified, no such messages are displayed and the command completes silently,
+    except for the output of the command itself if the Diagnose 8 interface didn't request
+    a response buffer.
+    <p>The default is <code>DISABLE ECHO</code>
     <p>
 
     <i><b>Caution:</b> &nbsp; Enabling this feature may have security consequences</i>
@@ -423,7 +569,7 @@ and how they are used.
     <p>
 
 <a name="ECPSVM"></a>
-<dt><code>ECPSVM &nbsp; YES &#124 NO &#124 LEVEL <em>nn</em></code>
+<dt><code>ECPSVM &nbsp; YES &#124; NO &#124; LEVEL <em>nn</em></code>
 <dd><p>
     specifies whether ECPS:VM (Extended Control Program Support : Virtual Machine)
     support is to be enabled. If <code>YES</code> is specified, then the support
@@ -441,6 +587,39 @@ and how they are used.
     to the operating system when it issues a Store ECPS:VM level, but it
     doesn't otherwise alter the ECPS:VM facility operations. This is a partial
     implementation.
+    <p>
+
+<a name="ENGINES"></a>
+<dt><code>ENGINES &nbsp; [<em>nn</em>*] CP
+    &#124; IL
+    &#124; AP
+    &#124; IP
+    [,...]</code>
+<dd><p>
+    specifies the type of engine for each installed processor.
+    The default engine type is CP.
+    <p>
+    <em>nn</em>* is an optional repeat count.
+    <p>
+    Examples:
+    <p>
+    <code>ENGINES CP,CP,AP,IP</code>
+    <br>specifies that processor engines 0 and 1 are of type CP, engine 2 is
+    type AP, and engine 3 is type IP.
+    <p>
+    <code>ENGINES 4*CP,2*AP,2*IP</code>
+    <br>specifies that the first four processor engines (engines 0-3) are of
+    type CP, the next two (engines 4-5) are of type AP, and the next two
+    (engines 6-7) are of type IP.
+    <p>
+    The number of installed processor engines is determined by the compile time
+    variable MAX_CPU_ENGINES.
+    If the ENGINES statement specifies more than MAX_CPU_ENGINES, the excess
+    engines are ignored. If fewer than MAX_CPU_ENGINES are specified, the
+    remaining engines are set to type CP.
+    <p>
+    See the <a href="#NUMCPU">NUMCPU</a> statement for a discussion of
+    MAX_CPU_ENGINES.
     <p>
 
 <a name="HERCPRIO"></a>
@@ -539,6 +718,30 @@ and how they are used.
     Multiple LDMOD statements may be used.
     <p>
 
+<a name="LEGACYSENSEID"></a>
+<dt><code>LEGACYSENSEID &nbsp; OFF &#124; DISABLE &#124; ON &#124; ENABLE</code>
+<dd><p>
+    specifies whether the SENSE ID CCW (X'E4') will be honored for
+    the devices that originally didn't support that feature. This
+    includes (but may not be limited to) the 3410 and 3420 tape drives
+    as well as the 2703 communication controllers.
+    <p>
+
+    Specify <code>ON</code> or <code>ENABLE</code> if your guest
+    operating system needs the Sense ID support to dynamically
+    detect those devices. Note that most current operating systems
+    will not detect those devices even though Sense ID is enabled
+    because those devices never supported the Sense ID in the first
+    place. So this mainly applies to custom built or modified versions
+    of guest operating systems that are aware of this specific Hercules
+    capability.
+    <p>
+
+    Because those legacy devices didn't originally support this command,
+    and for compatibility reasons, the default is <code>OFF</code>
+    or <code>DISABLE</code>.
+    <p>
+
 <a name="LOADPARM"></a>
 <dt><code>LOADPARM &nbsp; <em>xxxxxxxx</em></code>
 <dd><p>
@@ -547,12 +750,13 @@ and how they are used.
     <p>
 
 <a name="LOGOPT"></a>
-<dt><code>LOGOPT &nbsp; [TIMESTAMP &#124; NOTIMESTAMP]</code>
+<dt><code>LOGOPT &nbsp; TIMESTAMP &#124; NOTIMESTAMP</code>
 <dd><p>
     sets Hercules log options. TIMESTAMP causes messages to the log
     to be time stamped.  NOTIMESTAMP prevents time stamping of log
     messages.    TIMESTAMP and NOTIMESTAMP may be abbreviated as
-    TIME and NOTIME respectively.
+    TIME and NOTIME respectively.  The current resolution of the
+    stamp is one second.
     <p>
     The default is TIMESTAMP.
     <p>
@@ -564,18 +768,14 @@ and how they are used.
     <code>HERCULES</code>.
     <p>
 
-<a name="MODEL"></a>
-<dt><code>MODEL &nbsp; <em>name</em></code>
+<a name="MAINSIZE"></a>
+<dt><code>MAINSIZE &nbsp; <em>nnnn</em></code>
 <dd><p>
-    specifies the MODEL name returned by the STSI instruction.  The default is
-    <code>EMULATOR</code>.
-    <p>
-
-<a name="PLANT"></a>
-<dt><code>PLANT &nbsp; <em>name</em></code>
-<dd><p>
-    specifies the PLANT name returned by the STSI instruction.  The default is
-    <code>ZZ</code>.
+    specifies the main storage size in megabytes, where
+    <code><em>nnnn</em></code>&nbsp; is a decimal number. The lower limit is 2.
+    The actual upper limit is determined by your host system's architecture
+    and operating system, and (on some systems) the amount of physical
+    memory and paging space you have available.
     <p>
 
 <a name="MANUFACTURER"></a>
@@ -585,14 +785,11 @@ and how they are used.
     <code>HRC</code>.
     <p>
 
-<a name="MAINSIZE"></a>
-<dt><code>MAINSIZE &nbsp; <em>nnnn</em></code>
+<a name="MODEL"></a>
+<dt><code>MODEL &nbsp; <em>name</em></code>
 <dd><p>
-    specifies the main storage size in megabytes, where
-    <code><em>nnnn</em></code>&nbsp; is a decimal number. The lower limit is 2.
-    The actual upper limit is determined by your host system's architecture
-    and operating system, and (on some systems) the amount of physical
-    memory and paging space you have available.
+    specifies the MODEL name returned by the STSI instruction.  The default is
+    <code>EMULATOR</code>.
     <p>
 
 <a name="MODPATH"></a>
@@ -639,7 +836,12 @@ and how they are used.
 <a name="NUMCPU"></a>
 <dt><code>NUMCPU &nbsp; <em>nn</em></code>
 <dd><p>
-    specifies the number of emulated CPUs.
+    specifies the number of emulated processor engines
+    which will be configured online at startup time.
+    All processors are CP engines unless otherwise specified by the
+    <a href="#ENGINES">ENGINES</a> statement.
+    If NUMCPU is less than MAX_CPU_ENGINES then the remaining engines can be
+    configured online later.
     <p>
 
     <em>Note:</em>
@@ -647,8 +849,8 @@ and how they are used.
     the compile-time variable <code>MAX_CPU_ENGINES</code>
     in the file <tt>config.h</tt> has a value of more than 1.
     Current versions of Hercules already have this value
-    set to 2 by default, so all you need to do is specify
-    <tt>NUMCPU 2</tt>
+    set to 8 by default, so all you need to do is specify
+    <tt>NUMCPU 2</tt> or more
     in your configuration file. If you wish to define a greater value
     for <tt>MAX_CPU_ENGINES</tt>, use the
     <tt>--enable-multi-cpu=NUMBER</tt>
@@ -699,7 +901,7 @@ and how they are used.
     <p>
 
 <a name="PANRATE"></a>
-<dt><code>PANRATE &nbsp; SLOW &#124 FAST &#124 <em>nn</em></code>
+<dt><code>PANRATE &nbsp; SLOW &#124; FAST &#124; <em>nn</em></code>
 <dd><p>
     specifies the panel refresh rate, in milliseconds between refreshes. SLOW
     is the same as 500, and FAST is the same as 50. A value less than the
@@ -711,29 +913,31 @@ and how they are used.
 <dt><code>PANTITLE &nbsp; <em>"title-string"</em></code>
 <dd><p>
     specifies an optional console window title-bar string to be used
-    in place of the default one supplied by Windows. If the value
+    in place of the default supplied by the windowing system. If the value
     contains any blanks it must be enclosed within double-quotes.
     <p>
     This option allows one to distinguish between different Hercules
     sessions when running more than one instance of Hercules on the same
-    Windows host.
+    machine.
     <p>
+    This option takes effect only when the Hercules console is displayed
+    on an xterm terminal (commonly used on Unix systems), or
+    in a Windows command prompt window.
     Note that this option has no effect when Hercules is run under control
     of the Hercules GUI since Hercules's console window is hidden in favor
     of using the GUI's console window instead.
     <p>
 
 <a name="PGMPRDOS"></a>
-<dt><code>PGMPRDOS &nbsp; RESTRICTED &#124 LICENSED</code>
+<dt><code>PGMPRDOS &nbsp; RESTRICTED &#124; LICENSED</code>
 <dd><p>
     specifies whether or not Hercules will run licensed program product ESA
-    or z/Architecture operating systems.  Specify <code>RESTRICTED</code> to
-    make Hercules emulate an IFL (Integrated Facility for Linux) CPU. With
-    this specified, licensed ESA or z/Architecture OSes will refuse to
-    start. OS/390 and z/OS will enter an A7A wait state, with reason code 7,
-    at IPL time.  Specify <code>LICENSED</code> to allow these operating
-    systems to run normally. This parameter has no effect on Linux/390,
-    Linux for z/Series, or any 370-mode OS.
+    or z/Architecture operating systems. If <code>RESTRICTED</code> is
+    specified, Hercules will stop all CPUs when a licensed program product
+    operating system is detected.  Specify
+    <code>LICENSED</code> to allow these operating systems to run normally.
+    This parameter has no effect on Linux/390, Linux for z/Series, or any
+    370-mode OS.
     <p>
 
     <p class="warning">
@@ -745,8 +949,16 @@ and how they are used.
     <p>
 
     <code>RESTRICTED</code> is the default. Specifying
-    <code>LICENSED</code> will produce a message at Hercules startup to
-    remind you of your responsibility to comply with software license terms.
+    <code>LICENSED</code> will produce a message when a licensed operating
+    system is detected to remind you of your responsibility to comply with
+    software license terms.
+    <p>
+
+<a name="PLANT"></a>
+<dt><code>PLANT &nbsp; <em>name</em></code>
+<dd><p>
+    specifies the PLANT name returned by the STSI instruction.  The default is
+    <code>ZZ</code>.
     <p>
 
 <a name="SHCMDOPT"></a>
@@ -782,7 +994,7 @@ and how they are used.
     <p>
 
 <a name="SYSEPOCH"></a>
-<dt><code>SYSEPOCH &nbsp; <em>yyyy</em> [&plusmn<em>years</em>]</code>
+<dt><code>SYSEPOCH &nbsp; <em>yyyy</em> [&plusmn;<em>years</em>]</code>
 <dd><p>
     specifies the base date for the TOD clock.  Use the default value
     (<code>1900</code>) for all systems except OS/360. Use <code>1960</code>
@@ -799,7 +1011,7 @@ and how they are used.
     <p>
 
 <a name="TIMERINT"></a>
-<dt><code>TIMERINT &nbsp; DEFAULT &#124 <em>nnnn</em></code>
+<dt><code>TIMERINT &nbsp; DEFAULT &#124; <em>nnnn</em></code>
 <dd><p>
     specifies the internal timers update interval, in microseconds.  This
     parameter specifies how frequently Hercules's internal timers-update thread
@@ -845,6 +1057,28 @@ and how they are used.
 
     <i><b>Caution:</b> &nbsp; TODPRIO should be given a dispatching
     priority equal to or higher than any other thread within Hercules.</i>
+    <p>
+
+<a name="TRACEOPT"></a>
+<dt><code>TRACEOPT &nbsp; TRADITIONAL &#124; REGSFIRST &#124; NOREGS</code>
+<dd><p>
+    sets the Hercules instruction tracing display option.
+    <code>TRADITIONAL</code> (the default), displays the registers following
+    the instruction about to be executed such that pressing enter (to execute
+    the displayed instruction) then shows the next instruction to be executed
+    followed by the updated registers display.
+    <p>
+    <code>REGSFIRST</code> displays the current register contents followed by
+    the instruction about to be executed such that pressing enter (to execute
+    the displayed instruction) then shows the updated registers followed by
+    the next instruction to be executed.
+    <p>
+    <code>NOREGS</code> suppresses the registers display altogether
+    and shows just the instruction to be executed.
+    <p>
+    In addition to the <code>TRACEOPT</code> configuration file statement
+    there is also a corresponding <code>traceopt</code> panel command to
+    dynamically display and/or update the current setting at any time.
     <p>
 
 <a name="TZOFFSET"></a>
@@ -898,7 +1132,9 @@ and how they are used.
 <a name="subs"></a>
 <h3>Symbol substitutions</h3></a>
 <p>
-    In configuration and device statements, as well as in panel commands, symbols may be substituted for text.
+    In configuration and device statements, as well as in panel commands and OAT files,
+    symbols may be substituted for text.
+
 <h4>Syntax</h4>
 <p>
     To substitute symbol <em>symbol</em> with its contents, the symbol should be enclosed
@@ -919,7 +1155,7 @@ and how they are used.
 <h4>Special symbols</h4>
     <h5>Device group symbols</h5>
     <p>
-        When multiple devices are defined with a single device definition record, then the symbols<P>
+        When multiple devices are defined with a single device definition statement, then the symbols<P>
         <blockquote>
             <TABLE BORDER=0>
                 <ul compact>
@@ -1308,17 +1544,17 @@ and how they are used.
 
 <hr><!-- ---------------------------------------------------------------------------- -->
 
-<a name="device_definitions"></a>
-<h3>Device definitions</h3>
+<a name="device_stmts"></a>
+<h3>Device statements</h3>
 
 <p>
-    The remaining statements in the configuration file are device records.
-    There must be one device record for each I/O device or group of identical I/O devices.
-    The format of the device record is:
+    The remaining statements in the configuration file are device statements.
+    There must be one device statement for each I/O device or group of
+    identical I/O devices. The format of the device statement is:
     <p>
 
     <blockquote>
-        <code><em>devnum(s) &nbsp; devtype</em> &nbsp; [ <em>arguments</em> ] </code>
+    <code><em>devnum(s) &nbsp; devtype</em> &nbsp; [ <em>arguments</em> ] &nbsp; [ <em># comments...</em> ] </code>
     </blockquote>
     <p>
 
@@ -1328,7 +1564,7 @@ and how they are used.
 
 <blockquote>
 
-<dl> <!-- begin Device records -->
+<dl> <!-- begin Device statements -->
 <a name="devnums"></a>
 
 <dt><code><em>devnum(s)</em></code>
@@ -1379,19 +1615,25 @@ and how they are used.
 <dt><code><em>devtype</em></code>
 <dd><p>
     is the device type.  Valid device types are shown in the
-    <a href="#device_types_table">table</a> below.
+    <a href="#device_types_table">table</a> just below.
     <p>
 
 <dt><code><em>arguments</em></code>
 <dd><p>
     is a list of parameters whose meaning depends on the device type.
-    The arguments required for each class of device are shown below.
+    The arguments required for each class of device are shown further
+    below.
     <p>
 
-</dl> <!-- end Device records -->
+<dt><code><em># comments...</em></code>
+<dd><p>
+    A comment preceded by a &#035; sign may be appended to any device
+    definition statement.
+    <p>
+
+</dl> <!-- end Device statements -->
 
 </blockquote>
-
 
 <p><br>
 
@@ -1422,6 +1664,11 @@ and how they are used.
                 <td>TN3270 client connection</td>
             </tr>
 
+            <tr><td>SYSG</td>
+                <td><a href="#SYSG">Integrated 3270 console</a></td>
+                <td>TN3270 client connection</td>
+            </tr>
+
             <tr><td>1052, 3215</td>
                 <td><a href="#conprkb">Console printer-keyboards</a></td>
                 <td>Telnet client connection</td>
@@ -1447,7 +1694,7 @@ and how they are used.
                 <td>Disk file (ASCII)</td>
             </tr>
 
-            <tr><td>3410, 3420, 3422, 3430, 3480, 3490, 9347, 8809</td>
+            <tr><td>3410, 3420, 3422, 3430, 3480, 3490, 3590, 9347, 8809</td>
                 <td><a href="#tapedev">Tape drives</a></td>
                 <td>Disk file, CDROM, or SCSI tape</td>
             </tr>
@@ -1560,6 +1807,7 @@ and how they are used.
     <p>
 
     <dl>
+    <a name="loc3270group"></a>
     <dt><code><em>groupname</em></code>
     <dd><p>
         If a terminal group name is given on the device statement, a device type
@@ -1574,6 +1822,7 @@ and how they are used.
         obviously <i>not</i> be a hexadecimal number.
         <p>
 
+    <a name="loc3270ipaddr"></a>
     <dt><code><em>ipaddr</em> [ <em>mask</em> ]</code>
     <dd><p>
         The optional IP address and optional subnet mask specify the ip address(es)
@@ -1620,7 +1869,35 @@ and how they are used.
     over any ip address / subnet mask value which may also be specified.
     <p>
 
-<p><br>
+<hr width="50%"><p>
+
+<a name="SYSG"></a>
+<dt><em>Integrated 3270 console device</em>
+<dd><p>
+
+    The integrated 3270 (SYSG) console is similar to a <a href="#loc3270">local non-SNA
+    3270</a> device, except that it is not addressed by subchannel number and it is
+    supported only by certain system control programs. The SYSG console is defined
+    like a 3270 device except that the device type is SYSG and the device number is
+    ignored. Only one SYSG console can be defined in a configuration.
+    <p>
+
+    Use tn3270 client software to connect to the SYSG console device via the port number
+    specified on the <a href="#CNSLPORT">CNSLPORT</a> statement, just as you would connect
+    to a regular local non-SNA 3270 device.
+    <p>
+
+    The SYSG console configuration statement recognizes optional arguments which specify
+    <a href="#loc3270group">group name</a> and <a href="#loc3270ipaddr">IP address</a>
+    in the same way as previously described for a <a href="#loc3270">local non-SNA
+    3270</a> device. These optional arguments provide a means to ensure that a given
+    tn3270 client can connect directly to the SYSG console. If the group name and IP
+    address arguments are not specified, then the SYSG console is considered to be a
+    member of the general pool of devices eligible for connection to any incoming
+    tn3270 client.
+    <p>
+
+<hr width="50%"><p>
 
 <a name="consysc"></a>
 <dt><em>Integrated Console printer-keyboard devices</em>
@@ -1640,7 +1917,7 @@ and how they are used.
     All integrated devices must use a different command prefix.
     <p>
 
-<p><br>
+<hr width="50%"><p>
 
 <a name="conprkb"></a>
 <dt><em>Console printer-keyboard devices</em>
@@ -1674,7 +1951,7 @@ and how they are used.
     that the "noprompt" option, if specified, must precede the other arguments.
     <p>
 
-<p><br>
+<hr width="50%"><p>
 
 <a name="1442"></a>
 <a name="3505"></a>
@@ -1764,7 +2041,7 @@ and how they are used.
     </dl>
     <p>
 
-<p><br>
+<hr width="50%"><p>
 
 <a name="3525"></a>
 <a name="cardpch"></a>
@@ -1798,7 +2075,7 @@ and how they are used.
     </dl>
     <p>
 
-<p><br>
+<hr width="50%"><p>
 
 <a name="1403"></a>
 <a name="printer"></a>
@@ -1855,21 +2132,60 @@ and how they are used.
     the command line must be enclosed in apostrophes instead of quotes,
     for example:
     <pre>
-    000E 1403 '|"c:\Program Files\My Utils\pr" -s -PLPT1:' crlf 
+    000E 1403 '|"c:\Program Files\My Utils\pr" -s -PLPT1:' crlf
     </pre>
     <p>
     Tim Pinkawa has an example which shows how the print-to-pipe feature
     can be used to create output in PDF format:
     <a href="http://www.timpinkawa.net/hercules/prtspool.html">
     http://www.timpinkawa.net/hercules/prtspool.html</a>
+    <p>
 
-<p><br>
+<hr width="50%"><p>
 
 <a name="3420"></a>
 <a name="tapedev"></a>
 <dt><em>Emulated tape devices</em>
 <dd><p>
-    Four types of emulation are supported:
+    Five types of tape emulation are supported (see further below).
+    <p>
+
+    The only required parameter is the device filename. All other parameters
+    are optional and must follow the filename. Use '<b>*</b>' (asterisk) for
+    the filename to specify an empty (unmounted) tape drive. The specified file,
+    if other than '<b>*</b>', <i>must</i> exist.
+    <p>
+    Additionally, if the file name starts with the '@' character (at sign), the file
+    really describes a list of tape emulation files to be loaded in succession.
+    <p>
+
+    The syntax of each line is identical to the information that can be
+    specified after the device type when the options are specified directly
+    after the device type in the configuration file.
+    <p>
+
+    If the emulation file filename in the file list is the '<b>*</b>' (asterisk)
+    character, then this specifies a set of options to be applied to <i>all</i>
+    additional emulation files specified in the file list.
+    <p>
+
+    Parameters are appended in succession. In all cases, if the same parameter is
+    specified more than once, the last instance takes precedence.
+    <p>
+
+    Therefore, it is possible to specify a set of parameters in the base configuration
+    file, another set on a '*' line, and another set for each individual line.
+    Parameters are then appended in that order: options specified on the base device
+    statement itself first, followed by those options specified on the '*' statement,
+    and finally those specified on each individual file list statement last. <i>A
+    <b>SCSI tape</b> device should <b>not</b> be given in a file list.</i>
+    <p>
+
+    Refer to the distributed source-code's "<b>README.TAPE</b>" document for
+    additional information regarding system and application programming for tape
+    devices and instructions regarding use of the emulated <b>ACF</b> (Automatic
+    Cartridge Feeder) and <b><a href="#AUTOMOUNT">AUTOMOUNT</a></b> features
+    for virtual (non-SCSI) tape devices.
     <p>
 
     <dl> <!-- begin Emulated tape types of emulation -->
@@ -1983,6 +2299,10 @@ and how they are used.
             guest's 22-bit format block-id into 32-bit format before sending it
             to the actual SCSI hardware (since that is the format that the actual
             hardware requires it to be in).
+            <p>
+        <dt><code>--blkid-22</code>
+        <dd><p>
+            The complete opposite of the above <code>--blkid-32</code> option.
         </dl>
         <p><br>
 
@@ -2040,7 +2360,19 @@ and how they are used.
         a 6-byte header with no data.  This is the same format as is
         used by the P/390.
         The argument specifies the location of the AWSTAPE file
-        (for example <code>ickdsf.ipl</code>)
+        (for example <code>ickdsf.aws</code>)
+        <p><br>
+
+    <dt><b>FakeTape virtual files</b>
+    <dd><p>
+        These contain a complete tape in one file.  FakeTape files
+        consist of variable length EBCDIC blocks.  Each block is
+        preceded by a 12-ASCII-hex-character header.  Filemarks are represented by
+        a 12-character header with no data.  The FakeTape format is
+        used by the Flex-ES system from Fundamental Software Inc (FSI).
+        The argument specifies the location of the FakeTape file
+        (for example <code>ickdsf.fkt</code>). Note: "FLEX-ES" and
+        "FakeTape" are trademarks of Fundamental Software, Inc.
         <p><br>
 
     <dt><b>HET virtual files</b> &nbsp;&nbsp; (<b>H</b>ercules <b>E</b>mulated <b>T</b>ape)
@@ -2117,7 +2449,7 @@ and how they are used.
 
     <p><br>
 
-    The following parameters apply to both <b>AWS</b> and <b>HET</b> emulation files:
+    The following parameters apply to <b>AWS</b>, <b>HET</b> and <b>FakeTape</b> emulation files:
     <p>
 
     <blockquote>
@@ -2125,26 +2457,48 @@ and how they are used.
         <dt><code>MAXSIZE</code>=<i>n</i> &nbsp;&#124;&nbsp; <code>MAXSIZEK</code>=<i>n</i>
              &nbsp;&#124;&nbsp; <code>MAXSIZEM</code>=<i>n</i>
         <dd><p>
-            Specifies the maximum number of bytes (specified in bytes, Kilobytes or
-            Megabytes) for the emulated file. This parameter defaults to 0, meaning
-            there is no limit on the file size.
+            Specifies the maximum size (in bytes, Kilobytes or Megabytes)
+            that the emulated file is allowed to grow to. Specifying zero
+            for this parameter means "unlimited" (i.e. there is no limit).
             <p>
 
         <dt><code>EOTMARGIN</code>=<em>n</em>
         <dd><p>
             Specifies the number of bytes remaining before reaching <em>maxsize</em>
-            at which point the tape device will signal the presence of the 'End Of Tape'
+            at which point the tape device will signal the presence of the "End of Tape"
             marker (reflector), thus allowing the program to switch to the next tape.
             <p>
 
         <dt><code>READONLY</code>=<em>n</em>
-        <dt><code>RO</code>=<em>n</em>
-        <dt><code>NORING</code>=<em>n</em>
         <dd><p>
             Specifies whether the tape is mounted read-only (without a write
-            ring, or with the cartridge protect switch set to "write
-            protect". A parameter of 1 means read-only; a parameter of 0
-            means read-write.
+            ring or with the cartridge protect switch set to "write
+            protect").  A parameter of 1 means read-only; a parameter of 0
+            means read-write.  If READONLY=1, RO or NORING is not specified,
+            the default is READONLY=0.  Note that READONLY=0 does not override
+            the host system file permission settings for the underlying AWS or
+            HET file.  If the AWS or HET file is marked read-only, the tape
+            will be mounted read-only despite specification of READONLY=0.
+            <p>
+
+        <dt><code>RO</code>
+        <dt><code>NORING</code>
+        <dd><p>
+            Specifies that the tape is mounted read-only (without a write
+            ring or with the cartridge protect switch set to "write
+            protect").  RO and NORING are equivalent to READONLY=1.
+            <p>
+
+        <dt><code>RW</code>
+        <dt><code>RING</code>
+        <dd><p>
+            Specifies that the tape should be mounted read-write, if possible.
+            RW and RING are equivalent to READONLY=0.  This is the default if
+            RO, NORING or READONLY=1 is not specified.  Note that RW and RING
+            do not override the host system file permission settings for the
+            underlying AWS or HET file.  If the AWS or HET file is marked
+            read-only, the tape will be mounted read-only despite specification
+            of RW or RING.
             <p>
 
         <dt><code>DEONIRQ</code>=<em>n</em>
@@ -2154,46 +2508,82 @@ and how they are used.
             option; a parameter of 0 turns it off.
             <p>
 
+<a name="noautomount"></a>
+        <dt><code>NOAUTOMOUNT</code>
+        <dd><p>
+            Indicates support for guest-initiated automatic tape volume
+            mounting is to always be disabled for this tape device.
+            <p>
+            Automatic guest tape-mount support is automatically globally
+            enabled for all virtual (non-SCSI) tape devices by default
+            whenever an allowable automount directory is defined via the
+            <a href="#AUTOMOUNT">AUTOMOUNT</a> configuration file statement
+            or the <code>automount</code> panel command.
+            The <code>NOAUTOMOUNT</code> option allows you to specifically
+            disable such support for a given device.
+            <p>
+            The automount feature enables software running in guest operating
+            systems to automatically mount, unmount and/or query for themselves
+            the host "virtual tape volume" filename mounted on a tape drive,
+            via the use of special CCW opcodes (0x4B Set Diagnose and 0xE4
+            Sense Id) without any intervention on the part of the Hercules
+            operator. An example of such a program for DOS/VSE called
+            <code>TMOUNT</code> is provided in the <code>util</code>
+            subdirectory of the distributed source code.
+            <p>
+            This is a sticky option. When specified, automount support for
+            the device remains disabled until the option is specifically
+            removed via a <code>devinit</code> command <em>without</em> the option
+            specified. This means if <code>NOAUTOMOUNT</code> is enabled
+            for a device while global automount functionality is currently
+            disabled (because no <a href="#AUTOMOUNT">AUTOMOUNT</a> statement
+            was specified at Hercules startup), then automount functionality
+            remains disabled for the device even should global automount
+            functionality be later manually enabled via an
+            <code>automount</code> panel command.
+            <p>
+            When the 0x4B Set Diagnose CCW is used to auto-mount a virtual
+            tape volume onto a given tape drive, an absolute (fully-qualified)
+            pathname should normally always be specified, but need not be
+            if a path relative to the currently defined "default allowable"
+            automount directory is used instead.
+            <p>
+            The default allowable
+            automount directory is always the first "allowable" directory
+            that was defined, or else the current directory if no allowable
+            directories were specifically defined. (There is always a default
+            allowable directory whenever any allowable or unallowable automount
+            directories are defined.)
+            <p>
+            Fully-resolved, absolute-full-path filenames are defined as being
+            those which, for Windows, have a ':' (colon) in the second
+            position or, for other host operating systems (e.g. Linux), have
+            a '/' (slash) in the first position. Paths which start with a '.'
+            (period) are considered relative paths and will always be appended
+            to the currently defined default allowable automount directory,
+            before being resolved into fully-qualified paths by the host system.
+            (I.e. only fully-resolved absolute pathnames are used in the
+            performance of the actual automatic tape volume mount.)
+            <p>
+            For example, if more than one allowable automount directory is
+            defined and the volume wishing to be mounted happens to reside in
+            the second one, then a fully-qualified absolute pathname should
+            of course be specified (or else one that is relative to the
+            default directory which happens to resolve to the desired file).
+            <p>
+            All attempts to automount host files in any defined "disallowable"
+            directory (or any subdirectory thereof (or otherwise <i>not</i>
+            within any defined "allowable" directory or subdirectory)) will
+            be rejected. An error message is always issued in such cases,
+            just as one is whenever a successful mount or unmount is performed.
+            <p>
+            A sample guest automount program called <code>TMOUNT</code> for
+            the DOS/VSE operating system is provided in the
+            <code>util</code> subdirectory of the distributed source code.
         </dl>
     </blockquote>
 
-    Additionally, if the file name starts with the '@' character (at sign), the file
-    really describes a list of tape emulation files to be loaded in succession.
-    <p>
-
-    The syntax of each line is identical to the information that can be
-    specified after the device type when the options are specified directly
-    after the device type in the configuration file.
-    <p>
-
-    If the emulation file filename in the file list is the '<b>*</b>' (asterisk)
-    character, then this specifies a set of options to be applied to <i>all</i>
-    additional emulation files specified in the file list.
-    <p>
-
-    Parameters are appended in succession. In all cases, if the same parameter is
-    specified more than once, the last instance takes precedence.
-    <p>
-
-    Therefore, it is possible to specify a set of parameters in the base configuration
-    file, another set on a '*' line, and another set for each individual line.
-    Parameters are then appended in that order: options specified on the base device
-    statement itself first, followed by those options specified on the '*' statement,
-    and finally those specified on each individual file list statement last.
-    <p>
-
-    <i>A <b>SCSI tape</b> device should <b>not</b> be given in a file list.</i>
-    <p>
-
-    <p>
-
-    Refer to the distributed source-code's "<b>README.TAPE</b>" document for 
-    additional information regarding system and application programming for tape
-    devices and instructions regarding use of the emulated <b>ACF (Automatic
-    Cartridge Feeder)</b> feature for virtual (non-SCSI) tape devices.
-    <p>
-
-<p><br>
+<hr width="50%"><p>
 
 <a name="ctca"></a>
 <a name="3088"></a>
@@ -2603,7 +2993,7 @@ ROUTE  00  172.021.003.032  255.255.255.224
     </dl> <!-- end emulation types -->
     <p>
 
-<p><br>
+<hr width="50%"><p>
 
 <a name="3380"></a>
 <a name="ckddasd"></a>
@@ -2803,7 +3193,7 @@ ROUTE  00  172.021.003.032  255.255.255.224
     </dl> <!-- end (CKD) additional DASD arguments  -->
     <p>
 
-<p><br>
+<hr width="50%"><p>
 
 <a name="3370"></a>
 <a name="fbadasd"></a>
@@ -2895,7 +3285,7 @@ ROUTE  00  172.021.003.032  255.255.255.224
     </dl> <!-- end (FBA) additional DASD arguments  -->
     <p>
 
-<p><br>
+<hr width="50%"><p>
 
 <a name="comline"></a>
 <dt><em>Communication Line</em>
@@ -2993,12 +3383,6 @@ ROUTE  00  172.021.003.032  255.255.255.224
 
 </dl> <!-- end Arguments for each device type -->
 
-<p><br>
-
-A comment preceded by a &#035; sign may be appended to any device
-definition statement.
-<p>
-
 <center><hr width=15% noshade></center>
 <p>
 
@@ -3008,6 +3392,6 @@ If you have a question about Hercules, see the
 <p><center><hr width=15% noshade>
 <a href="hercinst.html"><img src="images/back.gif" border=0 alt="back"></a>
 </center>
-<p class="lastupd">Last updated $Date: 2007/06/22 21:23:29 $ $Revision: 1.125 $</p>
+<p class="lastupd">Last updated $Date: 2009/01/09 15:35:57 $ $Revision: 1.153 $</p>
 </BODY>
 </HTML>

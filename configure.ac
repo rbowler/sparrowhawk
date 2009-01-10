@@ -2,7 +2,7 @@
 # CONFIGURE.AC: Process this file with AutoConf to produce a configure script.
 ###############################################################################
 
-# $Id: configure.ac,v 1.193 2007/06/24 04:17:15 jmaynard Exp $
+# $Id: configure.ac,v 1.202 2009/01/09 16:31:25 jmaynard Exp $
 
 #    AC is AutoConfigure, AM is AutoMake, and AH is AutoHeader. The
 #    'HC_XXXX..' macros are custom Hercules autoconf macros defined
@@ -32,6 +32,40 @@
 ###############################################################################
 
 # $Log: configure.ac,v $
+# Revision 1.202  2009/01/09 16:31:25  jmaynard
+# 3.06 version number change.
+#
+# Revision 1.201  2009/01/08 01:57:55  jmaynard
+# Oops. Ripped out a little too much when removing --enable-universal-binary.
+#
+# Revision 1.200  2009/01/07 23:38:43  jmaynard
+# Remove --enable-universal-binary option, since it doesn't work with Leopard:
+# gcc 4.0 complains about libtool-mandated options when multiple architectures
+# are specified.
+#
+# Revision 1.199  2008/12/17 23:03:06  rbowler
+# Remove rogue spaces from AC_SUBST by Pasi Pirhonen
+#
+# Revision 1.198  2008/12/04 17:39:02  rbowler
+# Add ability to configure group name with --enable-setuid-hercifc=name
+#
+# Revision 1.197  2008/03/25 11:41:31  fish
+# SCSI TAPE MODS part 1: groundwork: non-functional changes:
+# rename some functions, comments, general restructuring, etc.
+# New source modules awstape.c, omatape.c, hettape.c and
+# tapeccws.c added, but not yet used (all will be used in a future
+# commit though when tapedev.c code is eventually split)
+#
+# Revision 1.196  2008/03/10 15:10:46  rbowler
+# Add -lpthread to link options for Solaris 2.9
+#
+# Revision 1.195  2008/02/19 11:49:18  ivan
+# - Move setting of CPU priority after spwaning timer thread
+# - Added support for Posix 1003.1e capabilities
+#
+# Revision 1.194  2008/02/15 23:24:32  rbowler
+# Add -lrt to link options for Solaris
+#
 # Revision 1.193  2007/06/24 04:17:15  jmaynard
 # Grumble. Missed the version tag in the MSVC build. Fixed.
 #
@@ -46,9 +80,9 @@
 #
 
 AC_INIT(hercules.h)                     # (package, version, bugreport email, etc)
-AC_REVISION($Revision: 1.193 $)         # (the version of this configure.ac)
+AC_REVISION($Revision: 1.202 $)         # (the version of this configure.ac)
 AC_CONFIG_AUX_DIR(autoconf)             # (directory containing auxillary build tools)
-AM_INIT_AUTOMAKE(hercules,3.05)         # (the version of our software package)
+AM_INIT_AUTOMAKE(hercules,3.06)         # (the version of our software package)
 # Don't forget to change it in msvc.makefile.includes/VERSION.msvc, too!
 AM_CONFIG_HEADER(config.h)              # (the file the resulting configure script will produce)
 AM_MAINTAINER_MODE()
@@ -305,6 +339,7 @@ AH_TEMPLATE( [_INTL_REDIRECT_MACROS],   [Define to 1 if non-Intel architecture (
 
 AH_TEMPLATE( [CCKD_BZIP2],              [Define to enable bzip2 compression in emulated DASDs] )
 AH_TEMPLATE( [HET_BZIP2],               [Define to enable bzip2 compression in emulated tapes] )
+AH_TEMPLATE( [OPTION_CAPABILITIES],     [Define to enable posix draft 1003.1e capabilities] )
 
 ###############################################################################
 #   OS-specific settings that we can't figure out any other way (yet)
@@ -556,6 +591,8 @@ AC_CHECK_HEADERS( signal.h,       [hc_cv_have_signal_h=yes],       [hc_cv_have_s
 AC_CHECK_HEADERS( termios.h,      [hc_cv_have_termios_h=yes],      [hc_cv_have_termios_h=no]      )
 AC_CHECK_HEADERS( time.h,         [hc_cv_have_time_h=yes],         [hc_cv_have_time_h=no]         )
 AC_CHECK_HEADERS( zlib.h,         [hc_cv_have_zlib_h=yes],         [hc_cv_have_zlib_h=no]         )
+AC_CHECK_HEADERS( sys/capability.h, [hc_cv_have_sys_capa_h=yes],   [hc_cv_have_sys_capa_h=no]     )
+AC_CHECK_HEADERS( sys/prctl.h,    [hc_cv_have_sys_prctl_h=yes],    [hc_cv_have_sys_prctl_h=no]    )
 
 AC_CACHE_SAVE()
 
@@ -594,6 +631,12 @@ AC_CHECK_DECLS( SIOCSIFHWADDR,        [hc_cv_have_siocsifhwaddr=yes],       [hc_
 AC_CHECK_DECLS( SIOCADDRT,            [hc_cv_have_siocaddrt=yes],           [hc_cv_have_siocaddrt=no],           [#include <linux/sockios.h>] )
 AC_CHECK_DECLS( SIOCDELRT,            [hc_cv_have_siocdelrt=yes],           [hc_cv_have_siocdelrt=no],           [#include <linux/sockios.h>] )
 AC_CHECK_DECLS( SIOCDIFADDR,          [hc_cv_have_siocdifaddr=yes],         [hc_cv_have_siocdifaddr=no],         [#include <linux/sockios.h>] )
+
+if test "$hc_cv_have_sys_mtio_h" == "yes"; then
+    AC_CHECK_DECLS( MTEWARN,          [hc_cv_have_mtewarn=yes],             [hc_cv_have_mtewarn=no],             [#include <sys/mtio.h>] )
+else
+    hc_cv_have_mtewarn=no
+fi
 
 AC_CACHE_SAVE()
 
@@ -675,6 +718,10 @@ AC_CHECK_LIB( bz2,    BZ2_bzBuffToBuffDecompress,
             [ hc_cv_have_libbz2=yes ],
             [ hc_cv_have_libbz2=no  ] )
 AC_CHECK_LIB( iconv,  iconv          )
+# jbs 10/15/2003 Solaris requires -lrt for sched_yield() and fdatasync()
+AC_CHECK_LIB( rt,     sched_yield    )
+# rbowler 2008/03/10 rev 1.196 Solaris 2.9 requires -lpthread
+AC_CHECK_LIB( pthread,pthread_create )
 
 AC_CACHE_SAVE()
 
@@ -1462,6 +1509,41 @@ AC_ARG_ENABLE( multi-cpu,
     [hc_cv_opt_num_cpu_engines=8]
 )
 
+AC_ARG_ENABLE( capabilities,
+
+    AC_HELP_STRING([--disable-capabilities],
+
+        [disable fine grained privileges]
+    ),
+    [
+        case "${enableval}" in
+        yes) hc_cv_opt_capabilities=yes                      ;;
+        no)  hc_cv_opt_capabilities=no                       ;;
+        *)   AC_MSG_RESULT( [ERROR: invalid 'capabilities' option] )
+             hc_error=yes
+             ;;
+        esac
+    ],
+    [hc_cv_opt_capabilities=hc_cv_have_sys_capability]
+)
+
+# only include libcap if needed
+if test "$hc_cv_opt_capabilities" = "yes"; then
+    AC_CHECK_LIB(cap,cap_set_proc)
+fi
+# Force disable capabilities support if library is missing
+if test "$ac_cv_lib_cap_cap_set_proc" = "no"; then
+  hc_cv_opt_capabilities="no"
+fi
+# Force disable capabilities support if sys/capability.h header is missing
+if test "$hc_cv_have_sys_capa_h" = "no"; then
+  hc_cv_opt_capabilities="no"
+fi
+# Force disable capabilities support if sys/prctl.h header is missing
+if test "$hc_cv_have_sys_prctl_h" = "no"; then
+  hc_cv_opt_capabilities="no"
+fi
+
 AC_ARG_ENABLE( custom,
 
     AC_HELP_STRING( [--enable-custom=STRING],
@@ -1477,16 +1559,16 @@ if test "$hc_cv_build_hercifc" = "yes"; then
 
     AC_ARG_ENABLE( setuid-hercifc,
 
-        AC_HELP_STRING( [--enable-setuid-hercifc],
+        AC_HELP_STRING( [--enable-setuid-hercifc=yes|no|GROUPNAME],
 
-            [install hercifc setuid root]
+            [install hercifc as setuid root, and allow execution by users in group GROUPNAME]
         ),
         [
             case "${enableval}" in
             yes) hc_cv_opt_setuid_hercifc=yes                      ;;
             no)  hc_cv_opt_setuid_hercifc=no                       ;;
-            *)   AC_MSG_RESULT( [ERROR: invalid 'setuid-hercifc' option] )
-                 hc_error=yes
+            *)   hc_cv_opt_setuid_hercifc=yes
+                 hc_cv_hercifc_groupname=${enableval}
                  ;;
             esac
         ],
@@ -1497,44 +1579,6 @@ if test "$hc_cv_build_hercifc" = "yes"; then
 
 else
     hc_cv_setuid_hercifc=no
-fi
-
-if test "$hc_cv_is_apple" = "yes"; then
-
-    AC_ARG_ENABLE( universal-binary,
-
-        AC_HELP_STRING( [--enable-universal-binary],
-
-            [build Mac OS X universal binary]
-        ),
-        [
-            case "${enableval}" in
-            yes) hc_cv_opt_build_apple_univ_binary=yes             ;;
-            no)  hc_cv_opt_build_apple_univ_binary=no              ;;
-            *)   AC_MSG_RESULT( [ERROR: invalid 'universal-binary' option] )
-                 hc_error=yes
-                 ;;
-            esac
-        ],
-        [hc_cv_opt_build_apple_univ_binary=no]
-    )
-
-    hc_cv_build_apple_univ_binary=$hc_cv_opt_build_apple_univ_binary
-
-    # If we're building a universal binary, turn off regparm and assembler
-    # byteswap: while the Intel compiler can deal with them, the PPC
-    # compiler cannot, and only those options common to both can be used.
-    # Turn off dependency tracking, too. -- JRM
-
-    if test "$hc_cv_build_apple_univ_binary" = "yes"; then
-        hc_cv_regparm_attr_supported=no
-        hc_cv_asm_byteswap=no
-        am_cv_CC_dependencies_compiler_type=none
-        am_cv_CXX_dependencies_compiler_type=none
-    fi
-
-else
-    hc_cv_build_apple_univ_binary=no
 fi
 
 #-----------------------------------------------------------------
@@ -1798,21 +1842,16 @@ if test "$hc_cv_auto_optimize" = "yes"; then
             hc_cv_optimization_flags="$hc_cv_optimization_flags -mcpu=$host_cpu -mtune=$host_cpu -frename-registers"
             ;;
     esac
-
     if test "$hc_cv_is_intel_x86_arch" = "yes"; then
 
-        if test "$hc_cv_build_apple_univ_binary" = "yes"; then
-            hc_cv_optimization_flags="$hc_cv_optimization_flags -arch i386 -arch ppc"
+        hc_cv_optimization_flags="$hc_cv_optimization_flags -march=$hc_cv_intel_cpu_type"
+
+        if test "$hc_cv_builtin_alloca_broke" != "yes"  &&
+           test "$hc_cv_opt_debug"            != "yes"; then
+
+            hc_cv_optimization_flags="$hc_cv_optimization_flags -fomit-frame-pointer"
         else
-            hc_cv_optimization_flags="$hc_cv_optimization_flags -march=$hc_cv_intel_cpu_type"
-
-            if test "$hc_cv_builtin_alloca_broke" != "yes"  &&
-               test "$hc_cv_opt_debug"            != "yes"; then
-
-                hc_cv_optimization_flags="$hc_cv_optimization_flags -fomit-frame-pointer"
-            else
-                hc_cv_optimization_flags="$hc_cv_optimization_flags -fno-omit-frame-pointer"
-            fi
+            hc_cv_optimization_flags="$hc_cv_optimization_flags -fno-omit-frame-pointer"
         fi
     fi
 fi
@@ -1905,6 +1944,7 @@ test "$hc_cv_have_getset_uid"            != "yes"  &&  AC_DEFINE(NO_SETUID)
 test "$hc_cv_asm_byteswap"               != "yes"  &&  AC_DEFINE(NO_ASM_BYTESWAP)
 test "$hc_cv_non_unique_gettimeofday"     = "yes"  &&  AC_DEFINE(NON_UNIQUE_GETTIMEOFDAY)
 test "$hc_cv_build_hercifc"               = "yes"  &&  AC_DEFINE(BUILD_HERCIFC)
+test "$hc_cv_opt_capabilities"            = "yes"  &&  AC_DEFINE(OPTION_CAPABILITIES)
 
 if test $hc_cv_have_sa_sigaction != yes ||
    test $hc_cv_have_sigusr1      != yes ||
@@ -2003,6 +2043,12 @@ AM_CONDITIONAL( BUILD_FTHREADS,      [ test "$hc_cv_opt_fthreads"     = "yes" ] 
 AM_CONDITIONAL( BUILD_FISHHANG,      [ test "$hc_cv_opt_fishhang"     = "yes" ] )
 AM_CONDITIONAL( BUILD_HERCIFC,       [ test "$hc_cv_build_hercifc"    = "yes" ] )
 AM_CONDITIONAL( SETUID_HERCIFC,      [ test "$hc_cv_setuid_hercifc"   = "yes" ] )
+AM_CONDITIONAL( HERCIFC_GROUPSET,    [ test "x$hc_cv_hercifc_groupname" != "x"] )
+
+if test "x$hc_cv_hercifc_groupname" != "x"; then
+    HERCIFC_GROUPNAME=${hc_cv_hercifc_groupname}
+    AC_SUBST(HERCIFC_GROUPNAME)
+fi
 
 #  Building of shared libraries is forced, and we force use of libtool too.
 

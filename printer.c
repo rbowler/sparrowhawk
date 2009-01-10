@@ -1,7 +1,7 @@
 /* PRINTER.C    (c) Copyright Roger Bowler, 1999-2007                */
 /*              ESA/390 Line Printer Device Handler                  */
 
-// $Id: printer.c,v 1.45 2007/06/23 00:04:15 ivan Exp $
+// $Id: printer.c,v 1.47 2007/11/29 16:30:42 jmaynard Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
@@ -9,6 +9,12 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: printer.c,v $
+// Revision 1.47  2007/11/29 16:30:42  jmaynard
+// Allow ALLOW DATA CHECK to precede LOAD UCS AND FOLD on 1403 for TSS/370.
+//
+// Revision 1.46  2007/11/21 22:54:14  fish
+// Use new BEGIN_DEVICE_CLASS_QUERY macro
+//
 // Revision 1.45  2007/06/23 00:04:15  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -334,7 +340,8 @@ int     i;                              /* Array subscript           */
 static void printer_query_device (DEVBLK *dev, char **class,
                 int buflen, char *buffer)
 {
-    *class = "PRT";
+    BEGIN_DEVICE_CLASS_QUERY( "PRT", dev, class, buflen, buffer );
+
     snprintf (buffer, buflen, "%s%s%s",
                 dev->filename,
                 (dev->crlf ? " crlf" : ""),
@@ -734,7 +741,10 @@ BYTE            c;                      /* Print character           */
     /* LOAD UCS BUFFER AND FOLD                                      */
     /*---------------------------------------------------------------*/
         /* For 1403, command reject if not chained to UCS GATE */
-        if (dev->devtype == 0x1403 && prevcode != 0xEB)
+        /* Also allow ALLOW DATA CHECK to get TSS/370 working  */
+        /* -- JRM 11/28/2007 */
+        if (dev->devtype == 0x1403 &&
+            ((prevcode != 0xEB) && (prevcode != 0x7B)))
         {
             dev->sense[0] = SENSE_CR;
             *unitstat = CSW_CE | CSW_DE | CSW_UC;

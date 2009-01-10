@@ -1,7 +1,7 @@
 /* CCKDUTIL.C   (c) Copyright Roger Bowler, 1999-2007                */
 /*       ESA/390 Compressed CKD Common routines                      */
 
-// $Id: cckdutil.c,v 1.54 2007/06/23 00:04:03 ivan Exp $
+// $Id: cckdutil.c,v 1.57 2008/09/04 22:03:15 gsmith Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module contains functions for compressed CKD devices         */
@@ -9,6 +9,15 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: cckdutil.c,v $
+// Revision 1.57  2008/09/04 22:03:15  gsmith
+// Fix 64-bit length problem in cdsk_valid_trk - Tony Harminc
+//
+// Revision 1.56  2007/12/01 23:31:57  fish
+// Fix cckdcdsk/cckdcomp/cckdutil no message o/p issue
+//
+// Revision 1.55  2007/08/28 20:22:41  gsmith
+// cckdutil fix for 64-bit - zhackules
+//
 // Revision 1.54  2007/06/23 00:04:03  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -2593,8 +2602,11 @@ int             len2;                   /* Positive `len'            */
 int             kl, dl;                 /* Key/Data lengths          */
 BYTE           *bufp;                   /* Buffer pointer            */
 int             bufl;                   /* Buffer length             */
+#ifdef HAVE_LIBZ
+uLongf          zlen;
+#endif
 #ifdef CCKD_BZIP2
-unsigned int    bufsz;
+unsigned int    bz2len;
 #endif
 #if defined(HAVE_LIBZ) || defined(CCKD_BZIP2)
 int             rc;                     /* Return code               */
@@ -2620,12 +2632,12 @@ BYTE            buf2[65536];            /* Uncompressed buffer       */
         if (len < 0) return 0;
         bufp = (BYTE *)buf2;
         memcpy (buf2, buf, CKDDASD_TRKHDR_SIZE);
-        bufl = sizeof(buf2) - CKDDASD_TRKHDR_SIZE;
-        rc = uncompress (buf2 + CKDDASD_TRKHDR_SIZE, (void *)&bufl,
+        zlen = sizeof(buf2) - CKDDASD_TRKHDR_SIZE;
+        rc = uncompress (buf2 + CKDDASD_TRKHDR_SIZE, &zlen,
                          buf + CKDDASD_TRKHDR_SIZE, len - CKDDASD_TRKHDR_SIZE);
         if (rc != Z_OK)
             return 0;
-        bufl += CKDDASD_TRKHDR_SIZE;
+        bufl = (int)zlen + CKDDASD_TRKHDR_SIZE;
         break;
 #endif
 
@@ -2634,14 +2646,12 @@ BYTE            buf2[65536];            /* Uncompressed buffer       */
         if (len < 0) return 0;
         bufp = (BYTE *)buf2;
         memcpy (buf2, buf, CKDDASD_TRKHDR_SIZE);
-        bufl = sizeof(buf2) - CKDDASD_TRKHDR_SIZE;
-        bufsz=bufl;
-        rc = BZ2_bzBuffToBuffDecompress ( (void *)&buf2[CKDDASD_TRKHDR_SIZE], &bufsz,
-                         (void *)&buf[CKDDASD_TRKHDR_SIZE], len - CKDDASD_TRKHDR_SIZE, 0, 0);
+        bz2len = sizeof(buf2) - CKDDASD_TRKHDR_SIZE;
+        rc = BZ2_bzBuffToBuffDecompress ( (char *)&buf2[CKDDASD_TRKHDR_SIZE], &bz2len,
+                         (char *)&buf[CKDDASD_TRKHDR_SIZE], len - CKDDASD_TRKHDR_SIZE, 0, 0);
         if (rc != BZ_OK)
             return 0;
-        bufl=bufsz;
-        bufl += CKDDASD_TRKHDR_SIZE;
+        bufl = (int)bz2len + CKDDASD_TRKHDR_SIZE;
         break;
 #endif
 
@@ -2659,7 +2669,7 @@ BYTE            buf2[65536];            /* Uncompressed buffer       */
             return len > 0 ? len : bufl;
     }
     /* Check length */
-    if (bufl < 5 + 8 + 8 + 8) return 0;
+    if (bufl <= 5 + 8 + 8 + 8 + 8) return 0;
     /* Check ha */
     if (fetch_hw(bufp + 1) != trk / heads
      || fetch_hw(bufp + 3) != trk % heads)
@@ -2718,5 +2728,8 @@ char          msg[4096];
     vsprintf (msg+i, format, vl);
     va_end (vl);
 
-    logmsg("%s",msg);
+    if (dev->batch)
+        fprintf(stdout,"%s",msg);
+    else
+        logmsg("%s",msg);
 }

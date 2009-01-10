@@ -1,7 +1,7 @@
 /* DIAGMSSF.C   (c) Copyright Jan Jaeger, 1999-2007                  */
 /*              ESA/390 Diagnose Functions                           */
 
-// $Id: diagmssf.c,v 1.43 2007/06/23 00:04:08 ivan Exp $
+// $Id: diagmssf.c,v 1.47 2008/12/23 11:07:43 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements various diagnose functions                 */
@@ -14,6 +14,19 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: diagmssf.c,v $
+// Revision 1.47  2008/12/23 11:07:43  ivan
+// Indicate CPU engine types in DIAG 204 CPU part structure array
+//
+// Revision 1.46  2008/12/21 21:25:59  ivan
+// Fix spelling
+//
+// Revision 1.45  2008/12/21 05:46:47  ivan
+// Fill diag 224 table with all the engine names
+//
+// Revision 1.44  2008/11/24 14:52:21  jj
+// Add PTYP=IFL
+// Change SCPINFO processing to check on ptyp for IFL specifics
+//
 // Revision 1.43  2007/06/23 00:04:08  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -37,6 +50,8 @@
 #include "hercules.h"
 
 #include "opcode.h"
+
+#include "service.h"
 
 #if !defined(_DIAGMSSF_C)
 
@@ -191,6 +206,15 @@ typedef struct _DIAG204_PART_CPU {
         DBLWRD  effdispatch;            /* Effective dispatch time   */
     } DIAG204_PART_CPU;
 
+static const char diag224_cputable[]=
+{
+    "CP              "
+    "ICF             "
+    "ZAAP            "
+    "IFL             "
+    "*UNKNOWN*       "
+    "ZIIP            "
+};
 
 #endif /*!defined(_DIAGMSSF_C)*/
 
@@ -436,6 +460,7 @@ static U64        diag204tod;          /* last diag204 tod           */
           {
               memset(cpuinfo, 0, sizeof(DIAG204_PART_CPU));
               STORE_HW(cpuinfo->cpaddr,sysblk.regs[i]->cpuad);
+              cpuinfo->index=sysblk.ptyp[i];
               STORE_HW(cpuinfo->weight,100);
               dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) / sysblk.cpus;
               dreg = (dreg * 1000000) + (i ? 0 : (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec));
@@ -478,6 +503,7 @@ static U64        diag204tod;          /* last diag204 tod           */
 
 } /* end function diag204_call */
 
+
 /*-------------------------------------------------------------------*/
 /* Process LPAR DIAG 224 call                                        */
 /*-------------------------------------------------------------------*/
@@ -485,7 +511,7 @@ void ARCH_DEP(diag224_call) (int r1, int r2, REGS *regs)
 {
 RADR              abs;                 /* abs addr of data area      */
 BYTE             *p;                   /* pointer to the data area   */
-int               i;                   /* loop index                 */
+unsigned int      i;                   /* loop index                 */
 
 //FIXME : this is probably incomplete.
 //        see linux/arch/s390/hypfs/hypfs_diag.c
@@ -508,20 +534,17 @@ int               i;                   /* loop index                 */
     STORAGE_KEY(abs, regs) |= STORKEY_REF | STORKEY_CHANGE;
 
     /* First byte contains the number of entries - 1 */
-    *p = 0;
+    *p = 5;
 
     /* Clear the next 15 bytes */
     memset (p + 1, 0, 15);
 
-    /* Set the first and only 16 byte entry */
+    /* Set the 6 possible entries */
     p += 16;
-    if (sysblk.pgmprdos == PGM_PRD_OS_LICENSED)
-        memcpy(p, "CP                ", 16);
-    else
-        memcpy(p, "ICF               ", 16);
+    memcpy(p,diag224_cputable,sizeof(diag224_cputable)-1);
 
     /* Convert to EBCDIC */
-    for (i = 0; i < 16; i++)
+    for (i = 0; i < sizeof(diag224_cputable); i++)
         p[i] = host_to_guest(p[i]);
 
 } /* end function diag224_call */

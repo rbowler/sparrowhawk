@@ -1,7 +1,7 @@
 /* PANEL.C      (c) Copyright Roger Bowler, 1999-2007                */
 /*              ESA/390 Control Panel Commands                       */
 
-// $Id: panel.c,v 1.211 2007/06/23 00:04:15 ivan Exp $
+// $Id: panel.c,v 1.255 2009/01/10 00:18:34 jmaynard Exp $
 
 /*              Modified for New Panel Display =NP=                  */
 /*-------------------------------------------------------------------*/
@@ -28,6 +28,145 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: panel.c,v $
+// Revision 1.255  2009/01/10 00:18:34  jmaynard
+// Allow a bare ENTER in cmdtgt scp or cmdtgt pscp mode to send a blank command
+// to the SCP.
+//
+// Revision 1.254  2009/01/09 13:40:13  jj
+// Ensure SYSG devices are listed in the panel display
+//
+// Revision 1.253  2009/01/07 16:37:29  bernard
+// msghld command
+//
+// Revision 1.252  2009/01/07 16:11:16  bernard
+// msghldsec command
+//
+// Revision 1.251  2008/12/21 03:27:47  ivan
+// Logic change for instruction count formating
+// previous logic was having problems with numbers larger than 10 billion
+//
+// Revision 1.250  2008/12/18 16:14:57  bernard
+// instcount with comma separator
+//
+// Revision 1.249  2008/12/16 07:06:33  bernard
+// Format PSW in the same way on both panels.
+//
+// Revision 1.248  2008/12/15 16:15:33  bernard
+// Readable instcount in millions
+//
+// Revision 1.247  2008/12/04 10:36:40  rbowler
+// Replace tabs by blanks in panel.c
+//
+// Revision 1.246  2008/12/03 11:40:34  rbowler
+// PANTITLE support for rxvt, dtterm, and screen
+//
+// Revision 1.245  2008/12/02 17:05:44  rbowler
+// Support for PANTITLE when console is an xterm window
+//
+// Revision 1.244  2008/09/02 06:13:15  fish
+// New fixed (?) sticky-messages (MSGHLD) logic.
+// This is my logic to hold us off in the mean time
+// until I can finish debugging Bernard's original logic
+// (having trouble debugging it! Sorry it's taking so long!)
+//
+// Revision 1.243  2008/08/30 05:50:30  fish
+// Fix 'quiet' command processing so that screens paint properly
+//
+// Revision 1.242  2008/08/29 19:06:42  fish
+// Panel display extended cursor handling (Windows only)
+//
+// Revision 1.241  2008/08/29 11:11:06  fish
+// Fix message-keep logic  (i.e. sticky/held messages)
+//
+// Revision 1.240  2008/08/29 10:22:52  fish
+// Fix some long outstanding New Panel data-input painting glitches
+//
+// Revision 1.239  2008/08/23 13:50:38  bernard
+// More error scroll_down_lines. Should be ok now!
+//
+// Revision 1.238  2008/08/23 13:27:23  bernard
+// Error in scroll_down_lines
+//
+// Revision 1.237  2008/08/23 12:44:54  bernard
+// Also release messages when scrolling up or down
+//
+// Revision 1.236  2008/08/23 12:35:03  bernard
+// OPTION_MSGHLD Sticky messages
+//
+// Revision 1.235  2008/08/23 11:58:07  fish
+// Fix line-wrap issue MSVC builds
+//
+// Revision 1.234  2008/08/09 01:53:29  fish
+// Another minor panel.c performance tweak: don't bother to repaint
+// the screen when new messages arrive if we're "scrolled back".
+//
+// Revision 1.233  2008/08/09 01:44:13  fish
+// Put 'msgnum' back for efficiency.
+//
+// Revision 1.232  2008/08/08 06:25:22  bernard
+// Removed all OPTION_MSGHLD stuff
+//
+// Revision 1.231  2008/08/07 20:47:18  bernard
+// Removed variable msgnum. I am getting crazy about this variable.
+// It is now less complex to move message arround in the list.
+// Still working on the OPTION_MSGHLD
+//
+// Revision 1.230  2008/08/06 17:03:16  bernard
+// message hold scroll_down implemented
+//
+// Revision 1.229  2008/08/06 15:26:34  bernard
+// message hold scroll_up implemented
+//
+// Revision 1.228  2008/08/06 14:03:29  bernard
+// Implemented keep messages when on autoscroll. You will have to delete
+// the comment before OPTION_MSGHLD on top to activate. Will work on
+// other situations.
+//
+// Revision 1.227  2008/08/04 19:34:46  fish
+// COLOR_DARK_GREY
+//
+// Revision 1.226  2008/08/03 07:20:06  bernard
+// get_color module
+//
+// Revision 1.225  2008/08/02 09:04:51  bernard
+// SCP message colors
+//
+// Revision 1.224  2008/07/28 15:15:48  bernard
+// !scp -> pscp
+//
+// Revision 1.223  2008/07/24 14:42:36  bernard
+// cmdtgt version 2
+//
+// Revision 1.222  2008/07/12 01:18:07  fish
+// .
+//
+// Revision 1.221  2008/07/12 01:17:40  fish
+// no message
+//
+// Revision 1.220  2008/07/12 01:03:44  fish
+// no message
+//
+// Revision 1.219  2008/07/10 18:38:10  fish
+// no message
+//
+// Revision 1.218  2008/07/10 18:34:55  fish
+// Simplifed redesign of panel scrolling logic to support:
+// 1) Ctrl+up, Ctrl+down = scroll one line up/down, and
+// 2) Ctrl+home, Ctrl+end = top/bottom.
+//
+// Revision 1.217  2008/07/09 17:35:22  fish
+// Revert previous changes until I can resolve
+// some remaining issues I forgot about. Sorry.
+//
+// Revision 1.214  2007/12/29 14:40:51  fish
+// fix copyregs function to fallback to using dummyregs whenever regs->hostregs happens to be NULL
+//
+// Revision 1.213  2007/12/10 23:12:02  gsmith
+// Tweaks to OPTION_MIPS_COUNTING processing
+//
+// Revision 1.212  2007/09/05 00:24:18  gsmith
+// Use integer arithmetic calculating cpupct
+//
 // Revision 1.211  2007/06/23 00:04:15  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -53,43 +192,38 @@
 
 #define  DISPLAY_INSTRUCTION_OPERANDS
 
-#define PANEL_MAX_ROWS 256
-#define PANEL_MAX_COLS 256
+#define PANEL_MAX_ROWS  (256)
+#define PANEL_MAX_COLS  (256)
 
-/*-------------------------------------------------------------------*/
-/* Definitions for keyboard input sequences                          */
-/*-------------------------------------------------------------------*/
-
-#define xKBD_UP_ARROW           "\x1BOA"
-#define xKBD_DOWN_ARROW         "\x1BOB"
-#define xKBD_RIGHT_ARROW        "\x1BOC"
-#define xKBD_LEFT_ARROW         "\x1BOD"
+int     redraw_msgs;                    /* 1=Redraw message area     */
+int     redraw_cmd;                     /* 1=Redraw command line     */
+int     redraw_status;                  /* 1=Redraw status line      */
 
 /*=NP================================================================*/
 /* Global data for new panel display                                 */
 /*   (Note: all NPD mods are identified by the string =NP=           */
 /*===================================================================*/
 
-static int    NPDup = 0;       /* 1 when new panel is up */
-static int    NPDinit = 0;     /* 1 when new panel is initialized */
-static int    NPhelpup = 0;    /* 1 when displaying help panel */
-static int    NPhelppaint = 1; /* 1 when the help panel needs painted */
-static int    NPhelpdown = 0;  /* 1 when the help panel is brought down */
-static int    NPregdisp = 0;   /* which regs are displayed 0=gpr, 1=cr, 2=ar, 3=fpr */
-
-static int    NPcmd = 0;       /* 1 when command mode for NP is in effect */
-static int    NPdataentry = 0; /* 1 when data entry for NP is in progress */
-static int    NPdevsel = 0;    /* 1 when device selection is in progress */
-static char   NPpending;       /* Command which is pending data entry */
-static char   NPentered[256];  /* Data which was entered */
-static char   NPprompt1[40];   /* Prompts for left and right bottom of screen */
-static char   NPoldprompt1[40];
-static char   NPprompt2[40];
-static char   NPoldprompt2[40];
-static char   NPsel2;          /* Command letter to trigger 2nd phase of dev sel */
-static char   NPdevice;        /* Which device selected */
-static int    NPasgn;          /* Index to device being reassigned */
-static int    NPlastdev;       /* Number of devices */
+static int    NPDup = 0;               /* 1 = new panel is up       */
+static int    NPDinit = 0;             /* 1 = new panel initialized */
+static int    NPhelpup = 0;            /* 1 = help panel showing    */
+static int    NPhelppaint = 1;         /* 1 = help pnl s/b painted  */
+static int    NPhelpdown = 0;          /* 1 = help pnl coming down  */
+static int    NPregdisp = 0;           /* which regs are displayed: */
+                                       /* 0=gpr, 1=cr, 2=ar, 3=fpr  */
+static int    NPcmd = 0;               /* 1 = NP in command mode    */
+static int    NPdataentry = 0;         /* 1 = NP in data-entry mode */
+static int    NPdevsel = 0;            /* 1 = device being selected */
+static char   NPpending;               /* pending data entry cmd    */
+static char   NPentered[256];          /* Data which was entered    */
+static char   NPprompt1[40];           /* Left bottom screen prompt */
+static char   NPoldprompt1[40];        /* Left bottom screen prompt */
+static char   NPprompt2[40];           /* Right bottom screen prompt*/
+static char   NPoldprompt2[40];        /* Right bottom screen prompt*/
+static char   NPsel2;                  /* dev sel part 2 cmd letter */
+static char   NPdevice;                /* Which device is selected  */
+static int    NPasgn;                  /* Index to dev being init'ed*/
+static int    NPlastdev;               /* Number of devices         */
 
 static char  *NPregnum[]   = {" 0"," 1"," 2"," 3"," 4"," 5"," 6"," 7",
                               " 8"," 9","10","11","12","13","14","15"
@@ -109,13 +243,13 @@ static int    NPcpunum_valid,
               NPmips_valid,
 #ifdef OPTION_MIPS_COUNTING
               NPsios_valid,
-#endif
+#endif // OPTION_MIPS_COUNTING
               NPdevices_valid,
               NPcpugraph_valid;
 
 /* Current CPU states */
 static U16    NPcpunum;
-static double NPcpupct;
+static int    NPcpupct;
 static int    NPpswmode;
 static int    NPpswzhost;
 static QWORD  NPpsw;
@@ -131,9 +265,9 @@ static U32    NPmips;
 static U32    NPsios;
 #else
 static U64    NPinstcount;
-#endif
+#endif // OPTION_MIPS_COUNTING
 static int    NPcpugraph;
-static double NPcpugraphpct[MAX_CPU_ENGINES];
+static int    NPcpugraphpct[MAX_CPU_ENGINES];
 
 /* Current device states */
 #define       NP_MAX_DEVICES (PANEL_MAX_ROWS - 3)
@@ -176,33 +310,52 @@ static char  *NPhelp[] = {
 "                    Press Escape to return to control panel operations",
 "" };
 
-////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////
 
-#define MSG_SIZE     PANEL_MAX_COLS      /* Size of one message       */
+#define MSG_SIZE     PANEL_MAX_COLS     /* Size of one message       */
 #define MAX_MSGS     2048                /* Number of slots in buffer */
-#define BUF_SIZE     (MAX_MSGS*MSG_SIZE) /* Total size of buffer      */
-#define NUM_LINES    (cons_rows - 2)     /* Number of scrolling lines */
-#define CMD_COLS     (cons_cols - (CMD_PREFIX_LEN + 1));
-#define CMD_SIZE     256                 /* cmdline buffer size       */
+//#define MAX_MSGS     300                /* (for testing scrolling)   */
+#define MSG_LINES    (cons_rows - 2)    /* #lines in message area    */
+#define SCROLL_LINES (MSG_LINES - numkept) /* #of scrollable lines   */
+#define CMD_SIZE     256                /* cmdline buffer size       */
 
-////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////
 
-static int   cons_rows = 0;             /* console height in lines    */
-static int   cons_cols = 0;             /* console width in chars     */
-static short cur_cons_row = 0;          /* current console row        */
-static short cur_cons_col = 0;          /* current colsole column     */
-static char *cons_term = NULL;          /* TERM env value             */
+static int   cons_rows = 0;             /* console height in lines   */
+static int   cons_cols = 0;             /* console width in chars    */
+static short cur_cons_row = 0;          /* current console row       */
+static short cur_cons_col = 0;          /* current console column    */
+static char *cons_term = NULL;          /* TERM env value            */
+static char  cmdins  = 1;               /* 1==insert mode, 0==overlay*/
 
-static char  cmdins  = 1;               /* 1==insert mode, 0==overlay */
-static char  cmdline[CMD_SIZE+1];       /* Command line buffer        */
-static int   cmdlen  = 0;               /* cmdline data len in bytes  */
-static int   cmdoff  = 0;               /* cmdline buffer cursor pos  */
-static int   cmdcols = 0;               /* visible cmdline width cols */
-static int   cmdcol  = 0;               /* cols cmdline scrolled right*/
-static FILE *confp   = NULL;            /* Console file pointer       */
+static char  cmdline[CMD_SIZE+1];       /* Command line buffer       */
+static int   cmdlen  = 0;               /* cmdline data len in bytes */
+static int   cmdoff  = 0;               /* cmdline buffer cursor pos */
 
-#define CMD_PREFIX_STR   "Command ==> "
-#define CMD_PREFIX_LEN   strlen(CMD_PREFIX_STR)
+static int   cursor_on_cmdline = 1;     /* bool: cursor on cmdline   */
+static char  saved_cmdline[CMD_SIZE+1]; /* Saved command             */
+static int   saved_cmdlen   = 0;        /* Saved cmdline data len    */
+static int   saved_cmdoff   = 0;        /* Saved cmdline buffer pos  */
+static short saved_cons_row = 0;        /* Saved console row         */
+static short saved_cons_col = 0;        /* Saved console column      */
+
+static int   cmdcols = 0;               /* visible cmdline width cols*/
+static int   cmdcol  = 0;               /* cols cmdline scrolled righ*/
+static FILE *confp   = NULL;            /* Console file pointer      */
+
+///////////////////////////////////////////////////////////////////////
+
+#define CMD_PREFIX_STR   "Command ==> " /* Keep same len as below!   */
+#ifdef  OPTION_CMDTGT
+#define CMD_PREFIX_STR1  "SCP ======> " /* Keep same len as above!   */
+#define CMD_PREFIX_STR2  "PrioSCP ==> " /* Keep same len as above!   */
+#endif // OPTION_CMDTGT
+
+#define CMD_PREFIX_LEN  (strlen(CMD_PREFIX_STR))
+#define CMDLINE_ROW     ((short)(cons_rows-1))
+#define CMDLINE_COL     ((short)(CMD_PREFIX_LEN+1))
+
+///////////////////////////////////////////////////////////////////////
 
 #define ADJ_SCREEN_SIZE() \
     do { \
@@ -211,7 +364,7 @@ static FILE *confp   = NULL;            /* Console file pointer       */
         if (rows != cons_rows || cols != cons_cols) { \
             cons_rows = rows; \
             cons_cols = cols; \
-            cmdcols = cons_cols - (CMD_PREFIX_LEN + 1); \
+            cmdcols = cons_cols - CMDLINE_COL; \
             redraw_msgs = redraw_cmd = redraw_status = 1; \
             NPDinit = 0; \
             clr_screen(); \
@@ -236,25 +389,432 @@ static FILE *confp   = NULL;            /* Console file pointer       */
 
 ///////////////////////////////////////////////////////////////////////
 
-static int   firstmsgn = 0;             /* Number of first message to
-                                           be displayed relative to
-                                           oldest message in buffer  */
-static BYTE *msgbuf;                    /* Circular message buffer   */
-static int   msgslot = 0;               /* Next available buffer slot*/
-static int   nummsgs = 0;               /* Number of msgs in buffer  */
+typedef struct _PANMSG      /* Panel message control block structure */
+{
+    struct _PANMSG*     next;           /* --> next entry in chain   */
+    struct _PANMSG*     prev;           /* --> prev entry in chain   */
+    int                 msgnum;         /* msgbuf 0-relative entry#  */
+    char                msg[MSG_SIZE];  /* text of panel message     */
+#if defined(OPTION_MSGCLR)
+    short               fg;             /* text color                */
+    short               bg;             /* screen background color   */
+#if defined(OPTION_MSGHLD)
+    int                 keep:1;         /* sticky flag               */
+    struct timeval      expiration;     /* when to unstick if sticky */
+#endif // defined(OPTION_MSGHLD)
+#endif // defined(OPTION_MSGCLR)
+}
+PANMSG;                     /* Panel message control block structure */
 
-static char *lmsbuf = NULL;
-static int   lmsndx = 0;
-static int   lmsnum = -1;
-static int   lmscnt = -1;
-static int   lmsmax = LOG_DEFSIZE/2;
+static PANMSG*  msgbuf;                 /* Circular message buffer   */
+static PANMSG*  topmsg;                 /* message at top of screen  */
+static PANMSG*  curmsg;                 /* newest message            */
+static int      wrapped = 0;            /* wrapped-around flag       */
+static int      numkept = 0;            /* count of kept messages    */
+static int      npquiet = 0;            /* screen updating flag      */
+
+///////////////////////////////////////////////////////////////////////
+
+static char *lmsbuf = NULL;             /* xxx                       */
+static int   lmsndx = 0;                /* xxx                       */
+static int   lmsnum = -1;               /* xxx                       */
+static int   lmscnt = -1;               /* xxx                       */
+static int   lmsmax = LOG_DEFSIZE/2;    /* xxx                       */
 static int   keybfd = -1;               /* Keyboard file descriptor  */
 
 static REGS  copyregs, copysieregs;     /* Copied regs               */
 
+///////////////////////////////////////////////////////////////////////
+
+#if defined(OPTION_MSGCLR)  /*  -- Message coloring build option --  */
+#if defined(OPTION_MSGHLD)  /*  -- Sticky messages build option --   */
+
+#define KEEP_TIMEOUT_SECS   120         /* #seconds kept msgs expire */
+static PANMSG*  keptmsgs;               /* start of keep chain       */
+static PANMSG*  lastkept;               /* last entry in keep chain  */
+
+/*-------------------------------------------------------------------*/
+/* Remove and Free a keep chain entry from the keep chain            */
+/*-------------------------------------------------------------------*/
+static void unkeep( PANMSG* pk )
+{
+    if (pk->prev)
+        pk->prev->next = pk->next;
+    if (pk->next)
+        pk->next->prev = pk->prev;
+    if (pk == keptmsgs)
+        keptmsgs = pk->next;
+    if (pk == lastkept)
+        lastkept = pk->prev;
+    free( pk );
+    numkept--;
+}
+
+/*-------------------------------------------------------------------*/
+/* Allocate and Add a new kept message to the keep chain             */
+/*-------------------------------------------------------------------*/
+static void keep( PANMSG* p )
+{
+    PANMSG* pk;
+    ASSERT( p->keep );
+    pk = malloc( sizeof(PANMSG) );
+    memcpy( pk, p, sizeof(PANMSG) );
+    if (!keptmsgs)
+        keptmsgs = pk;
+    pk->next = NULL;
+    pk->prev = lastkept;
+    if (lastkept)
+        lastkept->next = pk;
+    lastkept = pk;
+    numkept++;
+    /* Must ensure we always have at least 2 scrollable lines */
+    while (SCROLL_LINES < 2)
+    {
+        /* Permanently unkeep oldest kept message */
+        msgbuf[keptmsgs->msgnum].keep = 0;
+        unkeep( keptmsgs );
+    }
+}
+
+/*-------------------------------------------------------------------*/
+/* Remove a kept message from the kept chain                         */
+/*-------------------------------------------------------------------*/
+static void unkeep_by_keepnum( int keepnum, int perm )
+{
+    PANMSG* pk;
+    int i;
+
+    /* Validate call */
+    if (!numkept || keepnum < 0 || keepnum > numkept-1)
+    {
+        ASSERT(FALSE);    // bad 'keepnum' passed!
+        return;
+    }
+
+    /* Chase keep chain to find kept message to be unkept */
+    for (i=0, pk=keptmsgs; pk && i != keepnum; pk = pk->next, i++);
+
+    /* If kept message found, unkeep it */
+    if (pk)
+    {
+        if (perm)
+        {
+            msgbuf[pk->msgnum].keep = 0;
+
+#if defined(_DEBUG) || defined(DEBUG)
+            msgbuf[pk->msgnum].fg = COLOR_YELLOW;
+#endif // defined(_DEBUG) || defined(DEBUG)
+        }
+        unkeep(pk);
+    }
+}
+#endif // defined(OPTION_MSGHLD)
+#endif // defined(OPTION_MSGCLR)
+
+/*-------------------------------------------------------------------*/
+/* unkeep messages once expired                                      */
+/*-------------------------------------------------------------------*/
+void expire_kept_msgs(int unconditional)
+{
+#if defined(OPTION_MSGHLD)
+  struct timeval now;
+  PANMSG *pk = keptmsgs;
+  int i;
+
+  gettimeofday(&now, NULL);
+
+  while (pk)
+  {
+    for (i=0, pk=keptmsgs; pk; i++, pk = pk->next)
+    {
+      if (unconditional || now.tv_sec >= pk->expiration.tv_sec)
+      {
+        unkeep_by_keepnum(i,1); // remove message from chain
+        break;                  // start over again from the beginning
+      }
+    }
+  }
+#endif // defined(OPTION_MSGHLD)
+}
+
+#if defined(OPTION_MSGCLR)  /*  -- Message coloring build option --  */
+/*-------------------------------------------------------------------*/
+/* Get the color name from a string                                  */
+/*-------------------------------------------------------------------*/
+
+#define CHECKCOLOR(s, cs, c, cc) if(!strncasecmp(s, cs, sizeof(cs) - 1)) { *c = cc; return(sizeof(cs) - 1); }
+
+int get_color(char *string, short *color)
+{
+       CHECKCOLOR(string, "black",        color, COLOR_BLACK)
+  else CHECKCOLOR(string, "cyan",         color, COLOR_CYAN)
+  else CHECKCOLOR(string, "blue",         color, COLOR_BLUE)
+  else CHECKCOLOR(string, "darkgrey",     color, COLOR_DARK_GREY)
+  else CHECKCOLOR(string, "green",        color, COLOR_GREEN)
+  else CHECKCOLOR(string, "lightblue",    color, COLOR_LIGHT_BLUE)
+  else CHECKCOLOR(string, "lightcyan",    color, COLOR_LIGHT_CYAN)
+  else CHECKCOLOR(string, "lightgreen",   color, COLOR_LIGHT_GREEN)
+  else CHECKCOLOR(string, "lightgrey",    color, COLOR_LIGHT_GREY)
+  else CHECKCOLOR(string, "lightmagenta", color, COLOR_LIGHT_MAGENTA)
+  else CHECKCOLOR(string, "lightred",     color, COLOR_LIGHT_RED)
+  else CHECKCOLOR(string, "lightyellow",  color, COLOR_LIGHT_YELLOW)
+  else CHECKCOLOR(string, "magenta",      color, COLOR_MAGENTA)
+  else CHECKCOLOR(string, "red",          color, COLOR_RED)
+  else CHECKCOLOR(string, "white",        color, COLOR_WHITE)
+  else CHECKCOLOR(string, "yellow",       color, COLOR_YELLOW)
+  else return(0);
+}
+
+/*-------------------------------------------------------------------*/
+/* Read, process and remove the "<pnl...>" colorizing message prefix */
+/* Syntax:                                                           */
+/*   <pnl,token,...>                                                 */
+/*     Mandatory prefix "<pnl,"                                      */
+/*     followed by one or more tokens separated by ","               */
+/*     ending with a ">"                                             */
+/* Valid tokens:                                                     */
+/*  color(fg, bg)   specifies the message's color                    */
+/*  keep            keeps message on screen until removed            */
+/*-------------------------------------------------------------------*/
+void colormsg(PANMSG *p)
+{
+  int  i = 0;           // current message text index
+  int  len;             // length of color-name token
+
+  if(!strncasecmp(p->msg, "<pnl", 4))
+  {
+    // examine "<pnl...>" panel command(s)
+    i += 4;
+    while(p->msg[i] == ',')
+    {
+      i += 1; // skip ,
+      if(!strncasecmp(&p->msg[i], "color(", 6))
+      {
+        // inspect color command
+        i += 6; // skip color(
+        len = get_color(&p->msg[i], &p->fg);
+        if(!len)
+          break; // no valid color found
+        i += len; // skip colorname
+        if(p->msg[i] != ',')
+          break; // no ,
+        i++; // skip ,
+        len = get_color(&p->msg[i], &p->bg);
+        if(!len)
+          break; // no valid color found
+        i += len; // skip colorname
+        if(p->msg[i] != ')')
+          break; // no )
+        i++; // skip )
+      }
+      else if(!strncasecmp(&p->msg[i], "keep", 4))
+      {
+#if defined(OPTION_MSGHLD)
+        p->keep = 1;
+        gettimeofday(&p->expiration, NULL);
+        p->expiration.tv_sec += sysblk.keep_timeout_secs;
+#endif // defined(OPTION_MSGHLD)
+        i += 4; // skip keep
+      }
+      else
+        break; // rubbish
+    }
+    if(p->msg[i] == '>')
+    {
+      // Remove "<pnl...>" string from message
+      i += 1;
+      memmove(p->msg, &p->msg[i], MSG_SIZE - i);
+      memset(&p->msg[MSG_SIZE - i], SPACE, i);
+      return;
+    }
+  }
+
+  /* rubbish or no panel command */
+  p->fg = COLOR_DEFAULT_FG;
+  p->bg = COLOR_DEFAULT_BG;
+#if defined(OPTION_MSGHLD)
+  p->keep = 0;
+#endif // defined(OPTION_MSGHLD)
+}
+#endif // defined(OPTION_MSGCLR)
+
 /*-------------------------------------------------------------------*/
 /* Screen manipulation primitives                                    */
 /*-------------------------------------------------------------------*/
+
+static void beep()
+{
+    console_beep( confp );
+}
+
+static PANMSG* oldest_msg()
+{
+    return (wrapped) ? curmsg->next : msgbuf;
+}
+
+static PANMSG* newest_msg()
+{
+    return curmsg;
+}
+
+static int lines_scrolled()
+{
+    /* return # of lines 'up' from current line that we're scrolled. */
+    if (topmsg->msgnum <= curmsg->msgnum)
+        return curmsg->msgnum - topmsg->msgnum;
+    return MAX_MSGS - (topmsg->msgnum - curmsg->msgnum);
+}
+
+static int visible_lines()
+{
+    return (lines_scrolled() + 1);
+}
+
+static int is_currline_visible()
+{
+    return (visible_lines() <= SCROLL_LINES);
+}
+
+static int lines_remaining()
+{
+    return (SCROLL_LINES - visible_lines());
+}
+
+static void scroll_up_lines( int numlines, int doexpire )
+{
+    int i;
+
+    if (doexpire)
+        expire_kept_msgs(0);
+
+    for (i=0; i < numlines && topmsg != oldest_msg(); i++)
+    {
+        topmsg = topmsg->prev;
+
+        // If new topmsg is simply the last entry in the keep chain
+        // then we didn't really backup a line (all we did was move
+        // our topmsg ptr), so if that's the case then we need to
+        // continue backing up until we reach a non-kept message.
+        // Only then is the screen actually scrolled up one line.
+
+        while (1
+            && topmsg->keep
+            && lastkept
+            && lastkept->msgnum == topmsg->msgnum
+        )
+        {
+            unkeep( lastkept );
+            if (topmsg == oldest_msg())
+                break;
+            topmsg = topmsg->prev;
+        }
+    }
+}
+
+static void scroll_down_lines( int numlines, int doexpire )
+{
+    int i;
+
+    if (doexpire)
+        expire_kept_msgs(0);
+
+    for (i=0; i < numlines && topmsg != newest_msg(); i++)
+    {
+        // If the topmsg should be kept and is not already in our
+        // keep chain, then adding it to our keep chain before
+        // setting topmsg to the next entry does not really scroll
+        // the screen any (all it does is move the topmsg ptr),
+        // so if that's the case then we need to keep doing that
+        // until we eventually find the next non-kept message.
+        // Only then is the screen really scrolled down one line.
+
+        while (1
+            && topmsg->keep
+            && (!lastkept || topmsg->msgnum != lastkept->msgnum)
+        )
+        {
+            keep( topmsg );
+            topmsg = topmsg->next;
+            if (topmsg == newest_msg())
+                break;
+        }
+
+        if (topmsg != newest_msg())
+            topmsg = topmsg->next;
+    }
+}
+
+static void page_up( int doexpire )
+{
+    if (doexpire)
+        expire_kept_msgs(0);
+    scroll_up_lines( SCROLL_LINES - 1, 0 );
+}
+static void page_down( int doexpire )
+{
+    if (doexpire)
+        expire_kept_msgs(0);
+    scroll_down_lines( SCROLL_LINES - 1, 0 );
+}
+
+static void scroll_to_top_line( int doexpire )
+{
+    if (doexpire)
+        expire_kept_msgs(0);
+    topmsg = oldest_msg();
+    while (keptmsgs)
+        unkeep( keptmsgs );
+}
+
+static void scroll_to_bottom_line( int doexpire )
+{
+    if (doexpire)
+        expire_kept_msgs(0);
+    while (topmsg != newest_msg())
+        scroll_down_lines( 1, 0 );
+}
+
+static void scroll_to_bottom_screen( int doexpire )
+{
+    if (doexpire)
+        expire_kept_msgs(0);
+    scroll_to_bottom_line( 0 );
+    page_up( 0 );
+}
+
+static void do_panel_command( void* cmd )
+{
+    if (!is_currline_visible())
+        scroll_to_bottom_screen( 1 );
+    strlcpy( cmdline, cmd, sizeof(cmdline) );
+    panel_command( cmdline );
+    cmdline[0] = '\0';
+    cmdlen = 0;
+    cmdoff = 0;
+    ADJ_CMDCOL();
+}
+
+static void do_prev_history()
+{
+    if (history_prev() != -1)
+    {
+        strcpy(cmdline, historyCmdLine);
+        cmdlen = strlen(cmdline);
+        cmdoff = cmdlen < cmdcols ? cmdlen : 0;
+        ADJ_CMDCOL();
+    }
+}
+
+static void do_next_history()
+{
+    if (history_next() != -1)
+    {
+        strcpy(cmdline, historyCmdLine);
+        cmdlen = strlen(cmdline);
+        cmdoff = cmdlen < cmdcols ? cmdlen : 0;
+        ADJ_CMDCOL();
+    }
+}
 
 static void clr_screen ()
 {
@@ -268,13 +828,35 @@ static void get_dim (int *y, int *x)
         *y = PANEL_MAX_ROWS;
     if (*x > PANEL_MAX_COLS)
         *x = PANEL_MAX_COLS;
-#if defined(WIN32)
-    /* If running from a windows or cygwin command prompt we do
+#if defined(WIN32) && !defined( _MSVC_ )
+   /* If running from a cygwin command prompt we do
      * better with one less row.
      */
     if (!cons_term || strcmp(cons_term, "xterm"))
         (*y)--;
-#endif
+#endif // defined(WIN32) && !defined( _MSVC_ )
+}
+
+int get_keepnum_by_row( int row )
+{
+    // PROGRAMMING NOTE: right now all of our kept messages are
+    // always placed at the very top of the screen (starting on
+    // line 1), but should we at some point in the future decide
+    // to use the very top line of the screen for something else
+    // (such as a title or status line for example), then all we
+    // need to do is modify the below variable and the code then
+    // adjusts itself automatically. (I try to avoid hard-coded
+    // constants whenever possible). -- Fish
+
+   static int keep_beg_row = 1;  // screen 1-relative line# of first kept msg
+
+    if (0
+        || row <  keep_beg_row
+        || row > (keep_beg_row + numkept - 1)
+    )
+        return -1;
+
+    return (row - keep_beg_row);
 }
 
 static void set_color (short fg, short bg)
@@ -291,6 +873,54 @@ static void set_pos (short y, short x)
     set_screen_pos (confp, y, x);
 }
 
+static int is_cursor_on_cmdline()
+{
+#if defined(OPTION_EXTCURS)
+    get_cursor_pos( keybfd, confp, &cur_cons_row, &cur_cons_col );
+    cursor_on_cmdline =
+    (1
+        && cur_cons_row == CMDLINE_ROW
+        && cur_cons_col >= CMDLINE_COL
+        && cur_cons_col <= CMDLINE_COL + cmdcols
+    );
+#else // !defined(OPTION_EXTCURS)
+    cursor_on_cmdline = 1;
+#endif // defined(OPTION_EXTCURS)
+    return cursor_on_cmdline;
+}
+
+static void cursor_cmdline_home()
+{
+    cmdoff = 0;
+    ADJ_CMDCOL();
+    set_pos( CMDLINE_ROW, CMDLINE_COL );
+}
+
+static void cursor_cmdline_end()
+{
+    cmdoff = cmdlen;
+    ADJ_CMDCOL();
+    set_pos( CMDLINE_ROW, CMDLINE_COL + cmdoff - cmdcol );
+}
+
+static void save_command_line()
+{
+    memcpy( saved_cmdline, cmdline, sizeof(saved_cmdline) );
+    saved_cmdlen = cmdlen;
+    saved_cmdoff = cmdoff;
+    saved_cons_row = cur_cons_row;
+    saved_cons_col = cur_cons_col;
+}
+
+static void restore_command_line()
+{
+    memcpy( cmdline, saved_cmdline, sizeof(cmdline) );
+    cmdlen = saved_cmdlen;
+    cmdoff = saved_cmdoff;
+    cur_cons_row = saved_cons_row;
+    cur_cons_col = saved_cons_col;
+}
+
 static void draw_text (char *text)
 {
     int   len;
@@ -300,7 +930,7 @@ static void draw_text (char *text)
      || cur_cons_col < 1 || cur_cons_col > cons_cols)
         return;
     len = strlen(text);
-    if (cur_cons_col + len <= cons_cols)
+    if ((cur_cons_col + len - 1) <= cons_cols)
         fprintf (confp, "%s", text);
     else
     {
@@ -371,12 +1001,32 @@ static void draw_button (short bg, short fg, short hfg, char *left, char *mid, c
     draw_text (right);
 }
 
+static void set_console_title ()
+{
+    if (!sysblk.pantitle) return;
+
+  #if defined( _MSVC_ )
+    w32_set_console_title(sysblk.pantitle);
+  #else /*!defined(_MSVC_) */
+    /* For Unix systems we set the window title by sending a special
+       escape sequence (depends on terminal type) to the console.
+       See http://www.faqs.org/docs/Linux-mini/Xterm-Title.html */
+    if (!cons_term) return;
+    if (strcmp(cons_term,"xterm")==0
+     || strcmp(cons_term,"rxvt")==0
+     || strcmp(cons_term,"dtterm")==0
+     || strcmp(cons_term,"screen")==0)
+    {
+        fprintf(confp,"%c]0;%s%c",'\033',sysblk.pantitle,'\007');
+    }
+  #endif /*!defined(_MSVC_) */
+}
+
 /*=NP================================================================*/
 /*  Initialize the NP data                                           */
 /*===================================================================*/
 
-static
-void NP_init()
+static void NP_init()
 {
     NPdataentry = 0;
     strcpy(NPprompt1, "");
@@ -584,8 +1234,7 @@ static void NP_screen_redraw (REGS *regs)
 /*  This refreshes the screen with new data every cycle              */
 /*===================================================================*/
 
-static
-void NP_update(REGS *regs)
+static void NP_update(REGS *regs)
 {
     int     i, n;
     int     mode, zhost;
@@ -645,12 +1294,12 @@ void NP_update(REGS *regs)
     {
         set_color (COLOR_WHITE, COLOR_BLUE);
         set_pos (1, 22);
-        sprintf(buf, "%3d",(int)(100.0 * regs->cpupct));
+        sprintf(buf, "%3d", regs->cpupct);
         draw_text (buf);
         NPcpupct_valid = 1;
         NPcpupct = regs->cpupct;
     }
-#else
+#else // !defined(OPTION_MIPS_COUNTING)
     if (!NPcpupct_valid)
     {
         set_color (COLOR_WHITE, COLOR_BLUE);
@@ -669,9 +1318,9 @@ void NP_update(REGS *regs)
     zhost =
 #if defined(_FEATURE_SIE)
             !mode && SIE_MODE(regs) && regs->hostregs->arch_mode == ARCH_900;
-#else
+#else // !defined(_FEATURE_SIE)
             0;
-#endif
+#endif // defined(_FEATURE_SIE)
 
     /* Redraw the psw template if the mode changed */
     if (NPpswmode != mode || NPpswzhost != zhost)
@@ -749,7 +1398,7 @@ void NP_update(REGS *regs)
             (regs->arch_mode != ARCH_900
           && SIE_MODE(regs) && regs->hostregs->arch_mode == ARCH_900
           && (NPregdisp == 0 || NPregdisp == 1));
-#else
+#else // !defined(_FEATURE_SIE)
                  0;
 #endif /*defined(_FEATURE_SIE)*/
     if (NPregmode != mode || NPregzhost != zhost)
@@ -963,12 +1612,8 @@ void NP_update(REGS *regs)
         NPsios = sysblk.siosrate;
         NPsios_valid = 1;
     }
-#else
-    instcount = 
-#if defined(_FEATURE_SIE)
-        SIE_MODE(regs) ? (unsigned)regs->hostregs->instcount :
-#endif /*defined(_FEATURE_SIE)*/
-        (unsigned)regs->instcount;
+#else // !OPTION_MIPS_COUNTING
+    instcount = INSTCOUNT(regs);
     if (!NPmips_valid || NPinstcount != instcount)
         set_color (COLOR_LIGHT_YELLOW, COLOR_BLACK);
         set_pos (19, 1);
@@ -1008,8 +1653,8 @@ void NP_update(REGS *regs)
             }
             else if (!NPcpugraph_valid || NPcpugraphpct[i] != sysblk.regs[i]->cpupct)
             {
-                n = 34 * sysblk.regs[i]->cpupct;
-                if (n == 0 && sysblk.regs[i]->cpupct > 0.005)
+                n = (34 * sysblk.regs[i]->cpupct) / 100;
+                if (n == 0 && sysblk.regs[i]->cpupct > 0)
                     n = 1;
                 else if (n > 34)
                     n = 34;
@@ -1028,7 +1673,7 @@ void NP_update(REGS *regs)
     for (i = 0, dev = sysblk.firstdev; dev != NULL; i++, dev = dev->nextdev)
     {
         if (i >= cons_rows - 3) break;
-        if (!(dev->pmcw.flag5 & PMCW5_V)) continue;
+        if (!dev->allocated) continue;
 
         online = (dev->console && dev->connected) || strlen(dev->filename) > 0;
         busy   = dev->busy != 0 || IOPENDING(dev) != 0;
@@ -1073,9 +1718,17 @@ void NP_update(REGS *regs)
             set_pos (i+3, 53);
             sprintf (buf, "%-4.4s", devclass);
             draw_text (buf);
-            set_pos (i+3, 58);
-            draw_text (devnam);
-            fill_text (' ', PANEL_MAX_COLS);
+            /* Draw device name only if they're NOT assigning a new one */
+            if (0
+                || NPdataentry != 1
+                || NPpending != 'n'
+                || NPasgn != i
+            )
+            {
+                set_pos (i+3, 58);
+                draw_text (devnam);
+                fill_text (' ', PANEL_MAX_COLS);
+            }
         }
     }
 
@@ -1128,7 +1781,7 @@ void NP_update(REGS *regs)
     }
 
     /* Data entry field */
-    if (NPdataentry)
+    if (NPdataentry && redraw_cmd)
     {
         set_pos (NPcurrow, NPcurcol);
         if (NPcolorSwitch)
@@ -1136,6 +1789,7 @@ void NP_update(REGS *regs)
         fill_text (' ', NPcurcol + NPdatalen - 1);
         set_pos (NPcurrow, NPcurcol);
         PUTC_CMDLINE();
+        redraw_cmd = 0;
     }
     else
         /* Position the cursor to the bottom right */
@@ -1212,6 +1866,13 @@ REGS *copy_regs(int cpu)
     }
 
     memcpy (&copyregs, regs, sysblk.regs_copy_len);
+
+    if (copyregs.hostregs == NULL)
+    {
+        release_lock(&sysblk.cpulock[cpu]);
+        return &sysblk.dummyregs;
+    }
+
 #if defined(_FEATURE_SIE)
     if (regs->sie_active)
     {
@@ -1221,7 +1882,7 @@ REGS *copy_regs(int cpu)
         regs = &copysieregs;
     }
     else
-#endif
+#endif // defined(_FEATURE_SIE)
         regs = &copyregs;
 
     SET_PSW_IA(regs);
@@ -1229,6 +1890,43 @@ REGS *copy_regs(int cpu)
     release_lock(&sysblk.cpulock[cpu]);
     return regs;
 }
+
+static char *format_int(uint64_t ic)
+{
+    static    char obfr[32];  /* Enough for displaying 2^64-1 */
+    char  grps[7][4]; /* 7 groups of 3 digits */
+    int   maxg=0;
+    int   i;
+
+    strcpy(grps[0],"0");
+    while(ic>0)
+    {
+        int grp;
+        grp=ic%1000;
+        ic/=1000;
+        if(ic==0)
+        {
+            sprintf(grps[maxg],"%u",grp);
+        }
+        else
+        {
+            sprintf(grps[maxg],"%3.3u",grp);
+        }
+        maxg++;
+    }
+    if(maxg) maxg--;
+    obfr[0]=0;
+    for(i=maxg;i>=0;i--)
+    {
+        strcat(obfr,grps[i]);
+        if(i)
+        {
+            strcat(obfr,",");
+        }
+    }
+    return obfr;
+}
+
 
 /*-------------------------------------------------------------------*/
 /* Panel display thread                                              */
@@ -1243,15 +1941,15 @@ REGS *copy_regs(int cpu)
 void panel_display_r (void)
 #else
 void panel_display (void)
-#endif
+#endif // defined(OPTION_DYNAMIC_LOAD)
 {
 #ifndef _MSVC_
   int     rc;                           /* Return code               */
   int     maxfd;                        /* Highest file descriptor   */
   fd_set  readset;                      /* Select file descriptors   */
   struct  timeval tv;                   /* Select timeout structure  */
-#endif
-int     i, n;                           /* Array subscripts          */
+#endif // _MSVC_
+int     i;                              /* Array subscripts          */
 int     len;                            /* Length                    */
 REGS   *regs;                           /* -> CPU register context   */
 QWORD   curpsw;                         /* Current PSW               */
@@ -1259,13 +1957,10 @@ QWORD   prvpsw;                         /* Previous PSW              */
 BYTE    prvstate = 0xFF;                /* Previous stopped state    */
 U64     prvicount = 0;                  /* Previous instruction count*/
 U64     prvtcount = 0;                  /* Previous total count      */
-double  prvcpupct = 0.0;                /* Previous cpu percentage   */
+int     prvcpupct = 0;                  /* Previous cpu percentage   */
 #if defined(OPTION_SHARED_DEVICES)
 U32     prvscount = 0;                  /* Previous shrdcount        */
-#endif
-int     redraw_msgs;                    /* 1=Redraw message area     */
-int     redraw_cmd;                     /* 1=Redraw command line     */
-int     redraw_status;                  /* 1=Redraw status line      */
+#endif // defined(OPTION_SHARED_DEVICES)
 char    readbuf[MSG_SIZE];              /* Message read buffer       */
 int     readoff = 0;                    /* Number of bytes in readbuf*/
 BYTE    c;                              /* Character work area       */
@@ -1298,7 +1993,7 @@ char    buf[1024];                      /* Buffer workarea           */
 
     /* Clear the command-line buffer */
     memset (cmdline, 0, sizeof(cmdline));
-    cmdcols = cons_cols - (CMD_PREFIX_LEN + 1);
+    cmdcols = cons_cols - CMDLINE_COL;
 
     /* Obtain storage for the keyboard buffer */
     if (!(kbbuf = malloc (kbbufsize)))
@@ -1309,7 +2004,7 @@ char    buf[1024];                      /* Buffer workarea           */
     }
 
     /* Obtain storage for the circular message buffer */
-    msgbuf = malloc (BUF_SIZE);
+    msgbuf = malloc (MAX_MSGS * sizeof(PANMSG));
     if (msgbuf == NULL)
     {
         fprintf (stderr,
@@ -1318,6 +2013,35 @@ char    buf[1024];                      /* Buffer workarea           */
         return;
     }
 
+    /* Initialize circular message buffer */
+    for (curmsg = msgbuf, i=0; i < MAX_MSGS; curmsg++, i++)
+    {
+        curmsg->next = curmsg + 1;
+        curmsg->prev = curmsg - 1;
+        curmsg->msgnum = i;
+        memset(curmsg->msg,SPACE,MSG_SIZE);
+#if defined(OPTION_MSGCLR)
+        curmsg->bg = COLOR_DEFAULT_FG;
+        curmsg->fg = COLOR_DEFAULT_BG;
+#if defined(OPTION_MSGHLD)
+        curmsg->keep = 0;
+        memset( &curmsg->expiration, 0, sizeof(curmsg->expiration));
+#endif // defined(OPTION_MSGHLD)
+#endif // defined(OPTION_MSGCLR)
+    }
+
+    /* Complete the circle */
+    msgbuf->prev = msgbuf + MAX_MSGS - 1;
+    msgbuf->prev->next = msgbuf;
+
+    /* Indicate "first-time" state */
+    curmsg = topmsg = NULL;
+    wrapped = 0;
+    numkept = 0;
+#if defined(OPTION_MSGHLD)
+    keptmsgs = lastkept = NULL;
+#endif // defined(OPTION_MSGHLD)
+
     /* Set screen output stream to NON-buffered */
     setvbuf (confp, NULL, _IONBF, 0);
 
@@ -1325,10 +2049,7 @@ char    buf[1024];                      /* Buffer workarea           */
     set_or_reset_console_mode( keybfd, 1 );
 
     /* Set console title */
-#if defined( _MSVC_ )
-    if (sysblk.pantitle)
-        w32_set_console_title(sysblk.pantitle);
-#endif /* defined( _MSVC_ ) */
+    set_console_title();
 
     /* Clear the screen */
     set_color (COLOR_DEFAULT_FG, COLOR_DEFAULT_BG);
@@ -1422,12 +2143,12 @@ char    buf[1024];                      /* Buffer workarea           */
                     cmdoff = 0;
                     ADJ_CMDCOL();
                     switch(kbbuf[0]) {
-                        case 0x1b:                  /* ESC */
+                        case 0x1B:                  /* ESC */
                             NPDup = 0;
-                            cmdline[0] = '\0';
-                            cmdoff = 0;
-                            cmdlen = 0;
+                            restore_command_line();
                             ADJ_CMDCOL();
+                            redraw_msgs = redraw_cmd = redraw_status = 1;
+                            npquiet = 0; // (forced for one paint cycle)
                             break;
                         case '?':
                             NPhelpup = 1;
@@ -1435,11 +2156,11 @@ char    buf[1024];                      /* Buffer workarea           */
                             break;
                         case 'S':                   /* START */
                         case 's':
-                            panel_command("startall");
+                            do_panel_command("startall");
                             break;
                         case 'P':                   /* STOP */
                         case 'p':
-                            panel_command("stopall");
+                            do_panel_command("stopall");
                             break;
                         case 'O':                   /* Store */
                         case 'o':
@@ -1483,6 +2204,7 @@ char    buf[1024];                      /* Buffer workarea           */
                         case 'r':                   /* Enter address */
                         case 'R':
                             NPdataentry = 1;
+                            redraw_cmd = 1;
                             NPpending = 'r';
                             NPcurrow = 16;
                             NPcurcol = 12;
@@ -1497,6 +2219,7 @@ char    buf[1024];                      /* Buffer workarea           */
                         case 'd':                   /* Enter data */
                         case 'D':
                             NPdataentry = 1;
+                            redraw_cmd = 1;
                             NPpending = 'd';
                             NPcurrow = 16;
                             NPcurcol = 30;
@@ -1523,7 +2246,7 @@ char    buf[1024];                      /* Buffer workarea           */
                                 break;
                             }
                             sprintf (cmdline, "ipl %4.4x", NPdevnum[i]);
-                            panel_command(cmdline);
+                            do_panel_command(cmdline);
                             strcpy(NPprompt2, "");
                             redraw_status = 1;
                             break;
@@ -1542,7 +2265,7 @@ char    buf[1024];                      /* Buffer workarea           */
                                 break;
                             }
                             sprintf (cmdline, "i %4.4x", NPdevnum[i]);
-                            panel_command(cmdline);
+                            do_panel_command(cmdline);
                             strcpy(NPprompt2, "");
                             redraw_status = 1;
                             break;
@@ -1561,6 +2284,7 @@ char    buf[1024];                      /* Buffer workarea           */
                                 break;
                             }
                             NPdataentry = 1;
+                            redraw_cmd = 1;
                             NPpending = 'n';
                             NPasgn = i;
                             NPcurrow = 3 + i;
@@ -1582,10 +2306,8 @@ char    buf[1024];                      /* Buffer workarea           */
                             break;
                         case 4:                     /* POWER - 2nd part */
                             if (NPdevice == 'y' || NPdevice == 'Y')
-                            {
-                                panel_command("quit");
-                            }
-                            strcpy(NPprompt1, "Powering down");
+                                do_panel_command("quit");
+                            strcpy(NPprompt1, "");
                             redraw_status = 1;
                             break;
                         case 'T':                   /* Restart */
@@ -1597,9 +2319,7 @@ char    buf[1024];                      /* Buffer workarea           */
                             break;
                         case 5:                    /* Restart - part 2 */
                             if (NPdevice == 'y' || NPdevice == 'Y')
-                            {
-                                panel_command("restart");
-                            }
+                                do_panel_command("restart");
                             strcpy(NPprompt1, "");
                             redraw_status = 1;
                             break;
@@ -1612,9 +2332,7 @@ char    buf[1024];                      /* Buffer workarea           */
                             break;
                         case 6:                    /* External - part 2 */
                             if (NPdevice == 'y' || NPdevice == 'Y')
-                            {
-                                panel_command("ext");
-                            }
+                                do_panel_command("ext");
                             strcpy(NPprompt1, "");
                             redraw_status = 1;
                             break;
@@ -1623,7 +2341,17 @@ char    buf[1024];                      /* Buffer workarea           */
                     }
                     NPcmd = 1;
                 } else {  /* We are in data entry mode */
-                    NPcmd = 0;
+                    if (kbbuf[0] == 0x1B) {
+                        /* Switch back to command mode */
+                        NPdataentry = 0;
+                        NPaddr_valid = 0;
+                        NPdata_valid = 0;
+                        strcpy(NPprompt1, "");
+                        strcpy(NPprompt2, "");
+                        NPcmd = 1;
+                    }
+                    else
+                        NPcmd = 0;
                 }
                 if (NPcmd == 1)
                     kblen = 0;                  /* don't process as command */
@@ -1633,114 +2361,146 @@ char    buf[1024];                      /* Buffer workarea           */
             /* Process characters in the keyboard buffer */
             for (i = 0; i < kblen; )
             {
-                /* Test for home command */
+                /* Test for HOME */
                 if (strcmp(kbbuf+i, KBD_HOME) == 0) {
-                    if (cmdlen) {
-                        cmdoff = 0;
-                        ADJ_CMDCOL();
+                    if (NPDup == 1 || !is_cursor_on_cmdline() || cmdlen) {
+                        cursor_cmdline_home();
                         redraw_cmd = 1;
                     } else {
-                        if (firstmsgn == 0) break;
-                        firstmsgn = 0;
+                        scroll_to_top_line( 1 );
                         redraw_msgs = 1;
                     }
                     break;
                 }
 
-                /* Test for end command */
+                /* Test for END */
                 if (strcmp(kbbuf+i, KBD_END) == 0) {
-                    if (cmdlen) {
-                        cmdoff = cmdlen;
-                        ADJ_CMDCOL();
+                    if (NPDup == 1 || !is_cursor_on_cmdline() || cmdlen) {
+                        cursor_cmdline_end();
                         redraw_cmd = 1;
                     } else {
-                        if (firstmsgn + NUM_LINES >= nummsgs) break;
-                        firstmsgn = nummsgs - NUM_LINES;
+                        scroll_to_bottom_screen( 1 );
                         redraw_msgs = 1;
                     }
                     break;
                 }
 
-                /* Test for line up command */
-                if (strcmp(kbbuf+i,  KBD_UP_ARROW) == 0 ||
-                    strcmp(kbbuf+i, xKBD_UP_ARROW) == 0) {
-                    if (history_prev() != -1) {
-                        strcpy(cmdline, historyCmdLine);
-                        cmdlen = strlen(cmdline);
-                        cmdoff = cmdlen < cmdcols ? cmdlen : 0;
-                        ADJ_CMDCOL();
-                        NPDup = 0;
-                        NPDinit = 1;
-                        redraw_cmd = 1;
-                    }
-                    break;
-                }
-
-                /* Test for line down command */
-                if (strcmp(kbbuf+i,  KBD_DOWN_ARROW) == 0 ||
-                    strcmp(kbbuf+i, xKBD_DOWN_ARROW) == 0) {
-                    if (history_next() != -1) {
-                        strcpy(cmdline, historyCmdLine);
-                        cmdlen = strlen(cmdline);
-                        cmdoff = cmdlen < cmdcols ? cmdlen : 0;
-                        ADJ_CMDCOL();
-                        NPDup = 0;
-                        NPDinit = 1;
-                        redraw_cmd = 1;
-                    }
-                    break;
-                }
-
-                /* Test for page up command */
-                if (strcmp(kbbuf+i, KBD_PAGE_UP) == 0) {
-                    if (firstmsgn == 0) break;
-                    firstmsgn -= NUM_LINES;
-                    if (firstmsgn < 0) firstmsgn = 0;
+                /* Test for CTRL+HOME */
+                if (NPDup == 0 && strcmp(kbbuf+i, KBD_CTRL_HOME) == 0) {
+                    scroll_to_top_line( 1 );
                     redraw_msgs = 1;
                     break;
                 }
 
-                /* Test for page down command */
-                if (strcmp(kbbuf+i, KBD_PAGE_DOWN) == 0) {
-                    if (firstmsgn + NUM_LINES >= nummsgs) break;
-                    firstmsgn += NUM_LINES;
-                    if (firstmsgn > nummsgs - NUM_LINES)
-                        firstmsgn = nummsgs - NUM_LINES;
+                /* Test for CTRL+END */
+                if (NPDup == 0 && strcmp(kbbuf+i, KBD_CTRL_END) == 0) {
+                    scroll_to_bottom_line( 1 );
                     redraw_msgs = 1;
                     break;
                 }
 
-                /* Process backspace character  */
+                /* Process UPARROW */
+                if (NPDup == 0 && strcmp(kbbuf+i, KBD_UP_ARROW) == 0)
+                {
+                    do_prev_history();
+                    redraw_cmd = 1;
+                    break;
+                }
+
+                /* Process DOWNARROW */
+                if (NPDup == 0 && strcmp(kbbuf+i, KBD_DOWN_ARROW) == 0)
+                {
+                    do_next_history();
+                    redraw_cmd = 1;
+                    break;
+                }
+
+#if defined(OPTION_EXTCURS)
+                /* Process ALT+UPARROW */
+                if (NPDup == 0 && strcmp(kbbuf+i, KBD_ALT_UP_ARROW) == 0) {
+                    get_cursor_pos( keybfd, confp, &cur_cons_row, &cur_cons_col );
+                    if (cur_cons_row <= 1)
+                        cur_cons_row = cons_rows + 1;
+                    set_pos( --cur_cons_row, cur_cons_col );
+                    break;
+                }
+
+                /* Process ALT+DOWNARROW */
+                if (NPDup == 0 && strcmp(kbbuf+i, KBD_ALT_DOWN_ARROW) == 0) {
+                    get_cursor_pos( keybfd, confp, &cur_cons_row, &cur_cons_col );
+                    if (cur_cons_row >= cons_rows)
+                        cur_cons_row = 1 - 1;
+                    set_pos( ++cur_cons_row, cur_cons_col );
+                    break;
+                }
+#endif // defined(OPTION_EXTCURS)
+
+                /* Test for PAGEUP */
+                if (NPDup == 0 && strcmp(kbbuf+i, KBD_PAGE_UP) == 0) {
+                    page_up( 1 );
+                    redraw_msgs = 1;
+                    break;
+                }
+
+                /* Test for PAGEDOWN */
+                if (NPDup == 0 && strcmp(kbbuf+i, KBD_PAGE_DOWN) == 0) {
+                    page_down( 1 );
+                    redraw_msgs = 1;
+                    break;
+                }
+
+                /* Test for CTRL+UPARROW */
+                if (NPDup == 0 && strcmp(kbbuf+i, KBD_CTRL_UP_ARROW) == 0) {
+                    scroll_up_lines(1,1);
+                    redraw_msgs = 1;
+                    break;
+                }
+
+                /* Test for CTRL+DOWNARROW */
+                if (NPDup == 0 && strcmp(kbbuf+i, KBD_CTRL_DOWN_ARROW) == 0) {
+                    scroll_down_lines(1,1);
+                    redraw_msgs = 1;
+                    break;
+                }
+
+                /* Process BACKSPACE */
                 if (kbbuf[i] == '\b' || kbbuf[i] == '\x7F') {
-                    if (cmdoff > 0) {
-                        int j;
-                        for (j = cmdoff-1; j<cmdlen; j++)
-                            cmdline[j] = cmdline[j+1];
-                        cmdoff--;
-                        cmdlen--;
-                        ADJ_CMDCOL();
+                    if (NPDup == 0 && !is_cursor_on_cmdline())
+                        beep();
+                    else {
+                        if (cmdoff > 0) {
+                            int j;
+                            for (j = cmdoff-1; j<cmdlen; j++)
+                                cmdline[j] = cmdline[j+1];
+                            cmdoff--;
+                            cmdlen--;
+                            ADJ_CMDCOL();
+                        }
+                        i++;
+                        redraw_cmd = 1;
                     }
-                    i++;
-                    redraw_cmd = 1;
                     break;
                 }
 
-                /* Process DEL character */
+                /* Process DELETE */
                 if (strcmp(kbbuf+i, KBD_DELETE) == 0) {
-                    if (cmdoff < cmdlen) {
-                        int j;
-                        for (j = cmdoff; j<cmdlen; j++)
-                            cmdline[j] = cmdline[j+1];
-                        cmdlen--;
+                    if (NPDup == 0 && !is_cursor_on_cmdline())
+                        beep();
+                    else {
+                        if (cmdoff < cmdlen) {
+                            int j;
+                            for (j = cmdoff; j<cmdlen; j++)
+                                cmdline[j] = cmdline[j+1];
+                            cmdlen--;
+                        }
+                        i++;
+                        redraw_cmd = 1;
                     }
-                    i++;
-                    redraw_cmd = 1;
                     break;
                 }
 
-                /* Process LEFT_ARROW character */
-                if (strcmp(kbbuf+i,  KBD_LEFT_ARROW) == 0 ||
-                    strcmp(kbbuf+i, xKBD_LEFT_ARROW) == 0) {
+                /* Process LEFTARROW */
+                if (strcmp(kbbuf+i, KBD_LEFT_ARROW) == 0) {
                     if (cmdoff > 0) cmdoff--;
                     ADJ_CMDCOL();
                     i++;
@@ -1748,9 +2508,8 @@ char    buf[1024];                      /* Buffer workarea           */
                     break;
                 }
 
-                /* Process RIGHT_ARROW character */
-                if (strcmp(kbbuf+i,  KBD_RIGHT_ARROW) == 0 ||
-                    strcmp(kbbuf+i, xKBD_RIGHT_ARROW) == 0) {
+                /* Process RIGHTARROW */
+                if (strcmp(kbbuf+i, KBD_RIGHT_ARROW) == 0) {
                     if (cmdoff < cmdlen) cmdoff++;
                     ADJ_CMDCOL();
                     i++;
@@ -1758,7 +2517,37 @@ char    buf[1024];                      /* Buffer workarea           */
                     break;
                 }
 
-                /* Process INSERT character */
+#if defined(OPTION_EXTCURS)
+                /* Process ALT+LEFTARROW */
+                if (NPDup == 0 && strcmp(kbbuf+i, KBD_ALT_LEFT_ARROW) == 0) {
+                    get_cursor_pos( keybfd, confp, &cur_cons_row, &cur_cons_col );
+                    if (cur_cons_col <= 1)
+                    {
+                        cur_cons_row--;
+                        cur_cons_col = cons_cols + 1;
+                    }
+                    if (cur_cons_row < 1)
+                        cur_cons_row = cons_rows;
+                    set_pos( cur_cons_row, --cur_cons_col );
+                    break;
+                }
+
+                /* Process ALT+RIGHTARROW */
+                if (NPDup == 0 && strcmp(kbbuf+i, KBD_ALT_RIGHT_ARROW) == 0) {
+                    get_cursor_pos( keybfd, confp, &cur_cons_row, &cur_cons_col );
+                    if (cur_cons_col >= cons_cols)
+                    {
+                        cur_cons_row++;
+                        cur_cons_col = 0;
+                    }
+                    if (cur_cons_row > cons_rows)
+                        cur_cons_row = 1;
+                    set_pos( cur_cons_row, ++cur_cons_col );
+                    break;
+                }
+#endif // defined(OPTION_EXTCURS)
+
+                /* Process INSERT */
                 if (strcmp(kbbuf+i, KBD_INSERT) == 0 ) {
                     cmdins = !cmdins;
                     set_console_cursor_shape( confp, cmdins );
@@ -1766,9 +2555,10 @@ char    buf[1024];                      /* Buffer workarea           */
                     break;
                 }
 
-                /* Process escape key */
+                /* Process ESCAPE */
                 if (kbbuf[i] == '\x1B') {
-                    if (cmdlen) {
+                    /* If data on cmdline, erase it */
+                    if ((NPDup == 1 || is_cursor_on_cmdline()) && cmdlen) {
                         cmdline[0] = '\0';
                         cmdlen = 0;
                         cmdoff = 0;
@@ -1776,53 +2566,76 @@ char    buf[1024];                      /* Buffer workarea           */
                         redraw_cmd = 1;
                     } else {
                         /* =NP= : Switch to new panel display */
+                        save_command_line();
                         NP_init();
                         NPDup = 1;
-                        cmdline[0] = '\0';
-                        cmdlen = 0;
-                        cmdoff = 0;
-                        ADJ_CMDCOL();
                         /* =END= */
                     }
                     break;
                 }
 
-                /* Process TAB character */
+                /* Process TAB */
                 if (kbbuf[i] == '\t' || kbbuf[i] == '\x7F') {
-                    tab_pressed(cmdline, &cmdoff);
-                    cmdlen = strlen(cmdline);
-                    ADJ_CMDCOL();
-                    i++;
-                    redraw_cmd = 1;
+                    if (NPDup == 1 || !is_cursor_on_cmdline()) {
+                        cursor_cmdline_home();
+                        redraw_cmd = 1;
+                    } else {
+                        tab_pressed(cmdline, &cmdoff);
+                        cmdlen = strlen(cmdline);
+                        ADJ_CMDCOL();
+                        i++;
+                        redraw_cmd = 1;
+                    }
                     break;
                 }
 
-                /* Process the command if newline was read */
+#if defined(OPTION_EXTCURS)
+                /* ENTER key special handling */
+                if (NPDup == 0 && kbbuf[i] == '\n')
+                {
+                    /* Get cursor pos and check if on cmdline */
+                    if (!is_cursor_on_cmdline())
+                    {
+                        int keepnum = get_keepnum_by_row( cur_cons_row );
+                        if (keepnum >= 0)
+                        {
+                            /* ENTER pressed on kept msg; remove msg */
+                            unkeep_by_keepnum( keepnum, 1 );
+                            redraw_msgs = 1;
+                            break;
+                        }
+                        /* ENTER pressed NOT on cmdline */
+                        beep();
+                        break;
+                    }
+                        /* ENTER pressed on cmdline; fall through
+                           for normal ENTER keypress handling... */
+                }
+#endif // defined(OPTION_EXTCURS)
+
+                /* Process the command when the ENTER key is pressed */
                 if (kbbuf[i] == '\n') {
-                    if (cmdlen == 0 && NPDup == 0 && !sysblk.inststep) {
+                    if (cmdlen == 0 && NPDup == 0 && !sysblk.inststep &&
+                        sysblk.cmdtgt == 0) {
                         history_show();
                     } else {
                         cmdline[cmdlen] = '\0';
                         /* =NP= create_thread replaced with: */
                         if (NPDup == 0) {
                             if ('#' == cmdline[0] || '*' == cmdline[0]) {
-                                logmsg("%s\n", cmdline);
-                                for (;cmdlen >=0; cmdlen--)
-                                    cmdline[cmdlen] = '\0';
+                                if (!is_currline_visible())
+                                    scroll_to_bottom_screen( 1 );
+                                history_requested = 0;
+                                do_panel_command(cmdline);
+                                redraw_cmd = 1;
                                 cmdlen = 0;
                                 cmdoff = 0;
                                 ADJ_CMDCOL();
+                                redraw_cmd = 1;
                             } else {
                                 history_requested = 0;
-                                panel_command(cmdline);
-                                redraw_msgs = 1;
+                                do_panel_command(cmdline);
                                 redraw_cmd = 1;
-                                redraw_status = 1;
-                                for (;cmdlen >=0; cmdlen--)
-                                    cmdline[cmdlen] = '\0';
-                                cmdlen = 0;
-                                cmdoff = 0;
-                                ADJ_CMDCOL();
                                 if (history_requested == 1) {
                                     strcpy(cmdline, historyCmdLine);
                                     cmdlen = strlen(cmdline);
@@ -1855,7 +2668,7 @@ char    buf[1024];                      /* Buffer workarea           */
                                     strcpy(NPdevnam[NPasgn], "");
                                     sprintf (NPentered, "devinit %4.4x %s",
                                              NPdevnum[NPasgn], cmdline);
-                                    panel_command(NPentered);
+                                    do_panel_command(NPentered);
                                     strcpy(NPprompt2, "");
                                     break;
                                 default:
@@ -1871,16 +2684,19 @@ char    buf[1024];                      /* Buffer workarea           */
                         redraw_cmd = 1;
                     }
                     break;
-                }
+                } /* end if (kbbuf[i] == '\n') */
 
                 /* Ignore non-printable characters */
                 if (!isprint(kbbuf[i])) {
-#if 0 /* do we REALLY need to be doing this?! */
-                    logmsg ("%2.2X\n", kbbuf[i]);
-#endif
-                    console_beep( confp );
+                    beep();
                     i++;
                     continue;
+                }
+
+                /* Ignore all other keystrokes not on cmdline */
+                if (NPDup == 0 && !is_cursor_on_cmdline()) {
+                    beep();
+                    break;
                 }
 
                 /* Append the character to the command buffer */
@@ -1891,7 +2707,7 @@ char    buf[1024];                      /* Buffer workarea           */
                 )
                 {
                     /* (no more room!) */
-                    console_beep( confp );
+                    beep();
                 }
                 else /* (there's still room) */
                 {
@@ -1999,30 +2815,42 @@ FinishShutdown:
                    be continued on the very next screen line */
                 if (readoff >= MSG_SIZE)
                     break;
-
-            } // end while ( lmsndx < lmscnt && lmsndx < lmsmax )
+            } /* end while ( lmsndx < lmscnt && lmsndx < lmsmax ) */
 
             /* If we have a message to be displayed (or a complete
                part of one), then copy it to the circular buffer. */
             if (!readoff || readoff >= MSG_SIZE) {
-                /* Set the display update indicator */
-                redraw_msgs = 1;
 
-                memcpy(msgbuf+(msgslot*MSG_SIZE),readbuf,MSG_SIZE);
+                /* First-time here? */
+                if (curmsg == NULL) {
+                    curmsg = topmsg = msgbuf;
+                } else {
+                    /* Perform autoscroll if needed */
+                    if (is_currline_visible()) {
+                        while (lines_remaining() < 1)
+                            scroll_down_lines(1,1);
+                        /* Set the display update indicator */
+                        redraw_msgs = 1;
+                    }
 
-                /* Update message count and next available slot */
-                if (nummsgs < MAX_MSGS)
-                    msgslot = ++nummsgs;
-                else
-                    msgslot++;
-                if (msgslot >= MAX_MSGS) msgslot = 0;
+                    /* Go on to next available msg buffer */
+                    curmsg = curmsg->next;
 
-                /* Calculate the first line to display */
-                firstmsgn = nummsgs - NUM_LINES;
-                if (firstmsgn < 0) firstmsgn = 0;
-            }
+                    /* Updated wrapped indicator */
+                    if (curmsg == msgbuf)
+                        wrapped = 1;
+                }
 
-        } // end while ( lmsndx < lmscnt && lmsndx < lmsmax )
+                /* Copy message into next available PANMSG slot */
+                memcpy( curmsg->msg, readbuf, MSG_SIZE );
+
+#if defined(OPTION_MSGCLR)
+                /* Colorize and/or keep new message if needed */
+                colormsg(curmsg);
+#endif // defined(OPTION_MSGCLR)
+
+            } /* end if (!readoff || readoff >= MSG_SIZE) */
+        } /* end Read message bytes until newline... */
 
         /* Don't read or otherwise process any input
            once system shutdown has been initiated
@@ -2038,7 +2866,6 @@ FinishShutdown:
 
         /* =NP= : Reinit traditional panel if NP is down */
         if (NPDup == 0 && NPDinit == 1) {
-            NPDinit = 0;
             redraw_msgs = redraw_status = redraw_cmd = 1;
             set_color (COLOR_DEFAULT_FG, COLOR_DEFAULT_BG);
             clr_screen ();
@@ -2054,31 +2881,23 @@ FinishShutdown:
            or if the instruction counter has changed, or if
            the CPU stopped state has changed */
         if (memcmp(curpsw, prvpsw, sizeof(curpsw)) != 0
-         || (
-#if defined(_FEATURE_SIE)
-                  SIE_MODE(regs) ? regs->hostregs->instcount :
-#endif /*defined(_FEATURE_SIE)*/
-                  regs->instcount) != prvicount
+         || prvicount != INSTCOUNT(regs)
          || prvcpupct != regs->cpupct
 #if defined(OPTION_SHARED_DEVICES)
-         || sysblk.shrdcount != prvscount
-#endif
-         || regs->cpustate != prvstate
+         || prvscount != sysblk.shrdcount
+#endif // defined(OPTION_SHARED_DEVICES)
+         || prvstate != regs->cpustate
          || (NPDup && NPcpugraph && prvtcount != sysblk.instcount)
            )
         {
             redraw_status = 1;
             memcpy (prvpsw, curpsw, sizeof(prvpsw));
-            prvicount =
-#if defined(_FEATURE_SIE)
-                        SIE_MODE(regs) ? regs->hostregs->instcount :
-#endif /*defined(_FEATURE_SIE)*/
-                        regs->instcount;
+            prvicount = INSTCOUNT(regs);
             prvcpupct = regs->cpupct;
             prvstate  = regs->cpustate;
 #if defined(OPTION_SHARED_DEVICES)
             prvscount = sysblk.shrdcount;
-#endif
+#endif // defined(OPTION_SHARED_DEVICES)
             prvtcount = sysblk.instcount;
         }
 
@@ -2090,53 +2909,125 @@ FinishShutdown:
 
         if (NPDup == 0) {
             /* Rewrite the screen if display update indicators are set */
-            if (redraw_msgs && !sysblk.npquiet)
+            if (redraw_msgs && !npquiet)
             {
                 /* Display messages in scrolling area */
-                for (i=0; i < NUM_LINES && firstmsgn + i < nummsgs; i++)
+                PANMSG* p;
+
+                /* Save cursor location */
+                saved_cons_row = cur_cons_row;
+                saved_cons_col = cur_cons_col;
+
+                /* Unkeep kept messages if needed */
+                expire_kept_msgs(0);
+
+                /* Draw kept messages first */
+                for (i=0, p=keptmsgs; i < (SCROLL_LINES + numkept) && p; i++, p = p->next)
                 {
-                    n = (nummsgs < MAX_MSGS) ? 0 : msgslot;
-                    n += firstmsgn + i;
-                    if (n >= MAX_MSGS) n -= MAX_MSGS;
+                    set_pos (i+1, 1);
+#if defined(OPTION_MSGCLR)
+                    set_color (p->fg, p->bg);
+#else // !defined(OPTION_MSGCLR)
+                    set_color (COLOR_DEFAULT_FG, COLOR_DEFAULT_BG);
+#endif // defined(OPTION_MSGCLR)
+                    write_text (p->msg, MSG_SIZE);
+                }
+
+                /* Then draw current screen */
+                for (p=topmsg; i < (SCROLL_LINES + numkept) && (p != curmsg->next || p == topmsg); i++, p = p->next)
+                {
+                    set_pos (i+1, 1);
+#if defined(OPTION_MSGCLR)
+                    set_color (p->fg, p->bg);
+#else // !defined(OPTION_MSGCLR)
+                    set_color (COLOR_DEFAULT_FG, COLOR_DEFAULT_BG);
+#endif // defined(OPTION_MSGCLR)
+                    write_text (p->msg, MSG_SIZE);
+                }
+
+                /* Pad remainder of screen with blank lines */
+                for (; i < (SCROLL_LINES + numkept); i++)
+                {
                     set_pos (i+1, 1);
                     set_color (COLOR_DEFAULT_FG, COLOR_DEFAULT_BG);
-                    write_text ((char *)msgbuf + (n * MSG_SIZE), MSG_SIZE);
+                    erase_to_eol( confp );
                 }
 
                 /* Display the scroll indicators */
-                if (firstmsgn > 0)
+                if (topmsg != oldest_msg())
                 {
+                    /* More messages precede top line */
                     set_pos (1, cons_cols);
                     set_color (COLOR_DEFAULT_LIGHT, COLOR_DEFAULT_BG);
-                    draw_text ("+" );
+                    draw_text ("+");
                 }
-                if (firstmsgn + i < nummsgs)
+                if (!is_currline_visible())
                 {
+                    /* More messages follow bottom line */
                     set_pos (cons_rows-2, cons_cols);
                     set_color (COLOR_DEFAULT_LIGHT, COLOR_DEFAULT_BG);
                     draw_text ("V");
                 }
+
+                /* restore cursor location */
+                cur_cons_row = saved_cons_row;
+                cur_cons_col = saved_cons_col;
             } /* end if(redraw_msgs) */
 
             if (redraw_cmd)
             {
+                /* Save cursor location */
+                saved_cons_row = cur_cons_row;
+                saved_cons_col = cur_cons_col;
+
                 /* Display the command line */
-                set_pos (cons_rows-1, 1);
+                set_pos (CMDLINE_ROW, 1);
                 set_color (COLOR_DEFAULT_LIGHT, COLOR_DEFAULT_BG);
+
+#if defined(OPTION_CMDTGT)
+                switch(sysblk.cmdtgt)
+                {
+                  case 0: // cmdtgt herc 
+                  {
+                    draw_text(CMD_PREFIX_STR);
+                    break;
+                  }
+                  case 1: // cmdtgt scp
+                  {
+                    draw_text(CMD_PREFIX_STR1);
+                    break;
+                  }
+                  case 2: // cmdtgt pscp
+                  {
+                    draw_text(CMD_PREFIX_STR2);
+                    break;
+                  }
+                }
+#else // !defined(OPTION_CMDTGT)
                 draw_text (CMD_PREFIX_STR);
+#endif // defined(OPTION_CMDTGT)
+
                 set_color (COLOR_DEFAULT_FG, COLOR_DEFAULT_BG);
                 PUTC_CMDLINE ();
                 fill_text (' ',cons_cols);
+
+                /* restore cursor location */
+                cur_cons_row = saved_cons_row;
+                cur_cons_col = saved_cons_col;
             } /* end if(redraw_cmd) */
 
-            if (redraw_status && !sysblk.npquiet)
+            if (redraw_status && !npquiet)
             {
+                /* Save cursor location */
+                saved_cons_row = cur_cons_row;
+                saved_cons_col = cur_cons_col;
+
                 memset (buf, ' ', cons_cols);
                 len = sprintf (buf, "CPU%4.4X ", sysblk.pcpu);
                 if (IS_CPU_ONLINE(sysblk.pcpu))
                 {
                     char ibuf[32];
-                    len += sprintf(buf+len, "PSW=%8.8X %8.8X ",
+                    len += sprintf(buf+len, "PSW=%8.8X%8.8X ",
                                    fetch_fw(curpsw), fetch_fw(curpsw+4));
                     if (regs->arch_mode == ARCH_900)
                         len += sprintf (buf+len, "%16.16"I64_FMT"X ",
@@ -2159,11 +3050,7 @@ FinishShutdown:
                            SIE_MODE(regs)                     ? 'S' : '.',
                            regs->arch_mode == ARCH_900        ? 'Z' : '.');
                     buf[len++] = ' ';
-                    sprintf (ibuf, "instcount=%" I64_FMT "u",
-#if defined(_FEATURE_SIE)
-                        SIE_MODE(regs) ?  (U64) regs->hostregs->instcount :
-#endif /*defined(_FEATURE_SIE)*/
-                        (U64)regs->instcount);
+                    sprintf (ibuf, "instcount=%s", format_int(INSTCOUNT(regs)));
                     if (len + (int)strlen(ibuf) < cons_cols)
                         len = cons_cols - strlen(ibuf);
                     strcpy (buf + len, ibuf);
@@ -2177,32 +3064,55 @@ FinishShutdown:
                 set_pos (cons_rows, 1);
                 set_color (COLOR_LIGHT_YELLOW, COLOR_RED);
                 draw_text (buf);
+
+                /* restore cursor location */
+                cur_cons_row = saved_cons_row;
+                cur_cons_col = saved_cons_col;
             } /* end if(redraw_status) */
 
             /* Flush screen buffer and reset display update indicators */
             if (redraw_msgs || redraw_cmd || redraw_status)
             {
                 set_color (COLOR_DEFAULT_FG, COLOR_DEFAULT_BG);
-                set_pos (cons_rows-1, CMD_PREFIX_LEN+1+cmdoff-cmdcol);
+                if (NPDup == 0 && NPDinit == 1)
+                {
+                    NPDinit = 0;
+                    restore_command_line();
+                    set_pos (cur_cons_row, cur_cons_col);
+                }
+                else if (redraw_cmd)
+                    set_pos (CMDLINE_ROW, CMDLINE_COL + cmdoff - cmdcol);
+                else
+                    set_pos (cur_cons_row, cur_cons_col);
                 fflush (confp);
                 redraw_msgs = redraw_cmd = redraw_status = 0;
             }
 
-        } else {
+        } else { /* (NPDup == 1) */
 
             if (redraw_status || (NPDinit == 0 && NPDup == 1)
                    || (redraw_cmd && NPdataentry == 1)) {
                 if (NPDinit == 0) {
                     NPDinit = 1;
                     NP_screen_redraw(regs);
+                    NP_update(regs);
+                    fflush (confp);
                 }
             }
-            NP_update(regs);
-            fflush (confp);
+            /* Update New Panel every panrate interval */
+            if (!npquiet) {
+                NP_update(regs);
+                fflush (confp);
+            }
             redraw_msgs = redraw_cmd = redraw_status = 0;
         }
 
     /* =END= */
+
+        /* Force full screen repaint if needed */
+        if (!sysblk.npquiet && npquiet)
+            redraw_msgs = redraw_cmd = redraw_status = 1;
+        npquiet = sysblk.npquiet;
 
     } /* end while */
 
@@ -2210,10 +3120,10 @@ FinishShutdown:
 
 } /* end function panel_display */
 
-static
-void panel_cleanup(void *unused)
+static void panel_cleanup(void *unused)
 {
-int i,n;
+int i;
+PANMSG* p;
 
     UNREFERENCED(unused);
 
@@ -2222,29 +3132,28 @@ int i,n;
     set_screen_color( stderr, COLOR_DEFAULT_FG, COLOR_DEFAULT_BG );
     clear_screen( stderr );
 
-    /* Reset the first line to be displayed (i.e.
-       "scroll down to the most current message") */
-    firstmsgn = nummsgs - NUM_LINES;
-    if (firstmsgn < 0) firstmsgn = 0;
+    /* Scroll to last full screen's worth of messages */
+    scroll_to_bottom_screen( 1 );
 
     /* Display messages in scrolling area */
-    for (i=0; i < NUM_LINES && firstmsgn + i < nummsgs; i++)
+    for (i=0, p = topmsg; i < SCROLL_LINES && p != curmsg->next; i++, p = p->next)
     {
-        n = (nummsgs < MAX_MSGS) ? 0 : msgslot;
-        n += firstmsgn + i;
-        if (n >= MAX_MSGS) n -= MAX_MSGS;
-        set_screen_pos( stderr, i+1, 1 );
-        set_screen_color( stderr, COLOR_DEFAULT_FG, COLOR_DEFAULT_BG );
-        fwrite (msgbuf + (n * MSG_SIZE), MSG_SIZE, 1, stderr);
+        set_pos (i+1, 1);
+#if defined(OPTION_MSGCLR)
+        set_color (p->fg, p->bg);
+#else // !defined(OPTION_MSGCLR)
+        set_color (COLOR_DEFAULT_FG, COLOR_DEFAULT_BG);
+#endif // defined(OPTION_MSGCLR)
+        write_text (p->msg, MSG_SIZE);
     }
 
     /* Restore the terminal mode */
     set_or_reset_console_mode( keybfd, 0 );
 
-    if (nummsgs)
-        fwrite("\n",1,1,stderr);
+    /* Position to next line */
+    fwrite("\n",1,1,stderr);
 
-    /* Read any remaining msgs from the system log */
+    /* Read and display any msgs still remaining in the system log */
     while((lmscnt = log_read(&lmsbuf, &lmsnum, LOG_NOBLOCK)))
         fwrite(lmsbuf,lmscnt,1,stderr);
 

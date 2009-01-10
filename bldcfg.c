@@ -1,9 +1,9 @@
-/* BLDCFG.C     (c) Copyright Roger Bowler, 1999-2007                */
+/* BLDCFG.C     (c) Copyright Roger Bowler, 1999-2009                */
 /*              ESA/390 Configuration Builder                        */
 
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
 
-// $Id: bldcfg.c,v 1.77 2007/06/23 00:04:03 ivan Exp $
+// $Id: bldcfg.c,v 1.102 2009/01/08 14:43:38 jmaynard Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module builds the configuration tables for the Hercules      */
@@ -31,6 +31,92 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: bldcfg.c,v $
+// Revision 1.102  2009/01/08 14:43:38  jmaynard
+// Cosmetic update to CPU type display on startup.
+//
+// Revision 1.101  2009/01/02 19:21:50  jj
+// DVD-RAM IPL
+// RAMSAVE
+// SYSG Integrated 3270 console fixes
+//
+// Revision 1.100  2009/01/02 14:11:18  ivan
+// Change DIAG8CMD command statement semantics to be more consistent with other configuration statements
+// Syntax is now :
+// DIAG8CMD DISABLE|ENABLE [ECHO|NOECHO]
+//
+// Revision 1.99  2009/01/02 14:01:02  rbowler
+// herclogo being ignored if not the last statement in config
+//
+// Revision 1.98  2008/12/29 00:00:54  ivan
+// Change semantics for DIAG8CMD configuration statement
+// Disable command redisplay at the console when NOECHO is set
+// Commands typed with a '-' as the first character are not redisplayed
+//
+// Revision 1.97  2008/12/28 14:04:59  ivan
+// Allow DIAG8CMD NOECHO
+// This configures suppression of messages related to diag 8 issued by guests
+//
+// Revision 1.96  2008/12/01 22:07:16  fish
+// remove unused #defines
+//
+// Revision 1.95  2008/12/01 16:19:49  jj
+// Check for licensed operating systems without impairing architectural
+// compliance of IFL's
+//
+// Revision 1.94  2008/11/24 14:52:21  jj
+// Add PTYP=IFL
+// Change SCPINFO processing to check on ptyp for IFL specifics
+//
+// Revision 1.93  2008/11/24 13:44:03  rbowler
+// Fix bldcfg.c:1851: warning: short unsigned int format, different type arg
+//
+// Revision 1.92  2008/11/04 05:56:30  fish
+// Put ensure consistent create_thread ATTR usage change back in
+//
+// Revision 1.91  2008/11/03 15:31:58  rbowler
+// Back out consistent create_thread ATTR modification
+//
+// Revision 1.90  2008/10/18 09:32:20  fish
+// Ensure consistent create_thread ATTR usage
+//
+// Revision 1.89  2008/10/14 22:41:08  rbowler
+// Add ENGINES configuration statement
+//
+// Revision 1.88  2008/08/29 07:06:00  fish
+// Add KEEPMSG to blank lines in message HHCCF039W
+//
+// Revision 1.87  2008/08/23 11:54:54  fish
+// Reformat/center  "HHCCF039W PGMPRDOS LICENSED"  message
+//
+// Revision 1.86  2008/08/21 18:34:45  fish
+// Fix i/o-interrupt-queue race condition
+//
+// Revision 1.85  2008/08/02 18:31:28  bernard
+// type in PGMPRDOS message
+//
+// Revision 1.84  2008/08/02 13:25:00  bernard
+// Put PGMPRDOS message in red.
+//
+// Revision 1.83  2008/07/08 05:35:48  fish
+// AUTOMOUNT redesign: support +allowed/-disallowed dirs
+// and create associated 'automount' panel command - Fish
+//
+// Revision 1.82  2008/05/28 16:46:29  fish
+// Misleading VTAPE support renamed to AUTOMOUNT instead and fixed and enhanced so that it actually WORKS now.
+//
+// Revision 1.81  2008/03/04 01:10:29  ivan
+// Add LEGACYSENSEID config statement to allow X'E4' Sense ID on devices
+// that originally didn't support it. Defaults to off for compatibility reasons
+//
+// Revision 1.80  2008/01/18 23:44:12  rbowler
+// Segfault instead of HHCCF004S if no device records in config file
+//
+// Revision 1.79  2008/01/18 22:08:33  rbowler
+// HHCCF008E Error in hercules.cnf: Unrecognized keyword 0:0009
+//
+// Revision 1.78  2007/12/29 14:38:39  fish
+// init sysblk.dummyregs.hostregs = &sysblk.dummyregs; to prevent panel or dyngui threads from crashing when using new INSTCOUNT macro.
+//
 // Revision 1.77  2007/06/23 00:04:03  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -90,6 +176,10 @@
 #if defined(OPTION_FISHIO)
 #include "w32chan.h"
 #endif // defined(OPTION_FISHIO)
+
+#if defined( OPTION_TAPE_AUTOMOUNT )
+#include "tapedev.h"
+#endif
 
 #if !defined(_GEN_ARCH)
 
@@ -279,6 +369,116 @@ int off;
 #endif /*!_FEATURE_EXPANDED_STORAGE*/
     } /* end if(sysblk.xpndsize) */
 }
+
+#if defined( OPTION_TAPE_AUTOMOUNT )
+/*-------------------------------------------------------------------*/
+/* Add directory to AUTOMOUNT allowed/disallowed directories list    */
+/*                                                                   */
+/* Input:  tamdir     pointer to work character array of at least    */
+/*                    MAX_PATH size containing an allowed/disallowed */
+/*                    directory specification, optionally prefixed   */
+/*                    with the '+' or '-' indicator.                 */
+/*                                                                   */
+/*         ppTAMDIR   address of TAMDIR ptr that upon successful     */
+/*                    completion is updated to point to the TAMDIR   */
+/*                    entry that was just successfully added.        */
+/*                                                                   */
+/* Output: upon success, ppTAMDIR is updated to point to the TAMDIR  */
+/*         entry just added. Upon error, ppTAMDIR is set to NULL and */
+/*         the original input character array is set to the inter-   */
+/*         mediate value being processed when the error occurred.    */
+/*                                                                   */
+/* Returns:  0 == success                                            */
+/*           1 == unresolvable path                                  */
+/*           2 == path inaccessible                                  */
+/*           3 == conflict w/previous                                */
+/*           4 == duplicates previous                                */
+/*           5 == out of memory                                      */
+/*                                                                   */
+/*-------------------------------------------------------------------*/
+DLL_EXPORT int add_tamdir( char *tamdir, TAMDIR **ppTAMDIR )
+{
+    int  rc, rej = 0;
+    char dirwrk[ MAX_PATH ] = {0};
+
+    *ppTAMDIR = NULL;
+
+    if (*tamdir == '-')
+    {
+        rej = 1;
+        memmove (tamdir, tamdir+1, MAX_PATH);
+    }
+    else if (*tamdir == '+')
+    {
+        rej = 0;
+        memmove (tamdir, tamdir+1, MAX_PATH);
+    }
+
+    /* Convert tamdir to absolute path ending with a slash */
+
+#if defined(_MSVC_)
+    /* (expand any embedded %var% environment variables) */
+    rc = expand_environ_vars( tamdir, dirwrk, MAX_PATH );
+    if (rc == 0)
+        strlcpy (tamdir, dirwrk, MAX_PATH);
+#endif
+
+    if (!realpath( tamdir, dirwrk ))
+        return (1); /* ("unresolvable path") */
+    strlcpy (tamdir, dirwrk, MAX_PATH);
+
+    /* Verify that the path is valid */
+    if (access( tamdir, R_OK | W_OK ) != 0)
+        return (2); /* ("path inaccessible") */
+
+    /* Append trailing path separator if needed */
+    rc = strlen( tamdir );
+    if (tamdir[rc-1] != *PATH_SEP)
+        strlcat (tamdir, PATH_SEP, MAX_PATH);
+
+    /* Check for duplicate/conflicting specification */
+    for (*ppTAMDIR = sysblk.tamdir;
+         *ppTAMDIR;
+         *ppTAMDIR = (*ppTAMDIR)->next)
+    {
+        if (strfilenamecmp( tamdir, (*ppTAMDIR)->dir ) == 0)
+        {
+            if ((*ppTAMDIR)->rej != rej)
+                return (3); /* ("conflict w/previous") */
+            else
+                return (4); /* ("duplicates previous") */
+        }
+    }
+
+    /* Allocate new AUTOMOUNT directory entry */
+    *ppTAMDIR = malloc( sizeof(TAMDIR) );
+    if (!*ppTAMDIR)
+        return (5); /* ("out of memory") */
+
+    /* Fill in the new entry... */
+    (*ppTAMDIR)->dir = strdup (tamdir);
+    (*ppTAMDIR)->len = strlen (tamdir);
+    (*ppTAMDIR)->rej = rej;
+    (*ppTAMDIR)->next = NULL;
+
+    /* Add new entry to end of existing list... */
+    if (sysblk.tamdir == NULL)
+        sysblk.tamdir = *ppTAMDIR;
+    else
+    {
+        TAMDIR *pTAMDIR = sysblk.tamdir;
+        while (pTAMDIR->next)
+            pTAMDIR = pTAMDIR->next;
+        pTAMDIR->next = *ppTAMDIR;
+    }
+
+    /* Use first allowable dir as default */
+    if (rej == 0 && sysblk.defdir == NULL)
+        sysblk.defdir = (*ppTAMDIR)->dir;
+
+    return (0); /* ("success") */
+}
+#endif /* OPTION_TAPE_AUTOMOUNT */
 
 /*-------------------------------------------------------------------*/
 /* Subroutine to read a statement from the configuration file        */
@@ -573,7 +773,8 @@ void build_config (char *fname)
 int     rc;                             /* Return code               */
 int     i;                              /* Array subscript           */
 int     scount;                         /* Statement counter         */
-/* int     cpu; */                      /* CPU number                */
+int     cpu;                            /* CPU number                */
+int     count;                          /* Counter                   */
 FILE   *inc_fp[MAX_INC_LEVEL];          /* Configuration file pointer*/
 
 char   *sserial;                        /* -> CPU serial string      */
@@ -583,18 +784,21 @@ char   *smainsize;                      /* -> Main size string       */
 char   *sxpndsize;                      /* -> Expanded size string   */
 char   *snumcpu;                        /* -> Number of CPUs         */
 char   *snumvec;                        /* -> Number of VFs          */
+char   *sengines;                       /* -> Processor engine types */
 char   *sarchmode;                      /* -> Architectural mode     */
 char   *sloadparm;                      /* -> IPL load parameter     */
 char   *ssysepoch;                      /* -> System epoch           */
 char   *syroffset;                      /* -> System year offset     */
 char   *stzoffset;                      /* -> System timezone offset */
 char   *sdiag8cmd;                      /* -> Allow diagnose 8       */
+char   *sdiag8echo;                     /* -> Diag 8 Echo opt        */
 char   *sshcmdopt;                      /* -> SHCMDOPT shell cmd opt */
 char   *stoddrag;                       /* -> TOD clock drag factor  */
 char   *sostailor;                      /* -> OS to tailor system to */
 char   *spanrate;                       /* -> Panel refresh rate     */
 char   *stimerint;                      /* -> Timer update interval  */
 char   *sdevtmax;                       /* -> Max device threads     */
+char   *slegacysenseid;                 /* -> legacy senseid option  */
 char   *shercprio;                      /* -> Hercules base priority */
 char   *stodprio;                       /* -> Timer thread priority  */
 char   *scpuprio;                       /* -> CPU thread priority    */
@@ -651,6 +855,7 @@ int     diag8cmd;                       /* Allow diagnose 8 commands */
 BYTE    shcmdopt;                       /* Shell cmd allow option(s) */
 double  toddrag;                        /* TOD clock drag factor     */
 U64     ostailor;                       /* OS to tailor system to    */
+int     legacysenseid;                  /* ena/disa x'E4' on old devs*/
 int     timerint;                       /* Timer update interval     */
 int     panrate;                        /* Panel refresh rate        */
 int     hercprio;                       /* Hercules base priority    */
@@ -677,6 +882,9 @@ int     iodelay_warn = 0;               /* Issue iodelay warning     */
 int     ptt = 0;                        /* Pthread trace table size  */
 #endif /*OPTION_PTTRACE*/
 BYTE    c;                              /* Work area for sscanf      */
+char   *styp;                           /* -> Engine type string     */
+char   *styp_values[] = {"CP","CF","AP","IL","??","IP"}; /* type values */
+BYTE    ptyp;                           /* Processor engine type     */
 #if defined(OPTION_LPARNAME)
 char   *lparname;                       /* DIAG 204 lparname         */
 #endif /*defined(OPTION_LPARNAME)*/
@@ -693,6 +901,7 @@ int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
                                            cygwin from thrashing in
                                            select(). sigh            */
 #endif
+char    hlogofile[FILENAME_MAX+1] = ""; /* File name from HERCLOGO   */
 char    pathname[MAX_PATH];             /* file path in host format  */
 
     /* Initialize SETMODE and set user authority */
@@ -743,6 +952,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
     devprio  = DEFAULT_DEV_PRIO;
     pgmprdos = PGM_PRD_OS_RESTRICTED;
     devtmax  = MAX_DEVICE_THREADS;
+    legacysenseid = 0;
     sysblk.kaidle = KEEPALIVE_IDLE_TIME;
     sysblk.kaintv = KEEPALIVE_PROBE_INTERVAL;
     sysblk.kacnt  = KEEPALIVE_PROBE_COUNT;
@@ -757,6 +967,10 @@ char    pathname[MAX_PATH];             /* file path in host format  */
 #if defined(_FEATURE_ASN_AND_LX_REUSE)
     asnandlxreuse = 0;  /* ASN And LX Reuse is defaulted to DISABLE */
 #endif
+
+    /* Default CPU type CP */
+    for (i = 0; i < MAX_CPU; i++)
+        sysblk.ptyp[i] = SCCB_PTYP_CP;
 
     /* Cap the default priorities at zero if setuid not available */
 #if !defined(NO_SETUID)
@@ -775,12 +989,14 @@ char    pathname[MAX_PATH];             /* file path in host format  */
     }
 #endif /*!defined(NO_SETUID)*/
 
+    /*****************************************************************/
+    /* Parse configuration file system parameter statements...       */
+    /*****************************************************************/
 
-    /* Read records from the configuration file */
     for (scount = 0; ; scount++)
     {
         /* Read next record from the configuration file */
-        while (read_config (fname, inc_fp[inc_level]) && inc_level >= 0 )
+        while (inc_level >= 0 && read_config (fname, inc_fp[inc_level]))
         {
             fclose (inc_fp[inc_level--]);
         }
@@ -859,6 +1075,12 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         {
             break;
         }
+        /* Also exit if keyword contains ':' (added by Harold Grovesteen jan2008) */
+        /* Added because device statements may now contain channel set or LCSS id */
+        if(strchr(keyword,':'))
+        {
+            break;
+        }
 
         /* Clear the operand value pointers */
         sserial = NULL;
@@ -868,12 +1090,14 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         sxpndsize = NULL;
         snumcpu = NULL;
         snumvec = NULL;
+        sengines = NULL;
         sarchmode = NULL;
         sloadparm = NULL;
         ssysepoch = NULL;
         syroffset = NULL;
         stzoffset = NULL;
         sdiag8cmd = NULL;
+        sdiag8echo = NULL;
         sshcmdopt = NULL;
         stoddrag = NULL;
         sostailor = NULL;
@@ -884,6 +1108,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         scpuprio = NULL;
         sdevprio = NULL;
         sdevtmax = NULL;
+        slegacysenseid = NULL;
         spgmprdos = NULL;
         slogofile = NULL;
         straceopt = NULL;
@@ -987,6 +1212,10 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 snumvec = operand;
             }
+            else if (strcasecmp (keyword, "engines") == 0)
+            {
+                sengines = operand;
+            }
             else if (strcasecmp (keyword, "loadparm") == 0)
             {
                 sloadparm = operand;
@@ -1022,6 +1251,11 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             else if (strcasecmp (keyword, "diag8cmd") == 0)
             {
                 sdiag8cmd = operand;
+                if(addargc)
+                {
+                    sdiag8echo = addargv[0];
+                    addargc--;
+                }
             }
             else if (strcasecmp (keyword, "SHCMDOPT") == 0)
             {
@@ -1072,6 +1306,10 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             else if (strcasecmp (keyword, "devtmax") == 0)
             {
                 sdevtmax = operand;
+            }
+            else if (strcasecmp (keyword, "legacysenseid") == 0)
+            {
+                slegacysenseid = operand;
             }
             else if (strcasecmp (keyword, "pgmprdos") == 0)
             {
@@ -1244,6 +1482,78 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 /* (will be validated later) */
             }
 #endif /*defined(OPTION_HTTP_SERVER)*/
+#if defined( OPTION_TAPE_AUTOMOUNT )
+            else if (strcasecmp (keyword, "automount") == 0)
+            {
+                char tamdir[MAX_PATH+1]; /* +1 for optional '+' or '-' prefix */
+                TAMDIR* pTAMDIR = NULL;
+
+                if (!operand)
+                {
+                    fprintf(stderr, _("HHCCF007S Error in %s line %d: "
+                        "Missing argument.\n"),
+                        fname, inc_stmtnum[inc_level]);
+                    delayed_exit(1);
+                }
+
+                strlcpy (tamdir, operand, sizeof(tamdir));
+                rc = add_tamdir( tamdir, &pTAMDIR );
+
+                switch (rc)
+                {
+                    default:     /* (oops!) */
+                    {
+                        logmsg( _("HHCCF999S **LOGIC ERROR** file \"%s\", line %d\n"),
+                            __FILE__, __LINE__);
+                        delayed_exit(1);
+                    }
+                    break;
+
+                    case 5:     /* ("out of memory") */
+                    {
+                        logmsg( _("HHCCF900S Out of memory!\n"));
+                        delayed_exit(1);
+                    }
+                    break;
+
+                    case 1:     /* ("unresolvable path") */
+                    case 2:     /* ("path inaccessible") */
+                    {
+                        logmsg( _("HHCCF091S Invalid AUTOMOUNT directory: \"%s\": %s\n"),
+                               tamdir, strerror(errno));
+                        delayed_exit(1);
+                    }
+                    break;
+
+                    case 3:     /* ("conflict w/previous") */
+                    {
+                        logmsg( _("HHCCF092S AUTOMOUNT directory \"%s\""
+                            " conflicts with previous specification\n"),
+                            tamdir);
+                        delayed_exit(1);
+                    }
+                    break;
+
+                    case 4:     /* ("duplicates previous") */
+                    {
+                        logmsg( _("HHCCF093E AUTOMOUNT directory \"%s\""
+                            " duplicates previous specification\n"),
+                            tamdir);
+                        /* (non-fatal) */
+                    }
+                    break;
+
+                    case 0:     /* ("success") */
+                    {
+                        logmsg(_("HHCCF090I %s%s AUTOMOUNT directory = \"%s\"\n"),
+                            pTAMDIR->dir == sysblk.defdir ? "Default " : "",
+                            pTAMDIR->rej ? "Disallowed" : "Allowed",
+                            pTAMDIR->dir);
+                    }
+                    break;
+                }
+            }
+#endif /* OPTION_TAPE_AUTOMOUNT */
 #if defined(_FEATURE_ASN_AND_LX_REUSE)
             else if (strcasecmp(keyword,"asn_and_lx_reuse") == 0
                      || strcasecmp(keyword,"alrf") == 0)
@@ -1271,18 +1581,18 @@ char    pathname[MAX_PATH];             /* file path in host format  */
 #endif /*defined(OPTION_LPARNAME)*/
 
 #if defined(OPTION_SET_STSI_INFO)
-           else if (strcasecmp (keyword, "model") == 0)
-           {
-               stsi_model = operand;
-           }
-           else if (strcasecmp (keyword, "plant") == 0)
-           {
-               stsi_plant = operand;
-           }
-           else if (strcasecmp (keyword, "manufacturer") == 0)
-           {
-               stsi_manufacturer = operand;
-           }
+            else if (strcasecmp (keyword, "model") == 0)
+            {
+                stsi_model = operand;
+            }
+            else if (strcasecmp (keyword, "plant") == 0)
+            {
+                stsi_plant = operand;
+            }
+            else if (strcasecmp (keyword, "manufacturer") == 0)
+            {
+                stsi_manufacturer = operand;
+            }
 #endif /* defined(OPTION_SET_STSI_INFO) */
 
 #if defined( OPTION_SCSI_TAPE )
@@ -1298,7 +1608,6 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                shttp_server_kludge_msecs = operand;
             }
 #endif // defined( HTTP_SERVER_CONNECT_KLUDGE )
-
             else
             {
                 logmsg( _("HHCCF008E Error in %s line %d: "
@@ -1315,7 +1624,8 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                         "Incorrect number of operands\n"),
                         fname, inc_stmtnum[inc_level]);
             }
-        }
+
+        } /* end else (not old-style CPU statement) */
 
         if (sarchmode != NULL)
         {
@@ -1355,7 +1665,6 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         /* Indicate if z/Architecture is supported */
         sysblk.arch_z900 = sysblk.arch_mode != ARCH_390;
 #endif
-
         /* Parse "logopt" operands */
         if (slogopt[0])
         {
@@ -1579,6 +1888,54 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         }
         sysblk.numvec = numvec;
 
+        /* Parse processor engine types operand */
+        /* example: ENGINES 4*CP,AP,2*IP */
+        if (sengines != NULL)
+        {
+            styp = strtok(sengines,",");
+            for (cpu = 0; styp != NULL; )
+            {
+                count = 1;
+                if (isdigit(styp[0]))
+                {
+                    if (sscanf(styp, "%d%c", &count, &c) != 2
+                        || c != '*' || count < 1)
+                    {
+                        fprintf(stderr, _("HHCCF074S Error in %s line %d: "
+                                "Invalid engine syntax %s\n"),
+                                fname, inc_stmtnum[inc_level], styp);
+                        delayed_exit(1);
+                        break;
+                    }
+                    styp = strchr(styp,'*') + 1;
+                }
+                if (strcasecmp(styp,"cp") == 0)
+                    ptyp = SCCB_PTYP_CP;
+                else if (strcasecmp(styp,"cf") == 0)
+                    ptyp = SCCB_PTYP_ICF;
+                else if (strcasecmp(styp,"il") == 0)
+                    ptyp = SCCB_PTYP_IFL;
+                else if (strcasecmp(styp,"ap") == 0)
+                    ptyp = SCCB_PTYP_IFA;
+                else if (strcasecmp(styp,"ip") == 0)
+                    ptyp = SCCB_PTYP_SUP;
+                else {
+                    fprintf(stderr, _("HHCCF075S Error in %s line %d: "
+                            "Invalid engine type %s\n"),
+                            fname, inc_stmtnum[inc_level], styp);
+                    delayed_exit(1);
+                    break;
+                }
+                while (count-- > 0 && cpu < MAX_CPU_ENGINES)
+                {
+                    logmsg("HHCCF077I Engine %d set to type %d (%s)\n",
+                            cpu, ptyp, styp_values[ptyp]);
+                    sysblk.ptyp[cpu++] = ptyp;
+                }
+                styp = strtok(NULL,",");
+            }
+        }
+
         /* Parse load parameter operand */
         if (sloadparm != NULL)
         {
@@ -1640,17 +1997,53 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         /* Parse diag8cmd operand */
         if (sdiag8cmd != NULL)
         {
-            if (strcasecmp (sdiag8cmd, "enable") == 0)
-                diag8cmd = 1;
-            else
-            if (strcasecmp (sdiag8cmd, "disable") == 0)
-                diag8cmd = 0;
-            else
+            int d8ena=0,d8echo=1;
+            do
             {
+                if(strcasecmp(sdiag8cmd,"enable")==0)
+                {
+                    d8ena=1;
+                    break;
+                }
+                if(strcasecmp(sdiag8cmd,"disable")==0)
+                {
+                    break;
+                }
                 fprintf(stderr, _("HHCCF052S Error in %s line %d: "
-                        "%s: invalid argument\n"),
-                        fname, inc_stmtnum[inc_level], sdiag8cmd);
+                        "invalid diag8cmd option : Operand 1 should be ENABLE or DISABLE\n"),
+                        fname, inc_stmtnum[inc_level]);
                 delayed_exit(1);
+            } while(0);
+            if(sdiag8echo != NULL)
+            {
+                do
+                {
+                    if(strcasecmp(sdiag8echo,"echo")==0)
+                    {
+                        d8echo=1;
+                        break;
+                    }
+                    if(strcasecmp(sdiag8echo,"noecho")==0)
+                    {
+                        d8echo=0;
+                        break;
+                    }
+                    fprintf(stderr, _("HHCCF053S Error in %s line %d: "
+                            "incorrect diag8cmd option : Operand 2 should be ECHO or NOECHO\n"),
+                            fname, inc_stmtnum[inc_level]);
+                    delayed_exit(1);
+                } while(0);
+            }
+
+            diag8cmd=0;
+
+            if (d8ena)
+            {
+                diag8cmd = 1;
+            }
+            if(d8echo==0)
+            {
+                diag8cmd|=0x80;
             }
         }
 
@@ -1823,6 +2216,27 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             }
         }
 
+        /* Parse Legacy SenseID option */
+        if (slegacysenseid != NULL)
+        {
+            if(strcasecmp(slegacysenseid,"enable") == 0)
+            {
+                legacysenseid = 1;
+            }
+            if(strcasecmp(slegacysenseid,"on") == 0)
+            {
+                legacysenseid = 1;
+            }
+            if(strcasecmp(slegacysenseid,"disable") == 0)
+            {
+                legacysenseid = 0;
+            }
+            if(strcasecmp(slegacysenseid,"off") == 0)
+            {
+                legacysenseid = 0;
+            }
+        }
+
         /* Parse program product OS allowed */
         if (spgmprdos != NULL)
         {
@@ -1849,29 +2263,10 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         }
 
         /* Parse terminal logo option */
-        if(sysblk.logofile == NULL) /* LogoFile NOT passed in command line */
+        if (slogofile != NULL)
         {
-            if(slogofile != NULL) /* LogoFile SET in hercules config */
-            {
-                sysblk.logofile=slogofile;
-                readlogo(sysblk.logofile);
-            }
-            else /* Try to Read Logo File using Default FileName */
-            {
-                slogofile=getenv("HERCLOGO");
-                if(slogofile==NULL)
-                {
-                    readlogo("herclogo.txt");
-                }
-                else
-                {
-                    readlogo(slogofile);
-                }
-            } /* Otherwise Use Internal LOGO */
-        }
-        else /* LogoFile passed in command line */
-        {
-            readlogo(sysblk.logofile);
+            strncpy(hlogofile, slogofile, sizeof(hlogofile)-1);
+            hlogofile[sizeof(hlogofile)-1] = '\0';
         }
 
         /* Parse "traceopt" option */
@@ -2018,28 +2413,30 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             }
         }
 #endif /*defined(OPTION_SHARED_DEVICES)*/
+
 #if defined(_FEATURE_ASN_AND_LX_REUSE)
-    if(sasnandlxreuse != NULL)
-    {
-        if(strcasecmp(sasnandlxreuse,"enable")==0)
+        /* Parse asn_and_lx_reuse (alrf) operand */
+        if(sasnandlxreuse != NULL)
         {
-            asnandlxreuse=1;
-        }
-        else
-        {
-            if(strcasecmp(sasnandlxreuse,"disable")==0)
+            if(strcasecmp(sasnandlxreuse,"enable")==0)
             {
-                asnandlxreuse=0;
+                asnandlxreuse=1;
             }
-            else {
-                fprintf(stderr, _("HHCCF067S Error in %s line %d: "
-                            "Incorrect keyword %s for the ASN_AND_LX_REUSE statement.\n"),
-                            fname, inc_stmtnum[inc_level], sasnandlxreuse);
-                            delayed_exit(1);
+            else
+            {
+                if(strcasecmp(sasnandlxreuse,"disable")==0)
+                {
+                    asnandlxreuse=0;
+                }
+                else {
+                    fprintf(stderr, _("HHCCF067S Error in %s line %d: "
+                                "Incorrect keyword %s for the ASN_AND_LX_REUSE statement.\n"),
+                                fname, inc_stmtnum[inc_level], sasnandlxreuse);
+                                delayed_exit(1);
+                }
             }
         }
-    }
-#endif
+#endif /*defined(_FEATURE_ASN_AND_LX_REUSE)*/
 
 #ifdef OPTION_IODELAY_KLUDGE
         /* Parse I/O delay value */
@@ -2082,17 +2479,17 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             cckd_command (scckd, 0);
 
 #if defined(OPTION_LPARNAME)
-    if(lparname)
-        set_lparname(lparname);
+        if(lparname)
+            set_lparname(lparname);
 #endif /*defined(OPTION_LPARNAME)*/
 
 #if defined(OPTION_SET_STSI_INFO)
-    if(stsi_model)
-       set_model(stsi_model);
-    if(stsi_plant)
-       set_plant(stsi_plant);
-    if(stsi_manufacturer)
-       set_manufacturer(stsi_manufacturer);
+        if(stsi_model)
+            set_model(stsi_model);
+        if(stsi_plant)
+            set_plant(stsi_plant);
+        if(stsi_manufacturer)
+            set_manufacturer(stsi_manufacturer);
 #endif /* defined(OPTION_SET_STSI_INFO) */
 
 #if defined( OPTION_SCSI_TAPE )
@@ -2155,7 +2552,58 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         }
 #endif // defined( HTTP_SERVER_CONNECT_KLUDGE )
 
-    } /* end for(scount) */
+    } /* end for(scount) (end of configuration file statement loop) */
+
+    /* Read the logofile */
+    if (sysblk.logofile == NULL) /* LogoFile NOT passed in command line */
+    {
+        if (hlogofile[0] != '\0') /* LogoFile SET in hercules config */
+        {
+            readlogo(hlogofile);
+        }
+        else /* Try to Read Logo File using Default FileName */
+        {
+            slogofile=getenv("HERCLOGO");
+            if (slogofile==NULL)
+            {
+                readlogo("herclogo.txt");
+            }
+            else
+            {
+                readlogo(slogofile);
+            }
+        } /* Otherwise Use Internal LOGO */
+    }
+    else /* LogoFile passed in command line */
+    {
+        readlogo(sysblk.logofile);
+    }
+
+#if defined( OPTION_TAPE_AUTOMOUNT )
+    /* Define default AUTOMOUNT directory if needed */
+    if (sysblk.tamdir && sysblk.defdir == NULL)
+    {
+        char cwd[ MAX_PATH ];
+        TAMDIR *pNewTAMDIR = malloc( sizeof(TAMDIR) );
+        if (!pNewTAMDIR)
+        {
+            logmsg( _("HHCCF900S Out of memory!\n"));
+            delayed_exit(1);
+        }
+        VERIFY( getcwd( cwd, sizeof(cwd) ) != NULL );
+        rc = strlen( cwd );
+        if (cwd[rc-1] != *PATH_SEP)
+            strlcat (cwd, PATH_SEP, sizeof(cwd));
+        pNewTAMDIR->dir = strdup (cwd);
+        pNewTAMDIR->len = strlen (cwd);
+        pNewTAMDIR->rej = 0;
+        pNewTAMDIR->next = sysblk.tamdir;
+        sysblk.tamdir = pNewTAMDIR;
+        sysblk.defdir = pNewTAMDIR->dir;
+        logmsg(_("HHCCF090I Default Allowed AUTOMOUNT directory = \"%s\"\n"),
+            sysblk.defdir);
+    }
+#endif /* OPTION_TAPE_AUTOMOUNT */
 
 #if defined( HTTP_SERVER_CONNECT_KLUDGE )
     if (!sysblk.http_server_kludge_msecs)
@@ -2211,10 +2659,11 @@ char    pathname[MAX_PATH];             /* file path in host format  */
     initialize_lock (&sysblk.mainlock);
     sysblk.mainowner = LOCK_OWNER_NONE;
     initialize_lock (&sysblk.intlock);
+    initialize_lock (&sysblk.iointqlk);
     sysblk.intowner = LOCK_OWNER_NONE;
     initialize_lock (&sysblk.sigplock);
-    initialize_detach_attr (&sysblk.detattr);
-    initialize_join_attr   (&sysblk.joinattr);
+//  initialize_detach_attr (&sysblk.detattr);   // (moved to impl.c)
+//  initialize_join_attr   (&sysblk.joinattr);  // (moved to impl.c)
     initialize_condition (&sysblk.cpucond);
     for (i = 0; i < MAX_CPU_ENGINES; i++)
         initialize_lock (&sysblk.cpulock[i]);
@@ -2305,8 +2754,8 @@ char    pathname[MAX_PATH];             /* file path in host format  */
     /* Set the system OS tailoring value */
     sysblk.pgminttr = ostailor;
 
-    /* Set the system program product OS restriction flag */
-    sysblk.pgmprdos = pgmprdos;
+    /* Set the licence flag */
+    losc_set(pgmprdos);
 
 #ifdef OPTION_IODELAY_KLUDGE
     /* Set I/O delay value */
@@ -2323,13 +2772,19 @@ char    pathname[MAX_PATH];             /* file path in host format  */
     /* Set the panel refresh rate */
     sysblk.panrate = panrate;
 
+    /* set the legacy device senseid option */
+    sysblk.legacysenseid = legacysenseid;
+
     /* Set the timer update interval */
     sysblk.timerint = timerint;
 
     /* Gabor Hoffer (performance option) */
     copy_opcode_tables();
 
-    /* Parse the device configuration statements */
+    /*****************************************************************/
+    /* Parse configuration file device statements...                 */
+    /*****************************************************************/
+
     while(1)
     {
         /* First two fields are device number and device type */
@@ -2453,22 +2908,13 @@ char    pathname[MAX_PATH];             /* file path in host format  */
     sysblk.dummyregs.dummy = 1;
     initial_cpu_reset (&sysblk.dummyregs);
     sysblk.dummyregs.arch_mode = sysblk.arch_mode;
+    sysblk.dummyregs.hostregs = &sysblk.dummyregs;
 
 #ifdef OPTION_SELECT_KLUDGE
     /* Release the dummy file descriptors */
     for (i = 0; i < OPTION_SELECT_KLUDGE; i++)
         close(dummyfd[i]);
 #endif
-
-    if (sysblk.pgmprdos == PGM_PRD_OS_LICENSED)
-    {
-        logmsg(_("\nHHCCF039W PGMPRDOS LICENSED specified.\n"
-                "           Licensed program product operating systems are "
-                "enabled.\n           You are "
-                "responsible for meeting all conditions of your\n"
-                "           software "
-                "license.\n\n"));
-    }
 
 #ifdef _FEATURE_CPU_RECONFIG
     sysblk.maxcpu = archmode == ARCH_370 ? numcpu : MAX_CPU_ENGINES;

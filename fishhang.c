@@ -2,12 +2,15 @@
 //         fishhang.c           verify/debug proper Hercules LOCK handling...
 ////////////////////////////////////////////////////////////////////////////////////
 // (c) Copyright "Fish" (David B. Trout), 2002-2007. Released under the Q Public License
-// (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
+// (http://www.hercules-390.org/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: fishhang.c,v 1.18 2007/06/23 00:04:09 ivan Exp $
+// $Id: fishhang.c,v 1.19 2007/11/30 14:54:32 jmaynard Exp $
 //
 // $Log: fishhang.c,v $
+// Revision 1.19  2007/11/30 14:54:32  jmaynard
+// Changed conmicro.cx to hercules-390.org or conmicro.com, as needed.
+//
 // Revision 1.18  2007/06/23 00:04:09  ivan
 // Update copyright notices to include current year (2007)
 //

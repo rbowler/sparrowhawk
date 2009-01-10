@@ -1,7 +1,7 @@
 /* TRACE.C      (c) Copyright Jan Jaeger, 2000-2007                  */
 /*              Implicit tracing functions                           */
 
-// $Id: trace.c,v 1.31 2007/06/23 00:04:19 ivan Exp $
+// $Id: trace.c,v 1.32 2008/02/28 22:06:34 ptl00 Exp $
 
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
@@ -19,6 +19,9 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: trace.c,v $
+// Revision 1.32  2008/02/28 22:06:34  ptl00
+// Fix mode switch trace
+//
 // Revision 1.31  2007/06/23 00:04:19  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -205,7 +208,7 @@ typedef struct _TRACE_F2_PR {
 BYTE    format;
 #define TRACE_F2_PR_FMT 0x32
 BYTE    pswkey;
-#define TRACE_F2_PR_FM2 0x00
+#define TRACE_F2_PR_FM2 0x02
 HWORD   newpasn;
 FWORD   retna;
 FWORD   newia;
@@ -278,7 +281,7 @@ BYTE    pswkey;
 #define TRACE_F9_PR_FM2 0x0F
 HWORD   newpasn;
 DBLWRD  retna;
-FWORD   newia;
+DBLWRD  newia;
 } TRACE_F9_PR;
 
 typedef struct _TRACE_F1_PC {
@@ -786,8 +789,7 @@ int  size;
         STORE_HW(tte->newpasn, newregs->CR_LHL(4));
         STORE_FW(tte->retna, (newregs->psw.amode << 31)
                                 | newregs->psw.IA_L | PROBSTATE(&newregs->psw));
-        STORE_FW(tte->newia, (regs->psw.amode << 31)
-                                 | regs->psw.IA_L);
+        STORE_FW(tte->newia, regs->psw.IA_L);
     }
     else
     if(regs->psw.amode64 && regs->psw.IA_H != 0 && !newregs->psw.amode64)
@@ -963,14 +965,14 @@ BYTE nbit = (pti ? 1 : 0);
 /*                                                                   */
 /* Input:                                                            */
 /*      br      Mode switch branch indicator                         */
-/*      ia      updated instruction address                          */
+/*      baddr   Branch address for mode switch branch                */
 /*      regs    Pointer to the CPU register context                  */
 /* Return value:                                                     */
 /*      Updated value for CR12 after adding new trace entry          */
 /*                                                                   */
 /*      This function does not return if a program check occurs.     */
 /*-------------------------------------------------------------------*/
-CREG ARCH_DEP(trace_ms) (int br, VADR ia, REGS *regs)
+CREG ARCH_DEP(trace_ms) (int br, VADR baddr, REGS *regs)
 {
 RADR raddr;
 RADR ag;
@@ -992,7 +994,7 @@ int  size;
             STORE_FW(tte->newia, regs->psw.IA | (regs->psw.amode << 31));
         }
         else
-        if(regs->psw.amode64 && ia <= 0x7FFFFFFF)
+        if(regs->psw.amode64 && regs->psw.IA <= 0x7FFFFFFF)
         {
             TRACE_F2_MS *tte;
             size = sizeof(TRACE_F2_MS);
@@ -1017,7 +1019,8 @@ int  size;
     }
     else
     {
-        if(!regs->psw.amode64)
+        /* if currently in 64-bit, we are switching out */
+        if(regs->psw.amode64)
         {
             TRACE_F1_MSB *tte;
             size = sizeof(TRACE_F1_MSB);
@@ -1026,10 +1029,10 @@ int  size;
             tte->format = TRACE_F1_MSB_FMT;
             tte->fmt2 = TRACE_F1_MSB_FM2;
             STORE_HW(tte->resv, 0);
-            STORE_FW(tte->newia, ia);
+            STORE_FW(tte->newia, baddr);
         }
         else
-        if(regs->psw.amode64 && ia <= 0x7FFFFFFF)
+        if(!regs->psw.amode64 && baddr <= 0x7FFFFFFF)
         {
             TRACE_F2_MSB *tte;
             size = sizeof(TRACE_F2_MSB);
@@ -1038,7 +1041,7 @@ int  size;
             tte->format = TRACE_F2_MSB_FMT;
             tte->fmt2 = TRACE_F2_MSB_FM2;
             STORE_HW(tte->resv, 0);
-            STORE_FW(tte->newia, ia);
+            STORE_FW(tte->newia, baddr);
         }
         else
         {
@@ -1049,7 +1052,7 @@ int  size;
             tte->format = TRACE_F3_MSB_FMT;
             tte->fmt2 = TRACE_F3_MSB_FM2;
             STORE_HW(tte->resv, 0);
-            STORE_DW(tte->newia, ia);
+            STORE_DW(tte->newia, baddr);
         }
     }
 

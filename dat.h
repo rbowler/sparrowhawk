@@ -4,7 +4,7 @@
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 
-// $Id: dat.h,v 1.107 2007/06/23 00:04:08 ivan Exp $
+// $Id: dat.h,v 1.112 2008/12/08 20:38:20 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements the DAT, ALET, and ASN translation         */
@@ -24,6 +24,22 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: dat.h,v $
+// Revision 1.112  2008/12/08 20:38:20  ivan
+// Fix SIE DAT Issue with ESA/390 Guest on z/Arch host with >2GB of storage
+//
+// Revision 1.111  2008/03/16 00:04:37  rbowler
+// Replace ACC_ARMODE by USE_ARMODE for LPTEA
+//
+// Revision 1.110  2008/03/15 23:41:16  rbowler
+// Correct end function comment for logical_to_main
+//
+// Revision 1.109  2008/01/25 00:50:18  gsmith
+// Fix invalidate_tlbe processing - Paul Leisy
+//
+// Revision 1.108  2007/08/31 10:01:01  ivan
+// Throw an addressing exception when a SIE host->guest DAT points beyond
+// addressable storage
+//
 // Revision 1.107  2007/06/23 00:04:08  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -565,8 +581,8 @@ int i;
 /*      arn     Access register number (0-15) to be used if the      */
 /*              address-space control (PSW bits 16-17) indicates     */
 /*              that ARMODE is the current translation mode.         */
-/*              An access type ORed with the special value           */
-/*              ACC_ARMODE forces this routine to use ARMODE         */
+/*              An access register number ORed with the special      */
+/*              value USE_ARMODE forces this routine to use ARMODE   */
 /*              regardless of the PSW address-space control setting. */
 /*              Access register 0 is treated as if it contained 0    */
 /*              and its actual contents are not examined.            */
@@ -652,9 +668,12 @@ U16     eax;                            /* Authorization index       */
     #if defined(FEATURE_ACCESS_REGISTERS)
         if (ACCESS_REGISTER_MODE(&regs->psw)
          || (SIE_ACTIVE(regs) && MULTIPLE_CONTROLLED_DATA_SPACE(regs->guestregs))
-         || (acctype & ACC_ARMODE)
+         || (arn & USE_ARMODE)
            )
         {
+            /* Remove flags giving access register number 0-15 */
+            arn &= 0xF;
+
             /* [5.8.4.1] Select the access-list-entry token */
             alet = (arn == 0) ? 0 :
                    /* Guest ALET if XC guest in AR mode */
@@ -1017,6 +1036,7 @@ U32     ptl;                            /* Page table length         */
         (((U32)pte & PAGETAB_PFRA_4K) << 8) | (vaddr & 0xFFF) :
         (((U32)pte & PAGETAB_PFRA_2K) << 8) | (vaddr & 0x7FF);
 
+    regs->dat.rpfra = regs->dat.raddr & PAGEFRAME_PAGEMASK;
 #endif /*!defined(FEATURE_S390_DAT) && !defined(FEATURE_ESAME)*/
 
 #if defined(FEATURE_S390_DAT)
@@ -1134,9 +1154,12 @@ U32     ptl;                            /* Page table length         */
     } /* end if(!TLB) */
 
     if(!(acctype & ACC_PTE))
+    {
     /* [3.11.3.5] Combine the page frame real address with the byte
        index of the virtual address to form the real address */
         regs->dat.raddr = (pte & PAGETAB_PFRA) | (vaddr & 0xFFF);
+        regs->dat.rpfra = (pte & PAGETAB_PFRA);
+    }
     else
     /* In the case of lock page, return the address of the
        pagetable entry */
@@ -1470,9 +1493,12 @@ U16     sx, px;                         /* Segment and page index,
     }
 
     if(!(acctype & ACC_PTE))
+    {
         /* Combine the page frame real address with the byte index
            of the virtual address to form the real address */
         regs->dat.raddr = (pte & ZPGETAB_PFRA) | (vaddr & 0xFFF);
+        regs->dat.rpfra = (pte & ZPGETAB_PFRA);
+    }
     else
         regs->dat.raddr = pto;
 #endif /*defined(FEATURE_ESAME)*/
@@ -1578,7 +1604,7 @@ reg_second_invalid:
         cc = 2;
         return cc;
     } /* end if(ACCTYPE_LPTEA) */
-     
+
     /* Otherwise set translation exception code */
     goto reg_second_excp;
 
@@ -1590,7 +1616,7 @@ reg_third_invalid:
         cc = 2;
         return cc;
     } /* end if(ACCTYPE_LPTEA) */
-     
+
     /* Otherwise set translation exception code */
     goto reg_third_excp;
 
@@ -1619,7 +1645,7 @@ reg_third_excp:
 
 tran_excp_addr:
     /* For LPTEA instruction, return xcode with cc = 3 */
-    if (acctype & ACC_LPTEA) 
+    if (acctype & ACC_LPTEA)
         return 3;
 
     /* Set the translation exception address */
@@ -1828,10 +1854,29 @@ int  i;
 
 /*-------------------------------------------------------------------*/
 /* Invalidate matching translation lookaside buffer entries          */
+/*                                                                   */
+/* Input:                                                            */
+/*      main    mainstore address to match on. This is mainstore     */
+/*              base plus absolute address (regs->mainstor+aaddr)    */
+/*                                                                   */
+/*    This function is called by the SSK(E) instructions to purge    */
+/*    TLB entries that match the mainstore address. The "main"       */
+/*    field in the TLB contains the mainstore address plus an        */
+/*    XOR hash with effective address (regs->mainstor+aaddr^addr).   */
+/*    Before the compare can happen, the effective address from      */
+/*    the tlb (TLB_VADDR) must be XORed with the "main" field from   */
+/*    the tlb (removing hash).  This is done using MAINADDR() macro. */
+/* NOTES:                                                            */
+/*   TLB_VADDR does not contain all the effective address bits and   */
+/*   must be created on-the-fly using the tlb index (i << shift).    */
+/*   TLB_VADDR also contains the tlbid, so the regs->tlbid is merged */
+/*   with the main input variable before the search is begun.        */
 /*-------------------------------------------------------------------*/
 _DAT_C_STATIC void ARCH_DEP(invalidate_tlbe) (REGS *regs, BYTE *main)
 {
-int i;
+    int     i;                          /* index into TLB            */
+    int     shift;                      /* Number of bits to shift   */
+    BYTE    *mainwid;                   /* mainstore with tlbid      */
 
     if (main == NULL)
     {
@@ -1839,14 +1884,14 @@ int i;
         return;
     }
 
+    mainwid = main + regs->tlbID;
+
     INVALIDATE_AIA_MAIN(regs, main);
+    shift = regs->arch_mode == ARCH_370 ? 11 : 12;
     for (i = 0; i < TLBN; i++)
-#if 1
-        if(regs->tlb.main[i] == main)
-#else
         if (MAINADDR(regs->tlb.main[i],
-                     regs->tlb.TLB_VADDR(i)) == main)
-#endif
+                     (regs->tlb.TLB_VADDR(i) | (i << shift)))
+                     == mainwid)
         {
             regs->tlb.acc[i] = 0;
 #if !defined(FEATURE_S390_DAT) && !defined(FEATURE_ESAME)
@@ -1860,13 +1905,11 @@ int i;
     if (regs->host && regs->guestregs)
     {
         INVALIDATE_AIA_MAIN(regs->guestregs, main);
+        shift = regs->guestregs->arch_mode == ARCH_370 ? 11 : 12;
         for (i = 0; i < TLBN; i++)
-#if 1
-            if(regs->guestregs->tlb.main[i] == main)
-#else
             if (MAINADDR(regs->guestregs->tlb.main[i],
-                         regs->guestregs->tlb.TLB_VADDR(i)) == main)
-#endif
+                         (regs->guestregs->tlb.TLB_VADDR(i) | (i << shift)))
+                         == mainwid)
             {
                 regs->guestregs->tlb.acc[i] = 0;
 #if !defined(FEATURE_S390_DAT) && !defined(FEATURE_ESAME)
@@ -1880,13 +1923,11 @@ int i;
     if (regs->guest)
     {
         INVALIDATE_AIA_MAIN(regs->hostregs, main);
+        shift = regs->hostregs->arch_mode == ARCH_370 ? 11 : 12;
         for (i = 0; i < TLBN; i++)
-#if 1
-            if(regs->hostregs->tlb.main[i] == main)
-#else
             if (MAINADDR(regs->hostregs->tlb.main[i],
-                         regs->hostregs->tlb.TLB_VADDR(i)) == main)
-#endif
+                         (regs->hostregs->tlb.TLB_VADDR(i) | (i << shift)))
+                         == mainwid)
             {
                 regs->hostregs->tlb.acc[i] = 0;
 #if !defined(FEATURE_S390_DAT) && !defined(FEATURE_ESAME)
@@ -2093,6 +2134,7 @@ _LOGICAL_C_STATIC BYTE *ARCH_DEP(logical_to_main) (VADR addr, int arn,
                                     REGS *regs, int acctype, BYTE akey)
 {
 RADR    aaddr;                          /* Absolute address          */
+RADR    apfra;                          /* Abs page frame address    */
 int     ix = TLBIX(addr);               /* TLB index                 */
 
     /* Convert logical address to real address */
@@ -2113,6 +2155,7 @@ int     ix = TLBIX(addr);               /* TLB index                 */
     {
         regs->dat.private = regs->dat.protect = 0;
         regs->dat.raddr = addr;
+        regs->dat.rpfra = addr & PAGEFRAME_PAGEMASK;
 
         /* Setup `real' TLB entry (for MADDR) */
         regs->tlb.TLB_ASD(ix)   = TLB_REAL_ASD;
@@ -2133,6 +2176,7 @@ int     ix = TLBIX(addr);               /* TLB index                 */
 
     /* Convert real address to absolute address */
     regs->dat.aaddr = aaddr = APPLY_PREFIXING (regs->dat.raddr, regs->PX);
+    apfra=APPLY_PREFIXING(regs->dat.rpfra,regs->PX);
 
     /* Program check if absolute address is outside main storage */
     if (regs->dat.aaddr > regs->mainlim)
@@ -2161,6 +2205,10 @@ int     ix = TLBIX(addr);               /* TLB index                 */
         /* Convert host real address to host absolute address */
         regs->hostregs->dat.aaddr = aaddr =
               APPLY_PREFIXING (regs->hostregs->dat.raddr, regs->hostregs->PX);
+        apfra = APPLY_PREFIXING(regs->hostregs->dat.rpfra, regs->hostregs->PX);
+
+        if(regs->hostregs->dat.aaddr > regs->hostregs->mainlim)
+            goto vabs_addr_excp;
     }
 
     /* Do not apply host key access when SIE fetches/stores data */
@@ -2187,7 +2235,7 @@ int     ix = TLBIX(addr);               /* TLB index                 */
         regs->tlb.storkey[ix]    = regs->dat.storkey;
         regs->tlb.skey[ix]       = *regs->dat.storkey & STORKEY_KEY;
         regs->tlb.acc[ix]        = ACC_READ;
-        regs->tlb.main[ix]       = NEW_MAINADDR (regs, addr, aaddr);
+        regs->tlb.main[ix]       = NEW_MAINADDR (regs, addr, apfra);
 
     }
     else
@@ -2212,7 +2260,7 @@ int     ix = TLBIX(addr);               /* TLB index                 */
         regs->tlb.acc[ix]     = (addr >= PSA_SIZE || regs->dat.private)
                               ? (ACC_READ|ACC_CHECK|acctype)
                               :  ACC_READ;
-        regs->tlb.main[ix]    = NEW_MAINADDR (regs, addr, aaddr);
+        regs->tlb.main[ix]    = NEW_MAINADDR (regs, addr, apfra);
 
 #if defined(FEATURE_PER)
         if (EN_IC_PER_SA(regs))
@@ -2269,7 +2317,7 @@ vabs_prog_check:
     regs->program_interrupt (regs, regs->dat.xcode);
 
     return NULL; /* prevent warning from compiler */
-} /* end function logical_to_abs */
+} /* end function ARCH_DEP(logical_to_main) */
 
 #endif /*!defined(OPTION_NO_INLINE_LOGICAL) || defined(_DAT_C) */
 

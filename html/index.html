@@ -39,6 +39,7 @@ The Hercules System/370, ESA/390, and z/Architecture Emulator</TITLE>
 <b>Hercules</b> is an open source software implementation of the mainframe
 System/370 and ESA/390 architectures, in addition to the new 64-bit
 z/Architecture. Hercules runs under Linux, Windows (98, NT, 2000, and XP),
+Solaris, FreeBSD,
 and Mac OS X (10.3 and later).
 
 <p>
@@ -73,8 +74,8 @@ programmers is constantly at work implementing new features and fixing bugs.
 <h4>PDF manuals:</h4>
 <ul>
 <li><a href="HerculesGeneralInfo.pdf">Hercules General Information</a>
-<li><a href="HerculesWindowsInstall.pdf">Hercules Installation Guide
-(Windows)</a>
+<li><a href="HerculesReferenceSummary.pdf">Hercules Reference Summary</a>
+<li><a href="HerculesInstallation.pdf">Hercules Installation Guide</a>
 <li><a href="HerculesUserReference.pdf">Hercules User Reference Guide</a>
 <li><a href="HerculesMessagesandCodes.pdf">Hercules Messages and Codes</a>
 </ul>
@@ -87,40 +88,45 @@ programmers is constantly at work implementing new features and fixing bugs.
 <li>Source tarball:
 <p>
 <ul>
-<li><a href="http://www.hercules-390.org/hercules-3.05.tar.gz">hercules-3.05.tar.gz</a>
+<li><a href="http://www.hercules-390.org/hercules-3.06.tar.gz">hercules-3.06.tar.gz</a>
 </ul>
 <p>
 <li>Linux:
 <p>
 <ul>
-<li><a href="http://www.hercules-390.org/hercules-3.05-1.i686.rpm">hercules-3.05-1.i686.rpm</a>: Intel RPM
-<li><a href="http://www.hercules-390.org/hercules-3.05-1.src.rpm">hercules-3.05-1.src.rpm</a>: Source
+<li><a href="http://www.hercules-390.org/hercules-3.06-1.i686.rpm">hercules-3.06-1.i686.rpm</a>: Intel RPM
+<li><a href="http://www.hercules-390.org/hercules-3.06-1.src.rpm">hercules-3.06-1.src.rpm</a>: Source
 RPM (if you want to build RPMs yourself)
 </ul>
 <p>
 <li>Windows native program:
 <p>
 <ul>
-<li><a href="http://www.hercules-390.org/hercules-3.05-native.msi">hercules-3.05-native.msi</a>:
+<li><a href="http://www.hercules-390.org/hercules-3.06-native.msi">hercules-3.06-native.msi</a>:
 Windows Installer package
-<li><a href="http://www.hercules-390.org/hercules-3.05-native.exe">hercules-3.05-native.exe</a>:
+<li><a href="http://www.hercules-390.org/hercules-3.06-native.exe">hercules-3.06-native.exe</a>:
 Binaries only self-extracting archive
+<li><a href="http://www.hercules-390.org/hercules-3.06-native.zip">hercules-3.06-native.zip</a>:
+Binaries only archive
 <p>
 <small>
-<b>Note:</b> if you haven't ever installed the MSVC (native) version of Hercules on your system before
-(i.e. if this is the first time you are installing it), please use the .msi Windows Installer package
-since it will ensure the required Microsoft support DLLs are also installed.
-If you are simply upgrading from a previous MSVC (native) installation however, then since you
-only need the new Hercules binaries (and not the MS support DLLs),
-you may, if you wish, use the self-extracting archive instead.
+<b>Note:</b> Installing the .msi Windows Installer package ensures the
+required Microsoft Runtime components are installed and also provides
+convenience shortcuts in the programs menu. If the required components
+are already present and the shortcuts are not needed on the target system,
+the self-extracting or .zip archive may be used instead.
+<br>
+The required component for this build is the x86 version of the C runtime at level 8.50727.762.
 </small>
 </ul>
 <p>
 <li>Mac OS X:
 <p>
 <ul>
-<li><a href="http://www.hercules-390.org/hercules-3.05-tiger.dmg">hercules-3.05-tiger.dmg</a>: Mac OS X
-10.4 (Tiger) universal binary version (with internationalization)
+<li><a href="http://www.hercules-390.org/hercules-3.06-tiger.dmg">hercules-3.06-tiger.dmg</a>: Mac OS X
+10.4 (Tiger) universal binary version, 32-bit version only
+<li><a href="http://www.hercules-390.org/hercules-3.06-leopard.dmg">hercules-3.06-leopard.dmg</a>: Mac OS X
+10.5 (Leopard) universal binary version, 32-and 64-bit
 </ul>
 </ul>
 
@@ -235,6 +241,22 @@ Thanks much for making this product part of the open-source community!
 &#148;</em>
 <br>&#151;
 Roby Gamboa
+<p>
+<em>&#147;
+I have DOS and DOS/VS running on Hercules with
+some demo applications, both batch and on-line.  It does bring back
+some good memories. My compliments go to the Hercules team.  Thank you.
+&#148;</em>
+<br>&#151;
+Bill Carlborg
+<p>
+<em>&#147;
+This is stunning piece of work. To say that I am blown away is an
+understatement. I have a mainframe on my notebook!!!!!!
+P.S. Now if I can just remember my JCL
+&#148;</em>
+<br>&#151;
+Roger Tunnicliffe
 
 <p><br><br>
 
@@ -257,8 +279,8 @@ describing how to run Linux/390 under Hercules.
 Then suddenly, all mention of Hercules was mysteriously
 removed from the online edition of the book!
 Read the story of the disappearing Redbook chapter at
-<a href="http://www.trustsec.de/deb390/print.php?sid=26">
-http://www.trustsec.de/deb390/print.php?sid=26</a>
+<a href="http://www2.marist.edu/htbin/wlvtype?LINUX-VM.25658">
+http://www2.marist.edu/htbin/wlvtype?LINUX-VM.25658</a>
 
 <p>
 View the foils from Jay Maynard's presentation given at
@@ -360,9 +382,9 @@ Other Hercules-related sites
 http://groups.yahoo.com/group/hercules-390</a>.
 <p>
 Bug reports (together with your diagnosis of the fault, please)
-may be sent to me, <a href="http://www.conmicro.cx">Jay Maynard</a>,
-at <a href="mailto:jmaynard@conmicro.cx"><em>jmaynard </em>&#064;<em>
-conmicro.cx</em></a>.
+may be sent to me, <a href="http://www.conmicro.com">Jay Maynard</a>,
+at <a href="mailto:jmaynard@conmicro.com"><em>jmaynard </em>&#064;<em>
+conmicro.com</em></a>.
 
 <p><br>
 
@@ -378,7 +400,7 @@ Other product names mentioned here are trademarks of other companies.
 
 </small>
 
-<p class="lastupd">Last updated $Date: 2007/06/23 19:23:26 $ $Revision: 1.55 $</p>
+<p class="lastupd">Last updated $Date: 2009/01/09 15:23:50 $ $Revision: 1.63 $</p>
 
 </td></tr></table>
 

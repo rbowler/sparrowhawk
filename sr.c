@@ -1,9 +1,18 @@
 /* SR.C         (c)Copyright Greg Smith, 2005-2007                   */
 /*              Suspend/Resume a Hercules session                    */
 
-// $Id: sr.c,v 1.32 2007/06/23 00:04:16 ivan Exp $
+// $Id: sr.c,v 1.35 2008/11/04 05:56:31 fish Exp $
 //
 // $Log: sr.c,v $
+// Revision 1.35  2008/11/04 05:56:31  fish
+// Put ensure consistent create_thread ATTR usage change back in
+//
+// Revision 1.34  2008/11/03 15:31:53  rbowler
+// Back out consistent create_thread ATTR modification
+//
+// Revision 1.33  2008/10/18 09:32:21  fish
+// Ensure consistent create_thread ATTR usage
+//
 // Revision 1.32  2007/06/23 00:04:16  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -1292,19 +1301,19 @@ S64      dreg;
             switch (sysblk.arch_mode) {
 #if defined(_370)
             case ARCH_370:
-                rc = create_thread (&dev->tid, &sysblk.detattr,
+                rc = create_thread (&dev->tid, DETACHED,
                                     s370_execute_ccw_chain, dev, "device thread");
                 break;
 #endif
 #if defined(_390)
             case ARCH_390:
-                rc = create_thread (&dev->tid, &sysblk.detattr,
+                rc = create_thread (&dev->tid, DETACHED,
                                     s390_execute_ccw_chain, dev, "device thread");
                 break;
 #endif
 #if defined(_900)
             case ARCH_900:
-                rc = create_thread (&dev->tid, &sysblk.detattr,
+                rc = create_thread (&dev->tid, DETACHED,
                                     z900_execute_ccw_chain, dev, "device thread");
                 break;
 #endif

@@ -1,7 +1,7 @@
 /* DASDLOAD.C   (c) Copyright Roger Bowler, 1999-2007                */
 /*              Hercules DASD Utilities: DASD image loader           */
 
-// $Id: dasdload.c,v 1.53 2007/06/23 00:04:08 ivan Exp $
+// $Id: dasdload.c,v 1.54 2008/11/04 04:50:46 fish Exp $
 
 /*-------------------------------------------------------------------*/
 /* This program creates a virtual DASD volume from a list of         */
@@ -15,6 +15,9 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: dasdload.c,v $
+// Revision 1.54  2008/11/04 04:50:46  fish
+// Ensure consistent utility startup
+//
 // Revision 1.53  2007/06/23 00:04:08  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -4394,15 +4397,7 @@ int             altcylflag = 0;         /* Alternate cylinders flag  */
 int             lfs = 0;                /* 1 = Large file            */
 char            pathname[MAX_PATH];     /* cfname in host path format*/
 
-#ifdef EXTERNALGUI
-    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
-    {
-        extgui = 1;
-        argc--;
-        setvbuf(stderr, NULL, _IONBF, 0);
-        setvbuf(stdout, NULL, _IONBF, 0);
-    }
-#endif /*EXTERNALGUI*/
+    INITIALIZE_UTILITY("dasdload");
 
     /* Display the program identification message */
     display_version (stderr,

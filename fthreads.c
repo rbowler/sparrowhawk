@@ -2,12 +2,15 @@
 //         fthreads.c           Fish's WIN32 version of pthreads
 ////////////////////////////////////////////////////////////////////////////////////
 // (c) Copyright "Fish" (David B. Trout), 2001-2007. Released under the Q Public License
-// (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
+// (http://www.hercules-390.org/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: fthreads.c,v 1.29 2007/06/23 00:04:10 ivan Exp $
+// $Id: fthreads.c,v 1.30 2007/11/30 14:54:32 jmaynard Exp $
 //
 // $Log: fthreads.c,v $
+// Revision 1.30  2007/11/30 14:54:32  jmaynard
+// Changed conmicro.cx to hercules-390.org or conmicro.com, as needed.
+//
 // Revision 1.29  2007/06/23 00:04:10  ivan
 // Update copyright notices to include current year (2007)
 //

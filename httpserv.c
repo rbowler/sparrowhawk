@@ -1,7 +1,7 @@
 /* HTTPSERV.C   (c)Copyright Jan Jaeger, 2002-2007                   */
 /*              HTTP Server                                          */
 
-// $Id: httpserv.c,v 1.74 2007/06/23 00:04:12 ivan Exp $
+// $Id: httpserv.c,v 1.78 2008/11/04 05:56:31 fish Exp $
 
 /* This file contains all code required for the HTTP server,         */
 /* when the http_server thread is started it will listen on          */
@@ -30,6 +30,18 @@
 /*                                           Jan Jaeger - 28/03/2002 */
 
 // $Log: httpserv.c,v $
+// Revision 1.78  2008/11/04 05:56:31  fish
+// Put ensure consistent create_thread ATTR usage change back in
+//
+// Revision 1.77  2008/11/03 15:31:54  rbowler
+// Back out consistent create_thread ATTR modification
+//
+// Revision 1.76  2008/10/18 09:32:21  fish
+// Ensure consistent create_thread ATTR usage
+//
+// Revision 1.75  2008/05/28 16:39:44  fish
+// (use R_OK constant)
+//
 // Revision 1.74  2007/06/23 00:04:12  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -694,7 +706,7 @@ TID                     httptid;        /* Negotiation thread id     */
         // mode: 0 = exist only, 2 = write, 4 = read, 6 = read/write
         // rc: 0 = success, -1 = error (errno = cause)
         // ENOENT = File name or path not found.
-        if (access( absolute_httproot_path, 4 ) != 0)
+        if (access( absolute_httproot_path, R_OK ) != 0)
         {
             logmsg( _("HHCCF066E Invalid HTTPROOT: \"%s\": %s\n"),
                    absolute_httproot_path, strerror(errno));
@@ -793,7 +805,7 @@ TID                     httptid;        /* Negotiation thread id     */
             }
 
             /* Create a thread to execute the http request */
-            if ( create_thread (&httptid, &sysblk.detattr,
+            if ( create_thread (&httptid, DETACHED,
                                 http_request, (void *)(long)csock,
                                 "http_request")
                )

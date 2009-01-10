@@ -2,13 +2,22 @@
 /*       Perform chkdsk for a Compressed CKD Direct Access Storage   */
 /*       Device file.                                                */
 
-// $Id: cckdcdsk.c,v 1.42 2007/06/23 00:04:03 ivan Exp $
+// $Id: cckdcdsk.c,v 1.45 2008/11/04 04:50:45 fish Exp $
 
 /*-------------------------------------------------------------------*/
 /* Perform check function on a compressed ckd file                   */
 /*-------------------------------------------------------------------*/
 
 // $Log: cckdcdsk.c,v $
+// Revision 1.45  2008/11/04 04:50:45  fish
+// Ensure consistent utility startup
+//
+// Revision 1.44  2008/09/09 23:45:27  fish
+// 0 - 4, not 3
+//
+// Revision 1.43  2008/09/04 22:03:15  gsmith
+// Fix 64-bit length problem in cdsk_valid_trk - Tony Harminc
+//
 // Revision 1.42  2007/06/23 00:04:03  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -36,21 +45,7 @@ CCKDDASD_DEVHDR cdevhdr;                /* Compressed CKD device hdr */
 DEVBLK          devblk;                 /* DEVBLK                    */
 DEVBLK         *dev=&devblk;            /* -> DEVBLK                 */
 
-#if defined(ENABLE_NLS)
-    setlocale(LC_ALL, "");
-    bindtextdomain(PACKAGE, HERC_LOCALEDIR);
-    textdomain(PACKAGE);
-#endif
-
-#ifdef EXTERNALGUI
-    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
-    {
-        extgui = 1;
-        argc--;
-        setvbuf(stderr, NULL, _IONBF, 0);
-        setvbuf(stdout, NULL, _IONBF, 0);
-    }
-#endif /*EXTERNALGUI*/
+    INITIALIZE_UTILITY("cckdcdsk");
 
     /* parse the arguments */
     for (argc--, argv++ ; argc > 0 ; argc--, argv++)
@@ -138,16 +133,18 @@ int syntax()
 {
     fprintf (stderr, _("\ncckdcdsk [-v] [-f] [-level] [-ro] file1 [file2 ...]\n"
                 "\n"
-                "          -v      display version and exit\n"
+                "      -v      display version and exit\n"
                 "\n"
-                "          -f      force check even if OPENED bit is on\n"
+                "      -f      force check even if OPENED bit is on\n"
                 "\n"
-                "        level is a digit 0 - 3:\n"
-                "          -0  --  minimal checking\n"
-                "          -1  --  normal  checking\n"
-                "          -3  --  maximal checking\n"
+                "    level is a digit 0 - 4:\n"
+                "      -0  --  minimal checking (hdr, chdr, l1tab, l2tabs)\n"
+                "      -1  --  normal  checking (hdr, chdr, l1tab, l2tabs, free spaces)\n"
+                "      -2  --  extra   checking (hdr, chdr, l1tab, l2tabs, free spaces, trkhdrs)\n"
+                "      -3  --  maximal checking (hdr, chdr, l1tab, l2tabs, free spaces, trkimgs)\n"
+                "      -4  --  recover everything without using meta-data\n"
                 "\n"
-                "          -ro     open file readonly, no repairs\n"
+                "      -ro     open file readonly, no repairs\n"
                 "\n"));
     return -1;
 }

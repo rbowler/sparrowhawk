@@ -1,12 +1,86 @@
-/* OPCODE.H (c) Copyright Jan Jaeger, 2000-2007          */
+/* OPCODE.H (c) Copyright Jan Jaeger, 2000-2009          */
 /*      Instruction decoding macros and prototypes       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: opcode.h,v 1.208 2007/06/23 00:04:14 ivan Exp $
+// $Id: opcode.h,v 1.231 2009/01/02 19:21:51 jj Exp $
 //
 // $Log: opcode.h,v $
+// Revision 1.231  2009/01/02 19:21:51  jj
+// DVD-RAM IPL
+// RAMSAVE
+// SYSG Integrated 3270 console fixes
+//
+// Revision 1.230  2008/12/29 11:03:10  jj
+// Move HMC disk I/O functions to scedasd.c
+//
+// Revision 1.229  2008/12/21 02:51:58  ivan
+// Place the configuration in system check-stop state when a READ SCP INFO
+// is issued from a CPU that is not a CP Engine.
+//
+// Revision 1.228  2008/12/08 20:38:20  ivan
+// Fix SIE DAT Issue with ESA/390 Guest on z/Arch host with >2GB of storage
+//
+// Revision 1.227  2008/04/12 10:00:03  bernard
+// replaced exrl ifs within macros for conditional expressions
+//
+// Revision 1.226  2008/04/11 14:29:17  bernard
+// Integrate regs->exrl into base Hercules code.
+//
+// Revision 1.225  2008/04/09 06:53:05  bernard
+// Changes on request of Roger Bowler (No functional change)
+//
+// Revision 1.224  2008/04/08 17:14:36  bernard
+// Added execute relative long instruction
+//
+// Revision 1.223  2008/03/28 23:03:54  rbowler
+// Correct relative address calculation for RIL-format instructions
+//
+// Revision 1.222  2008/03/12 23:44:03  rbowler
+// Add MVCOS instruction (part 1)
+//
+// Revision 1.221  2008/03/12 21:41:21  rbowler
+// Add comment explaining 0 and _B forms of instruction decoders
+//
+// Revision 1.220  2008/03/08 22:28:04  rbowler
+// Add CHRL,CGHRL,CLRL,CLGRL,CLGFRL,CLHRL,CLGHRL,
+// CRL,CGRL,CGFRL instructions
+//
+// Revision 1.219  2008/03/04 15:42:49  rbowler
+// Add CRB,CGRB,CIB,CGIB,CLRB,CLGRB,CLIB,CLGIB instructions
+//
+// Revision 1.218  2008/02/29 15:53:10  rbowler
+// Instruction decoder for C4xx and C6xx instructions
+//
+// Revision 1.217  2008/02/29 00:57:03  rbowler
+// Modify compare_and_branch instruction names
+//
+// Revision 1.216  2008/02/29 00:08:25  rbowler
+// Additional RIE instruction formats
+//
+// Revision 1.215  2008/02/28 23:01:35  rbowler
+// RRS,SIL instruction formats
+//
+// Revision 1.214  2008/02/28 18:54:51  rbowler
+// RIS instruction format
+//
+// Revision 1.213  2008/02/28 17:18:01  rbowler
+// Opcodes for General-Instructions-Extension feature
+//
+// Revision 1.212  2008/02/28 11:08:26  rbowler
+// Opcodes for new instructions in zPOP-06
+//
+// Revision 1.211  2008/02/19 11:49:19  ivan
+// - Move setting of CPU priority after spwaning timer thread
+// - Added support for Posix 1003.1e capabilities
+//
+// Revision 1.210  2007/12/13 16:57:35  rbowler
+// Correct GENx___x390x___ definition (by Enrico Sorichetti)
+//
+// Revision 1.209  2007/11/15 22:54:43  rbowler
+// Correct PIC6 when loading DRM bits into FPC
+//
 // Revision 1.208  2007/06/23 00:04:14  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -134,7 +208,7 @@
         (void*)& _mnemonic "\0" #_name \
     }
 
-#define GENx___x390x_(_name,_format,_mnemonic) \
+#define GENx___x390x___(_name,_format,_mnemonic) \
     { \
     _GEN370(operation_exception) \
     _GEN390(_name) \
@@ -192,8 +266,9 @@
 typedef void (ATTR_REGPARM(2) *zz_func) (BYTE inst[], REGS *regs);
 
 #define ILC(_b) ((_b) < 0x40 ? 2 : (_b) < 0xc0 ? 4 : 6)
+
 #define REAL_ILC(_regs) \
- (likely(!(_regs)->execflag) ? (_regs)->psw.ilc : 4)
+ (likely(!(_regs)->execflag) ? (_regs)->psw.ilc : (_regs)->exrl ? 6 : 4)
 
 /* Gabor Hoffer (performance option) */
 OPC_DLL_IMPORT zz_func s370_opcode_table[];
@@ -212,6 +287,8 @@ OPC_DLL_IMPORT zz_func opcode_b3xx[][GEN_MAXARCH];
 OPC_DLL_IMPORT zz_func opcode_b9xx[][GEN_MAXARCH];
 OPC_DLL_IMPORT zz_func opcode_c0xx[][GEN_MAXARCH];
 OPC_DLL_IMPORT zz_func opcode_c2xx[][GEN_MAXARCH];                      /*@Z9*/
+OPC_DLL_IMPORT zz_func opcode_c4xx[][GEN_MAXARCH];                      /*208*/
+OPC_DLL_IMPORT zz_func opcode_c6xx[][GEN_MAXARCH];                      /*208*/
 OPC_DLL_IMPORT zz_func opcode_c8xx[][GEN_MAXARCH];
 OPC_DLL_IMPORT zz_func opcode_e3xx[][GEN_MAXARCH];
 OPC_DLL_IMPORT zz_func opcode_e4xx[256][GEN_MAXARCH];
@@ -267,6 +344,12 @@ int used; \
     case 0xC2:                                     /*@Z9*/ \
         used = sysblk.imapc2[(_inst)[1] & 0x0F]++; /*@Z9*/ \
         break;                                     /*@Z9*/ \
+    case 0xC4:                                     /*208*/ \
+        used = sysblk.imapc4[(_inst)[1] & 0x0F]++; /*208*/ \
+        break;                                     /*208*/ \
+    case 0xC6:                                     /*208*/ \
+        used = sysblk.imapc6[(_inst)[1] & 0x0F]++; /*208*/ \
+        break;                                     /*208*/ \
     case 0xC8: \
         used = sysblk.imapc8[(_inst)[1] & 0x0F]++; \
         break; \
@@ -449,7 +532,7 @@ do { \
     return; \
   } else { \
     if (unlikely((_regs)->execflag)) \
-      UPDATE_BEAR((_regs), (_len) - 4); \
+      UPDATE_BEAR((_regs), (_len) - ((_regs)->exrl ? 6 : 4)); \
     (_regs)->psw.IA = _newia; \
     (_regs)->aie = NULL; \
     PER_SB((_regs), (_regs)->psw.IA); \
@@ -468,7 +551,7 @@ do { \
     if (likely(!(_regs)->execflag)) \
       (_regs)->psw.IA = PSW_IA((_regs), (_offset)); \
     else { \
-      UPDATE_BEAR((_regs), (_len) - 4); \
+      UPDATE_BEAR((_regs), (_len) - ((_regs)->exrl ? 6 : 4)); \
       (_regs)->psw.IA = (_regs)->ET + (_offset); \
       (_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
     } \
@@ -492,7 +575,7 @@ do { \
     if (likely(!(_regs)->execflag)) \
       (_regs)->psw.IA = PSW_IA((_regs), (_offset)); \
     else { \
-      UPDATE_BEAR((_regs), 6 - 4); \
+      UPDATE_BEAR((_regs), 6 - ((_regs)->exrl ? 6 : 4)); \
       (_regs)->psw.IA = (_regs)->ET + (_offset); \
       (_regs)->psw.IA &= ADDRESS_MAXWRAP((_regs)); \
     } \
@@ -500,7 +583,6 @@ do { \
     PER_SB((_regs), (_regs)->psw.IA); \
   } \
 } while (0)
-
 
 /* CPU Stepping or Tracing */
 
@@ -618,15 +700,9 @@ do { \
         (_regs)->program_interrupt( (_regs), PGM_SPECIFICATION_EXCEPTION)
 
     /* Program check if fpc is not valid contents for FPC register */
-#if !defined(FEATURE_DECIMAL_FLOATING_POINT)
- #define FPC_CHECK(_fpc, _regs) \
-    if((_fpc) & (FPC_RESERVED | FPC_DRM)) \
-        (_regs)->program_interrupt( (_regs), PGM_SPECIFICATION_EXCEPTION)
-#else /*defined(FEATURE_DECIMAL_FLOATING_POINT)*/
- #define FPC_CHECK(_fpc, _regs) \
+#define FPC_CHECK(_fpc, _regs) \
     if((_fpc) & FPC_RESERVED) \
         (_regs)->program_interrupt( (_regs), PGM_SPECIFICATION_EXCEPTION)
-#endif /*defined(FEATURE_DECIMAL_FLOATING_POINT)*/
 
 #define SSID_CHECK(_regs) \
     if((!((_regs)->GR_LHH(1) & 0x0001)) \
@@ -921,7 +997,7 @@ do { \
 
 #define NEW_MAINADDR(_regs, _addr, _aaddr) \
    (BYTE*)((uintptr_t)((_regs)->mainstor \
-         + (uintptr_t)((_aaddr) & PAGEFRAME_PAGEMASK)) \
+         + (uintptr_t)(_aaddr)) \
          ^ (uintptr_t)((_addr) & TLB_PAGEMASK))
 
 /* Perform invalidation after storage key update.
@@ -972,6 +1048,28 @@ do { \
             if (_ilc) (_regs)->psw.ilc = (_ilc); \
         } while(0)
 
+/* Instruction decoders */
+
+/*
+ * A decoder is placed at the start of each instruction. The purpose
+ * of a decoder is to extract the operand fields according to the
+ * instruction format; to increment the instruction address (IA) field
+ * of the PSW by 2, 4, or 6 bytes; and to set the instruction length
+ * code (ILC) field of the PSW in case a program check occurs.
+ *
+ * Certain decoders have additional forms with 0 and _B suffixes.
+ * - the 0 suffix version does not update the PSW ILC.
+ * - the _B suffix version updates neither the PSW ILC nor the PSW IA.
+ *
+ * The "0" versions of the decoders are chosen whenever we know
+ * that past this point, no program interrupt will be generated
+ * (like most general instructions when no storage access is needed)
+ * therefore needing simpler prologue code.
+ * The "_B" versions for some of the decoders are intended for
+ * "branch" type operations where updating the PSW IA to IA+ILC 
+ * should only be done after the branch is deemed impossible.
+ */
+
 #undef DECODER_TEST_RRE
 #define DECODER_TEST_RRF_R
 #define DECODER_TEST_RRF_M
@@ -989,8 +1087,12 @@ do { \
 #undef DECODER_TEST_RSI
 #undef DECODER_TEST_RI
 #define DECODER_TEST_RIL
+#define DECODER_TEST_RIL_A
+#undef DECODER_TEST_RIS
+#undef DECODER_TEST_RRS
 #undef DECODER_TEST_SI
 #define DECODER_TEST_SIY
+#undef DECODER_TEST_SIL
 #undef DECODER_TEST_S
 #define DECODER_TEST_SS
 #define DECODER_TEST_SS_L
@@ -1831,6 +1933,78 @@ do { \
             INST_UPDATE_PSW((_regs), (_len), (_ilc)); \
     }
 
+/* RIE register and immediate with mask */                      /*208*/
+#undef RIE_RIM
+
+#define RIE_RIM(_inst, _regs, _r1, _i2, _m3) \
+        RIE_RIM_DECODER(_inst, _regs, _r1, _i2, _m3, 6, 6)
+
+#define RIE_RIM_DECODER(_inst, _regs, _r1, _i2, _m3, _len, _ilc) \
+    {   U32 temp = fetch_fw(&(_inst)[1]); \
+            (_m3) = (temp >> 4) & 0xf; \
+            (_i2) = (temp >> 8) & 0xffff; \
+            (_r1) = (temp >> 28) & 0xf; \
+            INST_UPDATE_PSW((_regs), (_len), (_ilc)); \
+    }
+
+/* RIE register to register with immediate and mask */          /*208*/
+#undef RIE_RRIM
+#undef RIE_RRIM0
+#undef RIE_RRIM_B
+
+#define RIE_RRIM(_inst, _regs, _r1, _r2, _i4, _m3) \
+        RIE_RRIM_DECODER(_inst, _regs, _r1, _r2, _i4, _m3, 6, 6)
+#define RIE_RRIM0(_inst, _regs, _r1, _r2, _i4, _m3) \
+        RIE_RRIM_DECODER(_inst, _regs, _r1, _r2, _i4, _m3, 6, 0)
+#define RIE_RRIM_B(_inst, _regs, _r1, _r2, _i4, _m3) \
+        RIE_RRIM_DECODER(_inst, _regs, _r1, _r2, _i4, _m3, 0, 0)
+
+#define RIE_RRIM_DECODER(_inst, _regs, _r1, _r2, _i4, _m3, _len, _ilc) \
+    {   U32 temp = fetch_fw(&(_inst)[1]); \
+            (_m3) = (temp >> 4) & 0xf; \
+            (_i4) = (temp >> 8) & 0xffff; \
+            (_r2) = (temp >> 24) & 0xf; \
+            (_r1) = (temp >> 28) & 0xf; \
+            INST_UPDATE_PSW((_regs), (_len), (_ilc)); \
+    }
+
+/* RIE register and mask with longer immediate and immediate */ /*208*/
+#undef RIE_RMII
+#undef RIE_RMII0
+#undef RIE_RMII_B
+
+#define RIE_RMII(_inst, _regs, _r1, _i2, _m3, _i4) \
+        RIE_RMII_DECODER(_inst, _regs, _r1, _i2, _m3, _i4, 6, 6)
+#define RIE_RMII0(_inst, _regs, _r1, _i2, _m3, _i4) \
+        RIE_RMII_DECODER(_inst, _regs, _r1, _i2, _m3, _i4, 6, 0)
+#define RIE_RMII_B(_inst, _regs, _r1, _i2, _m3, _i4) \
+        RIE_RMII_DECODER(_inst, _regs, _r1, _i2, _m3, _i4, 0, 0)
+
+#define RIE_RMII_DECODER(_inst, _regs, _r1, _i2, _m3, _i4, _len, _ilc) \
+    {   U32 temp = fetch_fw(&(_inst)[1]); \
+            (_i2) = temp & 0xff; \
+            (_i4) = (temp >> 8) & 0xffff; \
+            (_m3) = (temp >> 24) & 0xf; \
+            (_r1) = (temp >> 28) & 0xf; \
+            INST_UPDATE_PSW((_regs), (_len), (_ilc)); \
+    }
+
+/* RIE register to register with three immediate fields */      /*208*/
+#undef RIE_RRIII
+
+#define RIE_RRIII(_inst, _regs, _r1, _r2, _i3, _i4, _i5) \
+        RIE_RRIII_DECODER(_inst, _regs, _r1, _r2, _i3, _i4, _i5, 6, 6)
+
+#define RIE_RRIII_DECODER(_inst, _regs, _r1, _r2, _i3, _i4, _i5, _len, _ilc) \
+    {   U32 temp = fetch_fw(&(_inst)[1]); \
+            (_i5) = temp & 0xff; \
+            (_i4) = (temp >> 8) & 0xff; \
+            (_i3) = (temp >> 16) & 0xff; \
+            (_r2) = (temp >> 24) & 0xf; \
+            (_r1) = (temp >> 28) & 0xf; \
+            INST_UPDATE_PSW((_regs), (_len), (_ilc)); \
+    }
+
 /* RIL register and longer immediate with extended 4 bit op code */
 #undef RIL
 #undef RIL0
@@ -1867,6 +2041,140 @@ do { \
             (_i2) = fetch_fw(&(_inst)[2]); \
             (_op) = ((_inst)[1]     ) & 0xf; \
             (_r1) = ((_inst)[1] >> 4) & 0xf; \
+            INST_UPDATE_PSW((_regs), (_len), (_ilc)); \
+    }
+
+/* RIL register and longer immediate relative address */
+#undef RIL_A
+
+#if !defined(DECODER_TEST)&&!defined(DECODER_TEST_RIL_A)
+ #define RIL_A(_inst, _regs, _r1, _addr2) \
+         RIL_A_DECODER(_inst, _regs, _r1, _addr2, 6, 6)
+#else
+ #define RIL_A(_inst, _regs, _r1, _addr2) \
+         RIL_A_DECODER_TEST(_inst, _regs, _r1, _addr2, 6, 6)
+#endif
+
+#define RIL_A_DECODER(_inst, _regs, _r1, _addr2, _len, _ilc) \
+    {   U32 temp = fetch_fw(_inst); \
+        S64 offset; \
+            (_r1) = (temp >> 20) & 0xf; \
+            offset = 2LL*(S32)(((temp & 0xffff) << 16) \
+                    | ((_inst)[4] << 8) \
+                    | (_inst)[5]); \
+            (_addr2) = (likely(!(_regs)->execflag)) ? \
+                    PSW_IA((_regs), offset) : \
+                    ((_regs)->ET + offset) & ADDRESS_MAXWRAP((_regs)); \
+            INST_UPDATE_PSW((_regs), (_len), (_ilc)); \
+    }
+
+#define RIL_A_DECODER_TEST(_inst, _regs, _r1, _addr2, _len, _ilc) \
+    { \
+        S64 offset = 2LL*(S32)(fetch_fw(&(_inst)[2])); \
+            (_r1) = ((_inst)[1] >> 4) & 0xf; \
+            (_addr2) = (likely(!(_regs)->execflag)) ? \
+                    PSW_IA((_regs), offset) : \
+                    ((_regs)->ET + offset) & ADDRESS_MAXWRAP((_regs)); \
+            INST_UPDATE_PSW((_regs), (_len), (_ilc)); \
+    }
+
+/* RIS register, immediate, mask, and storage */                /*208*/
+#undef RIS
+#undef RIS0
+#undef RIS_B
+
+#if !defined(DECODER_TEST)&&!defined(DECODER_TEST_RIS)
+ #define RIS(_inst, _regs, _r1, _i2, _m3, _b4, _effective_addr4) \
+         RIS_DECODER(_inst, _regs, _r1, _i2, _m3, _b4, _effective_addr4, 6, 6)
+ #define RIS0(_inst, _regs, _r1, _i2, _m3, _b4, _effective_addr4) \
+         RIS_DECODER(_inst, _regs, _r1, _i2, _m3, _b4, _effective_addr4, 6, 0)
+ #define RIS_B(_inst, _regs, _r1, _i2, _m3, _b4, _effective_addr4) \
+         RIS_DECODER(_inst, _regs, _r1, _i2, _m3, _b4, _effective_addr4, 0, 0)
+#else
+ #define RIS(_inst, _regs, _r1, _i2, _m3, _b4, _effective_addr4) \
+         RIS_DECODER_TEST(_inst, _regs, _r1, _i2, _m3, _b4, _effective_addr4, 6, 6)
+ #define RISO(_inst, _regs, _r1, _i2, _m3, _b4, _effective_addr4) \
+         RIS_DECODER_TEST(_inst, _regs, _r1, _i2, _m3, _b4, _effective_addr4, 6, 0)
+ #define RIS_B(_inst, _regs, _r1, _i2, _m3, _b4, _effective_addr4) \
+         RIS_DECODER_TEST(_inst, _regs, _r1, _i2, _m3, _b4, _effective_addr4, 0, 0)
+#endif
+
+#define RIS_DECODER(_inst, _regs, _r1, _i2, _m3, _b4, _effective_addr4, _len, _ilc) \
+    {   U32 temp = fetch_fw(_inst); \
+            (_effective_addr4) = temp & 0xfff; \
+            (_b4) = (temp >> 12) & 0xf; \
+            if((_b4) != 0) \
+            { \
+                (_effective_addr4) += (_regs)->GR((_b4)); \
+                (_effective_addr4) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            (_m3) = (temp >> 16) & 0xf; \
+            (_r1) = (temp >> 20) & 0xf; \
+            (_i2) = (_inst)[4]; \
+            INST_UPDATE_PSW((_regs), (_len), (_ilc)); \
+    }
+
+#define RIS_DECODER_TEST(_inst, _regs, _r1, _i2, _m3, _b4, _effective_addr4, _len, _ilc) \
+    {   U32 temp = fetch_fw(_inst); \
+            (_effective_addr4) = temp & 0xfff; \
+            (_b4) = (temp >> 12) & 0xf; \
+            if((_b4)) { \
+                (_effective_addr4) += (_regs)->GR((_b4)); \
+                (_effective_addr4) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            (_m3) = (temp >> 16) & 0xf; \
+            (_r1) = (temp >> 20) & 0xf; \
+            (_i2) = (_inst)[4]; \
+            INST_UPDATE_PSW((_regs), (_len), (_ilc)); \
+    }
+
+/* RRS register, immediate, mask, and storage */                /*208*/
+#undef RRS
+#undef RRS0
+#undef RRS_B
+
+#if !defined(DECODER_TEST)&&!defined(DECODER_TEST_RRS)
+ #define RRS(_inst, _regs, _r1, _r2, _m3, _b4, _effective_addr4) \
+         RRS_DECODER(_inst, _regs, _r1, _r2, _m3, _b4, _effective_addr4, 6, 6)
+ #define RRS0(_inst, _regs, _r1, _r2, _m3, _b4, _effective_addr4) \
+         RRS_DECODER(_inst, _regs, _r1, _r2, _m3, _b4, _effective_addr4, 6, 0)
+ #define RRS_B(_inst, _regs, _r1, _r2, _m3, _b4, _effective_addr4) \
+         RRS_DECODER(_inst, _regs, _r1, _r2, _m3, _b4, _effective_addr4, 0, 0)
+#else
+ #define RRS(_inst, _regs, _r1, _r2, _m3, _b4, _effective_addr4) \
+         RRS_DECODER_TEST(_inst, _regs, _r1, _r2, _m3, _b4, _effective_addr4, 6, 6)
+ #define RRS0(_inst, _regs, _r1, _r2, _m3, _b4, _effective_addr4) \
+         RRS_DECODER_TEST(_inst, _regs, _r1, _r2, _m3, _b4, _effective_addr4, 6, 0)
+ #define RRS_B(_inst, _regs, _r1, _r2, _m3, _b4, _effective_addr4) \
+         RRS_DECODER_TEST(_inst, _regs, _r1, _r2, _m3, _b4, _effective_addr4, 0, 0)
+#endif
+
+#define RRS_DECODER(_inst, _regs, _r1, _r2, _m3, _b4, _effective_addr4, _len, _ilc) \
+    {   U32 temp = fetch_fw(_inst); \
+            (_effective_addr4) = temp & 0xfff; \
+            (_b4) = (temp >> 12) & 0xf; \
+            if((_b4) != 0) \
+            { \
+                (_effective_addr4) += (_regs)->GR((_b4)); \
+                (_effective_addr4) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            (_r2) = (temp >> 16) & 0xf; \
+            (_r1) = (temp >> 20) & 0xf; \
+            (_m3) = ((_inst)[4] >> 4) & 0xf; \
+            INST_UPDATE_PSW((_regs), (_len), (_ilc)); \
+    }
+
+#define RRS_DECODER_TEST(_inst, _regs, _r1, _r2, _m3, _b4, _effective_addr4, _len, _ilc) \
+    {   U32 temp = fetch_fw(_inst); \
+            (_effective_addr4) = temp & 0xfff; \
+            (_b4) = (temp >> 12) & 0xf; \
+            if((_b4)) { \
+                (_effective_addr4) += (_regs)->GR((_b4)); \
+                (_effective_addr4) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            (_r2) = (temp >> 16) & 0xf; \
+            (_r1) = (temp >> 20) & 0xf; \
+            (_m3) = ((_inst)[4] >> 4) & 0xf; \
             INST_UPDATE_PSW((_regs), (_len), (_ilc)); \
     }
 
@@ -1949,6 +2257,43 @@ do { \
             (_effective_addr1) &= ADDRESS_MAXWRAP((_regs)); \
             INST_UPDATE_PSW((_regs), (_len), (_ilc)); \
             (_i2) = (temp >> 16) & 0xff; \
+    }
+
+/* SIL storage and longer immediate */                          /*208*/
+#undef SIL
+
+#if !defined(DECODER_TEST)&&!defined(DECODER_TEST_SIL)
+ #define SIL(_inst, _regs, _i2, _b1, _effective_addr1) \
+         SIL_DECODER(_inst, _regs, _i2, _b1, _effective_addr1, 6, 6)
+#else
+ #define SIL(_inst, _regs, _i2, _b1, _effective_addr1) \
+         SIL_DECODER_TEST(_inst, _regs, _i2, _b1, _effective_addr1, 6, 6)
+#endif
+
+#define SIL_DECODER(_inst, _regs, _i2, _b1, _effective_addr1, _len, _ilc) \
+    {   U32 temp = fetch_fw(&(_inst)[2]); \
+            (_i2) = temp & 0xffff; \
+            (_effective_addr1) = (temp >> 16) & 0xfff; \
+            (_b1) = (temp >> 28) & 0xf; \
+            if((_b1) != 0) \
+            { \
+                (_effective_addr1) += (_regs)->GR((_b1)); \
+                (_effective_addr1) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            INST_UPDATE_PSW((_regs), (_len), (_ilc)); \
+    }
+
+#define SIL_DECODER_TEST(_inst, _regs, _i2, _b1, _effective_addr1, _len, _ilc) \
+    {   U32 temp = fetch_fw(&(_inst)[2]); \
+            (_i2) = temp & 0xffff; \
+            (_effective_addr1) = (temp >> 16) & 0xfff; \
+            (_b1) = (temp >> 28) & 0xf; \
+            if((_b1) != 0) \
+            { \
+                (_effective_addr1) += (_regs)->GR((_b1)); \
+                (_effective_addr1) &= ADDRESS_MAXWRAP((_regs)); \
+            } \
+            INST_UPDATE_PSW((_regs), (_len), (_ilc)); \
     }
 
 /* S storage operand only */
@@ -2408,107 +2753,6 @@ do { \
 #define PERFORM_SERIALIZATION(_regs) do { } while (0)
 #define PERFORM_CHKPT_SYNC(_regs) do { } while (0)
 
-#if !defined(NO_SETUID)
-
-/* SETMODE(INIT)
- *   sets the saved uid to the effective uid, and
- *   sets the effective uid to the real uid, such
- *   that the program is running with normal user
- *   attributes, other then that it may switch to
- *   the saved uid by SETMODE(ROOT). This call is
- *   usually made upon entry to the setuid program.
- *
- * SETMODE(ROOT)
- *   sets the saved uid to the real uid, and
- *   sets the real and effective uid to the saved uid.
- *   A setuid root program will enter 'root mode' and
- *   will have all the appropriate access.
- *
- * SETMODE(USER)
- *   sets the real and effective uid to the uid of the
- *   caller.  The saved uid will be the effective uid
- *   upon entry to the program (as before SETMODE(INIT))
- *
- * SETMODE(TERM)
- *   sets real, effective and saved uid to the real uid
- *   upon entry to the program.  This call will revoke
- *   any setuid access that the thread/process has.  It
- *   is important to issue this call before an exec to a
- *   shell or other program that could introduce integrity
- *   exposures when running with root access.
- */
-
-#if defined(HAVE_SETRESUID)
-
-#define _SETMODE_INIT \
-do { \
-    getresuid(&sysblk.ruid,&sysblk.euid,&sysblk.suid); \
-    getresgid(&sysblk.rgid,&sysblk.egid,&sysblk.sgid); \
-    setresuid(sysblk.ruid,sysblk.ruid,sysblk.euid); \
-    setresgid(sysblk.rgid,sysblk.rgid,sysblk.egid); \
-} while(0)
-
-#define _SETMODE_ROOT \
-do { \
-    setresuid(sysblk.suid,sysblk.suid,sysblk.ruid); \
-} while(0)
-
-#define _SETMODE_USER \
-do { \
-    setresuid(sysblk.ruid,sysblk.ruid,sysblk.suid); \
-} while(0)
-
-#define _SETMODE_TERM \
-do { \
-    setresuid(sysblk.ruid,sysblk.ruid,sysblk.ruid); \
-    setresgid(sysblk.rgid,sysblk.rgid,sysblk.rgid); \
-} while(0)
-
-#elif defined(HAVE_SETREUID)
-
-#define _SETMODE_INIT \
-do { \
-    sysblk.ruid = getuid(); \
-    sysblk.euid = geteuid(); \
-    sysblk.rgid = getgid(); \
-    sysblk.egid = getegid(); \
-    setreuid(sysblk.euid, sysblk.ruid); \
-    setregid(sysblk.egid, sysblk.rgid); \
-} while (0)
-
-#define _SETMODE_ROOT \
-do { \
-    setreuid(sysblk.ruid, sysblk.euid); \
-    setregid(sysblk.rgid, sysblk.egid); \
-} while (0)
-
-#define _SETMODE_USER \
-do { \
-    setregid(sysblk.egid, sysblk.rgid); \
-    setreuid(sysblk.euid, sysblk.ruid); \
-} while (0)
-
-#define _SETMODE_TERM \
-do { \
-    setuid(sysblk.ruid); \
-    setgid(sysblk.rgid); \
-} while (0)
-
-#else /* defined(HAVE_SETRESUID) || defined(HAVE_SETEREUID) */
-
-#error Cannot figure out how to swap effective UID/GID, maybe you should define NO_SETUID?
-
-#endif /* defined(HAVE_SETREUID) || defined(HAVE_SETRESUID) */
-
-#define SETMODE(_func) _SETMODE_ ## _func
-
-#else /* !defined(NO_SETUID) */
-
-#define SETMODE(_func)
-
-#endif /* !defined(NO_SETUID) */
-
-
 /* Functions in module channel.c */
 int  ARCH_DEP(startio) (REGS *regs, DEVBLK *dev, ORB *orb);
 void *s370_execute_ccw_chain (DEVBLK *dev);
@@ -2555,6 +2799,7 @@ void z900_process_trace (REGS *regs);
 
 int cpu_init (int cpu, REGS *regs, REGS *hostregs);
 void ARCH_DEP(perform_io_interrupt) (REGS *regs);
+void ARCH_DEP(checkstop_config)(void);
 #if defined(_FEATURE_SIE)
 CPU_DLL_IMPORT void (ATTR_REGPARM(2) s370_program_interrupt) (REGS *regs, int code);
 #endif /*!defined(_FEATURE_SIE)*/
@@ -2608,20 +2853,27 @@ void store_status (REGS *ssreg, U64 aaddr);
 
 
 /* Functions in module ipl.c */
-int          load_main          (char *fname, RADR startloc);
-int ARCH_DEP(load_main)         (char *fname, RADR startloc);
 int          load_ipl           (U16 lcss, U16  devnum, int cpu, int clear);
 int ARCH_DEP(load_ipl)          (U16 lcss, U16  devnum, int cpu, int clear);
-int          load_hmc           (char *fname, int cpu, int clear);
-int ARCH_DEP(load_hmc)          (char *fname, int cpu, int clear);
 int          system_reset       (             int cpu, int clear);
 int ARCH_DEP(system_reset)      (             int cpu, int clear);
 int          cpu_reset          (REGS *regs);
 int ARCH_DEP(cpu_reset)         (REGS *regs);
 int          initial_cpu_reset  (REGS *regs);
 int ARCH_DEP(initial_cpu_reset) (REGS *regs);
+int ARCH_DEP(common_load_begin)  (int cpu, int clear);
+int ARCH_DEP(common_load_finish) (REGS *regs);
 void storage_clear(void);
 void xstorage_clear(void);
+
+
+/* Functions in module scedasd.c */
+int          load_main          (char *fname, RADR startloc);
+int ARCH_DEP(load_main)         (char *fname, RADR startloc);
+int          load_hmc           (char *fname, int cpu, int clear);
+int ARCH_DEP(load_hmc)          (char *fname, int cpu, int clear);
+void ARCH_DEP(sclp_scedio_request) (SCCB_HEADER *);
+void ARCH_DEP(sclp_scedio_event) (SCCB_HEADER *);
 
 
 /* Functions in module machchk.c */
@@ -2803,6 +3055,7 @@ DEF_INST(move_to_primary);
 DEF_INST(move_to_secondary);
 DEF_INST(move_with_destination_key);
 DEF_INST(move_with_key);
+DEF_INST(move_with_optional_specifications);                    /*208*/
 DEF_INST(move_with_source_key);
 DEF_INST(program_call);
 DEF_INST(program_return);
@@ -2986,7 +3239,7 @@ DEF_INST(store_float_long_y);
 DEF_INST(store_float_short_y);
 
 
-/* Instructions in general.c */
+/* Instructions in general1.c */
 DEF_INST(add_register);
 DEF_INST(add);
 DEF_INST(add_halfword);
@@ -3048,6 +3301,7 @@ DEF_INST(exclusive_or);
 DEF_INST(exclusive_or_immediate);
 DEF_INST(exclusive_or_character);
 DEF_INST(execute);
+DEF_INST(execute_relative_long);                                /*208*/
 DEF_INST(extract_access_register);
 DEF_INST(insert_character);
 DEF_INST(insert_characters_under_mask);
@@ -3080,6 +3334,9 @@ DEF_INST(multiply_halfword);
 DEF_INST(multiply_halfword_immediate);
 DEF_INST(multiply_single_register);
 DEF_INST(multiply_single);
+
+
+/* Instructions in general2.c */
 DEF_INST(or_register);
 DEF_INST(or);
 DEF_INST(or_immediate);
@@ -3120,9 +3377,86 @@ DEF_INST(test_under_mask_low);
 DEF_INST(translate);
 DEF_INST(translate_and_test);
 DEF_INST(translate_and_test_reverse);
+DEF_INST(translate_and_test_extended);                          /*208*/
+DEF_INST(translate_and_test_reverse_extended);                  /*208*/
 DEF_INST(translate_extended);
 DEF_INST(unpack);
 DEF_INST(update_tree);
+
+
+/* Instructions in general3.c */
+DEF_INST(add_immediate_long_storage);                           /*208*/
+DEF_INST(add_immediate_storage);                                /*208*/
+DEF_INST(add_logical_with_signed_immediate);                    /*208*/
+DEF_INST(add_logical_with_signed_immediate_long);               /*208*/
+DEF_INST(compare_and_branch_register);                          /*208*/
+DEF_INST(compare_and_branch_long_register);                     /*208*/
+DEF_INST(compare_and_branch_relative_register);                 /*208*/
+DEF_INST(compare_and_branch_relative_long_register);            /*208*/
+DEF_INST(compare_and_trap_long_register);                       /*208*/
+DEF_INST(compare_and_trap_register);                            /*208*/
+DEF_INST(compare_halfword_immediate_halfword_storage);          /*208*/
+DEF_INST(compare_halfword_immediate_long_storage);              /*208*/
+DEF_INST(compare_halfword_immediate_storage);                   /*208*/
+DEF_INST(compare_halfword_long);                                /*208*/
+DEF_INST(compare_halfword_relative_long);                       /*208*/
+DEF_INST(compare_halfword_relative_long_long);                  /*208*/
+DEF_INST(compare_immediate_and_branch);                         /*208*/
+DEF_INST(compare_immediate_and_branch_long);                    /*208*/
+DEF_INST(compare_immediate_and_branch_relative);                /*208*/
+DEF_INST(compare_immediate_and_branch_relative_long);           /*208*/
+DEF_INST(compare_immediate_and_trap);                           /*208*/
+DEF_INST(compare_immediate_and_trap_long);                      /*208*/
+DEF_INST(compare_logical_and_branch_long_register);             /*208*/
+DEF_INST(compare_logical_and_branch_register);                  /*208*/
+DEF_INST(compare_logical_and_branch_relative_long_register);    /*208*/
+DEF_INST(compare_logical_and_branch_relative_register);         /*208*/
+DEF_INST(compare_logical_and_trap_long_register);               /*208*/
+DEF_INST(compare_logical_and_trap_register);                    /*208*/
+DEF_INST(compare_logical_immediate_and_branch);                 /*208*/
+DEF_INST(compare_logical_immediate_and_branch_long);            /*208*/
+DEF_INST(compare_logical_immediate_and_branch_relative);        /*208*/
+DEF_INST(compare_logical_immediate_and_branch_relative_long);   /*208*/
+DEF_INST(compare_logical_immediate_and_trap_fullword);          /*208*/
+DEF_INST(compare_logical_immediate_and_trap_long);              /*208*/
+DEF_INST(compare_logical_immediate_fullword_storage);           /*208*/
+DEF_INST(compare_logical_immediate_halfword_storage);           /*208*/
+DEF_INST(compare_logical_immediate_long_storage);               /*208*/
+DEF_INST(compare_logical_relative_long);                        /*208*/
+DEF_INST(compare_logical_relative_long_halfword);               /*208*/
+DEF_INST(compare_logical_relative_long_long);                   /*208*/
+DEF_INST(compare_logical_relative_long_long_fullword);          /*208*/
+DEF_INST(compare_logical_relative_long_long_halfword);          /*208*/
+DEF_INST(compare_relative_long);                                /*208*/
+DEF_INST(compare_relative_long_long);                           /*208*/
+DEF_INST(compare_relative_long_long_fullword);                  /*208*/
+DEF_INST(extract_cache_attribute);                              /*208*/
+DEF_INST(load_address_extended_y);                              /*208*/
+DEF_INST(load_and_test_long_fullword);                          /*208*/
+DEF_INST(load_halfword_relative_long);                          /*208*/
+DEF_INST(load_halfword_relative_long_long);                     /*208*/
+DEF_INST(load_logical_halfword_relative_long);                  /*208*/
+DEF_INST(load_logical_halfword_relative_long_long);             /*208*/
+DEF_INST(load_logical_relative_long_long_fullword);             /*208*/
+DEF_INST(load_relative_long);                                   /*208*/
+DEF_INST(load_relative_long_long);                              /*208*/
+DEF_INST(load_relative_long_long_fullword);                     /*208*/
+DEF_INST(move_fullword_from_halfword_immediate);                /*208*/
+DEF_INST(move_halfword_from_halfword_immediate);                /*208*/
+DEF_INST(move_long_from_halfword_immediate);                    /*208*/
+DEF_INST(multiply_halfword_y);                                  /*208*/
+DEF_INST(multiply_single_immediate_fullword);                   /*208*/
+DEF_INST(multiply_single_immediate_long_fullword);              /*208*/
+DEF_INST(multiply_y);                                           /*208*/
+DEF_INST(prefetch_data);                                        /*208*/
+DEF_INST(prefetch_data_relative_long);                          /*208*/
+DEF_INST(rotate_then_and_selected_bits_long_reg);               /*208*/
+DEF_INST(rotate_then_exclusive_or_selected_bits_long_reg);      /*208*/
+DEF_INST(rotate_then_insert_selected_bits_long_reg);            /*208*/
+DEF_INST(rotate_then_or_selected_bits_long_reg);                /*208*/
+DEF_INST(store_halfword_relative_long);                         /*208*/
+DEF_INST(store_relative_long);                                  /*208*/
+DEF_INST(store_relative_long_long);                             /*208*/
 
 
 /* Instructions in io.c */
@@ -3233,7 +3567,9 @@ DEF_INST(extract_stacked_registers_long);
 DEF_INST(extract_psw);
 DEF_INST(extract_and_set_extended_authority);
 DEF_INST(load_address_relative_long);
+DEF_INST(perform_frame_management_function);                    /*208*/
 DEF_INST(perform_timing_facility_function);                     /*@Z9*/
+DEF_INST(perform_topology_function);                            /*208*/
 DEF_INST(store_facility_list);
 DEF_INST(store_facility_list_extended);                         /*@Z9*/
 DEF_INST(load_long_halfword_immediate);
@@ -3441,7 +3777,6 @@ DEF_INST(load_logical_halfword);                                /*@Z9*/
 DEF_INST(load_logical_halfword_register);                       /*@Z9*/
 DEF_INST(load_logical_long_halfword_register);                  /*@Z9*/
 DEF_INST(find_leftmost_one_long_register);                      /*@Z9*/
-DEF_INST(move_with_optional_specifications);
 DEF_INST(extract_cpu_time);
 
 

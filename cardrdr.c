@@ -1,7 +1,7 @@
 /* CARDRDR.C    (c) Copyright Roger Bowler, 1999-2007                */
 /*              ESA/390 Card Reader Device Handler                   */
 
-// $Id: cardrdr.c,v 1.46 2007/06/23 00:04:03 ivan Exp $
+// $Id: cardrdr.c,v 1.47 2007/11/21 22:54:13 fish Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
@@ -9,6 +9,9 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: cardrdr.c,v $
+// Revision 1.47  2007/11/21 22:54:13  fish
+// Use new BEGIN_DEVICE_CLASS_QUERY macro
+//
 // Revision 1.46  2007/06/23 00:04:03  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -330,7 +333,7 @@ int     fc;                             /* File counter              */
 static void cardrdr_query_device (DEVBLK *dev, char **class,
                 int buflen, char *buffer)
 {
-    *class = "RDR";
+    BEGIN_DEVICE_CLASS_QUERY( "RDR", dev, class, buflen, buffer );
 
     snprintf (buffer, buflen, "%s%s%s%s%s%s%s%s",
         ((dev->filename[0] == '\0') ? "*"          : (char *)dev->filename),

@@ -7,9 +7,40 @@
 //      The <config.h> header and other required headers are
 //      presumed to have already been #included ahead of it...
 
-// $Id: hmacros.h,v 1.17 2007/06/06 22:14:57 gsmith Exp $
+// $Id: hmacros.h,v 1.27 2008/11/29 21:28:01 rbowler Exp $
 //
 // $Log: hmacros.h,v $
+// Revision 1.27  2008/11/29 21:28:01  rbowler
+// Fix warnings C4267 because win64 declares send length as int not size_t
+//
+// Revision 1.26  2008/11/04 04:50:46  fish
+// Ensure consistent utility startup
+//
+// Revision 1.25  2008/09/02 06:09:01  fish
+// Have TRACE macro call DebugTrace function for MSVC DEBUG builds
+//
+// Revision 1.24  2008/08/21 18:34:45  fish
+// Fix i/o-interrupt-queue race condition
+//
+// Revision 1.23  2008/07/16 11:01:41  fish
+// Create "sizeof_member" macro
+//
+// Revision 1.22  2008/06/26 14:00:06  rbowler
+// CAP_SYS_NICE undeclared  when -DNO_SETUID
+//
+// Revision 1.21  2008/05/22 21:17:29  fish
+// Tape file extension neutrality support
+//
+// Revision 1.20  2008/02/19 11:49:19  ivan
+// - Move setting of CPU priority after spwaning timer thread
+// - Added support for Posix 1003.1e capabilities
+//
+// Revision 1.19  2008/01/23 00:47:40  rbowler
+// Modifications for VS9 C++ 2008 Express by Charlie Brint
+//
+// Revision 1.18  2007/12/10 23:12:02  gsmith
+// Tweaks to OPTION_MIPS_COUNTING processing
+//
 // Revision 1.17  2007/06/06 22:14:57  gsmith
 // Fix SYNCHRONIZE_CPUS when numcpu > number of host processors - Greg
 //
@@ -49,7 +80,7 @@
 #ifdef _MSVC_
   #define  create_pipe(a)       socketpair(AF_INET,IPPROTO_IP,SOCK_STREAM,a)
   #define  read_pipe(f,b,n)     recv(f,b,n,0)
-  #define  write_pipe(f,b,n)    send(f,b,n,0)
+  #define  write_pipe(f,b,n)    send(f,b,(int)n,0)
   #define  close_pipe(f)        closesocket(f)
 #else
   #define  create_pipe(f)       pipe(f)
@@ -113,6 +144,23 @@
   #else
     #define  va_copy(to,from)   memcpy((to),(from),sizeof(va_list))
   #endif
+#endif
+
+/*-------------------------------------------------------------------*/
+/* some handy array/struct macros...                                 */
+/*-------------------------------------------------------------------*/
+
+#ifndef   _countof
+  #define _countof(x)       ( sizeof(x) / sizeof(x[0]) )
+#endif
+#ifndef   arraysize
+  #define arraysize(x)      _countof(x)
+#endif
+#ifndef   sizeof_member
+  #define sizeof_member(_struct,_member) sizeof(((_struct*)0)->_member)
+#endif
+#ifndef   offsetof
+  #define offsetof(_struct,_member)   (size_t)&(((_struct*)0)->_member)
 #endif
 
 /*-------------------------------------------------------------------*/
@@ -204,16 +252,23 @@
 
 #if defined(DEBUG) || defined(_DEBUG)
 
-  #define TRACE   logmsg
-
   #ifdef _MSVC_
 
+    #define TRACE(...) \
+      do \
+      { \
+        IsDebuggerPresent() ? DebugTrace (__VA_ARGS__): \
+                              logmsg     (__VA_ARGS__); \
+      } \
+      while (0)
+
+    #undef ASSERT /* For VS9 2008 */
     #define ASSERT(a) \
       do \
       { \
         if (!(a)) \
         { \
-          logmsg("HHCxx999W *** Assertion Failed! *** %s(%d); function: %s\n",__FILE__,__LINE__,__FUNCTION__); \
+          TRACE("HHCxx999W *** Assertion Failed! *** %s(%d); function: %s\n",__FILE__,__LINE__,__FUNCTION__); \
           if (IsDebuggerPresent()) DebugBreak();   /* (break into debugger) */ \
         } \
       } \
@@ -221,25 +276,28 @@
 
   #else // ! _MSVC_
 
+    #define TRACE logmsg
+
     #define ASSERT(a) \
       do \
       { \
         if (!(a)) \
         { \
-          logmsg("HHCxx999W *** Assertion Failed! *** %s(%d)\n",__FILE__,__LINE__); \
+          TRACE("HHCxx999W *** Assertion Failed! *** %s(%d)\n",__FILE__,__LINE__); \
         } \
       } \
       while(0)
 
   #endif // _MSVC_
 
-  #define VERIFY(a)   ASSERT((a))
+  #define VERIFY  ASSERT
 
 #else // non-debug build...
 
   #ifdef _MSVC_
 
     #define TRACE       __noop
+    #undef ASSERT /* For VS9 2008 */
     #define ASSERT(a)   __noop
     #define VERIFY(a)   ((void)(a))
 
@@ -309,6 +367,10 @@ typedef U64  (*z900_trace_br_func) (int amode,  U64 ia, REGS *regs);
 
 #define MAX_REPORTED_MIPSRATE  (250000000) /* instructions / second  */
 #define MAX_REPORTED_SIOSRATE  (10000)     /* SIOs per second        */
+
+/* Instruction count for a CPU */
+#define INSTCOUNT(_regs) \
+ ((_regs)->hostregs->prevcount + (_regs)->hostregs->instcount)
 
 /*-------------------------------------------------------------------*/
 /* Obtain/Release mainlock.                                          */
@@ -446,7 +508,16 @@ typedef U64  (*z900_trace_br_func) (int amode,  U64 ia, REGS *regs);
 /* Macros to queue/dequeue a device on the I/O interrupt queue...    */
 /*-------------------------------------------------------------------*/
 
+/* NOTE: sysblk.iointqlk ALWAYS needed to examine sysblk.iointq */
+
 #define QUEUE_IO_INTERRUPT(_io) \
+ do { \
+   obtain_lock(&sysblk.iointqlk); \
+   QUEUE_IO_INTERRUPT_QLOCKED((_io)); \
+   release_lock(&sysblk.iointqlk); \
+ } while (0)
+
+#define QUEUE_IO_INTERRUPT_QLOCKED(_io) \
  do { \
    IOINT *prev; \
    for (prev = (IOINT *)&sysblk.iointq; prev->next != NULL; prev = prev->next) \
@@ -457,20 +528,50 @@ typedef U64  (*z900_trace_br_func) (int amode,  U64 ia, REGS *regs);
      prev->next = (_io); \
      (_io)->priority = (_io)->dev->priority; \
    } \
-   ON_IC_IOPENDING; \
-   WAKEUP_CPU_MASK (sysblk.waiting_mask); \
+        if ((_io)->pending)     (_io)->dev->pending     = 1; \
+   else if ((_io)->pcipending)  (_io)->dev->pcipending  = 1; \
+   else if ((_io)->attnpending) (_io)->dev->attnpending = 1; \
  } while (0)
 
 #define DEQUEUE_IO_INTERRUPT(_io) \
+ do { \
+   obtain_lock(&sysblk.iointqlk); \
+   DEQUEUE_IO_INTERRUPT_QLOCKED((_io)); \
+   release_lock(&sysblk.iointqlk); \
+ } while (0)
+
+#define DEQUEUE_IO_INTERRUPT_QLOCKED(_io) \
  do { \
    IOINT *prev; \
    for (prev = (IOINT *)&sysblk.iointq; prev->next != NULL; prev = prev->next) \
      if (prev->next == (_io)) { \
        prev->next = (_io)->next; \
+            if ((_io)->pending)     (_io)->dev->pending     = 0; \
+       else if ((_io)->pcipending)  (_io)->dev->pcipending  = 0; \
+       else if ((_io)->attnpending) (_io)->dev->attnpending = 0; \
        break; \
      } \
+ } while (0)
+
+/* NOTE: sysblk.iointqlk needed to examine sysblk.iointq,
+   sysblk.intlock (which MUST be held before calling these
+   macros) needed in order to set/reset IC_IOPENDING flag */
+
+#define UPDATE_IC_IOPENDING() \
+ do { \
+   obtain_lock(&sysblk.iointqlk); \
+   UPDATE_IC_IOPENDING_QLOCKED(); \
+   release_lock(&sysblk.iointqlk); \
+ } while (0)
+
+#define UPDATE_IC_IOPENDING_QLOCKED() \
+ do { \
    if (sysblk.iointq == NULL) \
      OFF_IC_IOPENDING; \
+   else { \
+     ON_IC_IOPENDING; \
+     WAKEUP_CPU_MASK (sysblk.waiting_mask); \
+   } \
  } while (0)
 
 /*-------------------------------------------------------------------*/
@@ -530,6 +631,47 @@ typedef U64  (*z900_trace_br_func) (int amode,  U64 ia, REGS *regs);
  } while (0)
 
 /*-------------------------------------------------------------------*/
+/* Perform standard utility initialization                           */
+/*-------------------------------------------------------------------*/
+
+#if !defined(ENABLE_NLS)
+  #define INITIALIZE_NLS()
+#else
+  #define INITIALIZE_NLS() \
+  do { \
+    setlocale(LC_ALL, ""); \
+    bindtextdomain(PACKAGE, HERC_LOCALEDIR); \
+    textdomain(PACKAGE); \
+  } while (0)
+#endif
+
+#if !defined(EXTERNALGUI)
+  #define INITIALIZE_EXTERNAL_GUI()
+#else
+  #define INITIALIZE_EXTERNAL_GUI() \
+  do { \
+    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0) { \
+        extgui = 1; \
+        argc--; \
+        setvbuf(stderr, NULL, _IONBF, 0); \
+        setvbuf(stdout, NULL, _IONBF, 0); \
+    } \
+  } while (0)
+#endif
+
+#define INITIALIZE_UTILITY(name) \
+  do { \
+    SET_THREAD_NAME(name); \
+    INITIALIZE_NLS(); \
+    INITIALIZE_EXTERNAL_GUI(); \
+    memset (&sysblk, 0, sizeof(SYSBLK)); \
+    initialize_detach_attr (DETACHED); \
+    initialize_join_attr   (JOINABLE); \
+    set_codepage(NULL); \
+    init_hostinfo( &hostinfo ); \
+  } while (0)
+
+/*-------------------------------------------------------------------*/
 /* Macro for Setting a Thread Name  (mostly for debugging purposes)  */
 /*-------------------------------------------------------------------*/
 
@@ -540,5 +682,120 @@ typedef U64  (*z900_trace_br_func) (int amode,  U64 ia, REGS *regs);
   #define  SET_THREAD_NAME_ID(t,n)
   #define  SET_THREAD_NAME(n)
 #endif
+
+#if !defined(NO_SETUID)
+
+/* SETMODE(INIT)
+ *   sets the saved uid to the effective uid, and
+ *   sets the effective uid to the real uid, such
+ *   that the program is running with normal user
+ *   attributes, other then that it may switch to
+ *   the saved uid by SETMODE(ROOT). This call is
+ *   usually made upon entry to the setuid program.
+ *
+ * SETMODE(ROOT)
+ *   sets the saved uid to the real uid, and
+ *   sets the real and effective uid to the saved uid.
+ *   A setuid root program will enter 'root mode' and
+ *   will have all the appropriate access.
+ *
+ * SETMODE(USER)
+ *   sets the real and effective uid to the uid of the
+ *   caller.  The saved uid will be the effective uid
+ *   upon entry to the program (as before SETMODE(INIT))
+ *
+ * SETMODE(TERM)
+ *   sets real, effective and saved uid to the real uid
+ *   upon entry to the program.  This call will revoke
+ *   any setuid access that the thread/process has.  It
+ *   is important to issue this call before an exec to a
+ *   shell or other program that could introduce integrity
+ *   exposures when running with root access.
+ */
+
+#if defined(HAVE_SYS_CAPABILITY_H) && defined(HAVE_SYS_PRCTL_H) && defined(OPTION_CAPABILITIES)
+
+#define SETMODE(_x)
+#define DROP_PRIVILEGES(_capa) drop_privileges(_capa)
+#define DROP_ALL_CAPS() drop_all_caps()
+
+#else
+
+#define DROP_PRIVILEGES(_capa)
+#define DROP_ALL_CAPS()
+
+#if defined(HAVE_SETRESUID)
+
+#define _SETMODE_INIT \
+do { \
+    getresuid(&sysblk.ruid,&sysblk.euid,&sysblk.suid); \
+    getresgid(&sysblk.rgid,&sysblk.egid,&sysblk.sgid); \
+    setresuid(sysblk.ruid,sysblk.ruid,sysblk.euid); \
+    setresgid(sysblk.rgid,sysblk.rgid,sysblk.egid); \
+} while(0)
+
+#define _SETMODE_ROOT \
+do { \
+    setresuid(sysblk.suid,sysblk.suid,sysblk.ruid); \
+} while(0)
+
+#define _SETMODE_USER \
+do { \
+    setresuid(sysblk.ruid,sysblk.ruid,sysblk.suid); \
+} while(0)
+
+#define _SETMODE_TERM \
+do { \
+    setresuid(sysblk.ruid,sysblk.ruid,sysblk.ruid); \
+    setresgid(sysblk.rgid,sysblk.rgid,sysblk.rgid); \
+} while(0)
+
+#elif defined(HAVE_SETREUID)
+
+#define _SETMODE_INIT \
+do { \
+    sysblk.ruid = getuid(); \
+    sysblk.euid = geteuid(); \
+    sysblk.rgid = getgid(); \
+    sysblk.egid = getegid(); \
+    setreuid(sysblk.euid, sysblk.ruid); \
+    setregid(sysblk.egid, sysblk.rgid); \
+} while (0)
+
+#define _SETMODE_ROOT \
+do { \
+    setreuid(sysblk.ruid, sysblk.euid); \
+    setregid(sysblk.rgid, sysblk.egid); \
+} while (0)
+
+#define _SETMODE_USER \
+do { \
+    setregid(sysblk.egid, sysblk.rgid); \
+    setreuid(sysblk.euid, sysblk.ruid); \
+} while (0)
+
+#define _SETMODE_TERM \
+do { \
+    setuid(sysblk.ruid); \
+    setgid(sysblk.rgid); \
+} while (0)
+
+#else /* defined(HAVE_SETRESUID) || defined(HAVE_SETEREUID) */
+
+#error Cannot figure out how to swap effective UID/GID, maybe you should define NO_SETUID?
+
+#endif /* defined(HAVE_SETREUID) || defined(HAVE_SETRESUID) */
+
+#define SETMODE(_func) _SETMODE_ ## _func
+
+#endif /* !defined(HAVE_SYS_CAPABILITY_H) */
+
+#else /* !defined(NO_SETUID) */
+
+#define SETMODE(_func)
+#define DROP_PRIVILEGES(_capa)
+#define DROP_ALL_CAPS()
+
+#endif /* !defined(NO_SETUID) */
 
 #endif // _HMACROS_H

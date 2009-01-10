@@ -3,11 +3,19 @@
 # --------------------------------------------------------------------------
 # (c) Copyright Roger Bowler, 2005-2007
 # --------------------------------------------------------------------------
+# $Id: VERSION.msvc,v 1.6 2009/01/09 16:31:25 jmaynard Exp $
 #
 #  Handles defining the product VERSION strings
 #
 #
 #                           CHANGE HISTORY
+# $Log: VERSION.msvc,v $
+# Revision 1.6  2009/01/09 16:31:25  jmaynard
+# 3.06 version number change.
+#
+# Revision 1.5  2008/01/31 22:45:17  rbowler
+# Fix LNK4010: invalid subsystem version number 4.0
+#
 # DD/MM/YY Description
 #
 # 26/12/06 Fish: created by extraction from existing makefile-dllmod.msvc
@@ -18,10 +26,11 @@
 !IFNDEF VERSION
 
 #   >>>  Jay!  <<<  Be sure to change the below V1/V2/V3/V4 values to match!
+#
 #   >>> Fish!! <<<  If you move this again, please change the comment in
 #                   configure.ac so I can find it again! :-)
 
-VERSION = \"3.05\"
+VERSION = \"3.06\"
 
 # The below VERSION digits values SHOULD match the ABOVE VERSION number.
 #
@@ -48,11 +57,21 @@ VERSION = \"3.05\"
 # correspond to V1=3, V2=03, V3=0, V4=2). -- JRM, 12 Feb 06
 
 V1 = 3
-V2 = 05
+V2 = 06
 V3 = 0
 V4 = 0
 
 !ENDIF
 
+!IF $(vsversion) < 9 
+
 APPVER   = 4.0
 TARGETOS = BOTH
+
+!ELSE # $(vsversion) >= 9
+
+APPVER   = 5.0
+TARGETOS = WINNT
+
+!ENDIF
+

@@ -1,11 +1,12 @@
-/* HSCCMD.C     (c) Copyright Roger Bowler, 1999-2007                */
-/*              (c) Copyright "Fish" (David B. Trout), 2002-2007     */
+/* HSCCMD.C     (c) Copyright Roger Bowler, 1999-2009                */
+/*              (c) Copyright "Fish" (David B. Trout), 2002-2009     */
 /*              Execute Hercules System Commands                     */
 /*                                                                   */
-/*   Released under the Q Public License (http://www.conmicro.cx/    */
-/*     hercules/herclic.html) as modifications to Hercules.          */
+/*   Released under the Q Public License                             */
+/*   (http://www.hercules-390.org/herclic.html) as modifications to  */
+/*   Hercules.                                                       */
 
-// $Id: hsccmd.c,v 1.219 2007/06/23 00:04:11 ivan Exp $
+// $Id: hsccmd.c,v 1.266 2009/01/10 00:18:33 jmaynard Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements the various Hercules System Console        */
@@ -17,6 +18,163 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: hsccmd.c,v $
+// Revision 1.266  2009/01/10 00:18:33  jmaynard
+// Allow a bare ENTER in cmdtgt scp or cmdtgt pscp mode to send a blank command
+// to the SCP.
+//
+// Revision 1.265  2009/01/09 23:41:36  jmaynard
+// Add ability to switch from cmdtgt scp/pscp back to cmdtgt herc.
+//
+// Revision 1.264  2009/01/09 13:43:52  jj
+// Ensure that devices which have the subchannel valid bit disabled can be
+// processed
+//
+// Revision 1.263  2009/01/07 16:37:12  bernard
+// hldmsg command
+//
+// Revision 1.262  2009/01/07 16:00:02  bernard
+// add msghldsec command
+//
+// Revision 1.261  2009/01/02 19:21:51  jj
+// DVD-RAM IPL
+// RAMSAVE
+// SYSG Integrated 3270 console fixes
+//
+// Revision 1.260  2009/01/01 02:00:41  hsg001
+// Allow iplc to work with service processor load
+//
+// Revision 1.259  2008/12/29 00:00:54  ivan
+// Change semantics for DIAG8CMD configuration statement
+// Disable command redisplay at the console when NOECHO is set
+// Commands typed with a '-' as the first character are not redisplayed
+//
+// Revision 1.258  2008/12/28 12:39:02  ivan
+// Define MAX() is not defined
+//
+// Revision 1.257  2008/12/28 06:11:47  ivan
+// MSG panel command support fixes
+//
+// Revision 1.256  2008/12/28 05:46:44  ivan
+// Emulate VM's MESSAGE & MSGNOH commands
+//
+// Revision 1.255  2008/11/25 23:00:11  rbowler
+// Issue HHCPN052E if ipl target is AP or IP engine
+//
+// Revision 1.254  2008/11/04 05:56:31  fish
+// Put ensure consistent create_thread ATTR usage change back in
+//
+// Revision 1.253  2008/11/03 15:31:56  rbowler
+// Back out consistent create_thread ATTR modification
+//
+// Revision 1.252  2008/10/18 09:32:21  fish
+// Ensure consistent create_thread ATTR usage
+//
+// Revision 1.251  2008/09/02 06:10:58  fish
+// Modified "$TEST" command (test_cmd function) to
+// help debug panel MSGHLD (sticky messages) logic
+//
+// Revision 1.250  2008/08/30 05:51:00  fish
+// Add help text for 'quiet' command
+//
+// Revision 1.249  2008/07/28 15:15:34  bernard
+// !scp -> pscp
+//
+// Revision 1.248  2008/07/27 10:21:03  rbowler
+// Fix  warning C4013: 'ProcessPanelCommand' undefined
+//
+// Revision 1.247  2008/07/24 14:42:21  bernard
+// cmdtgt version 2
+//
+// Revision 1.246  2008/07/20 12:10:57  bernard
+// OPTION_CMDTGT
+//
+// Revision 1.245  2008/07/16 11:05:10  fish
+// automount delete command: fix MINOR memory leak
+// and add support for optional relative path resolution.
+//
+// Revision 1.244  2008/07/08 05:35:49  fish
+// AUTOMOUNT redesign: support +allowed/-disallowed dirs
+// and create associated 'automount' panel command - Fish
+//
+// Revision 1.243  2008/05/28 16:38:34  fish
+// (fix typo in comment; no code was changed)
+//
+// Revision 1.242  2008/05/23 20:38:13  fish
+// Change device query calls to not ask for what they don't need
+//
+// Revision 1.241  2008/04/14 21:09:58  rbowler
+// Include C4xx,C6xx,C8xx instructions in icount display
+//
+// Revision 1.240  2008/03/28 02:09:42  fish
+// Add --blkid-24 option support, poserror flag renamed to fenced,
+// added 'generic', 'readblkid' and 'locateblk' tape media handler
+// call vectors.
+//
+// Revision 1.239  2008/03/25 11:41:31  fish
+// SCSI TAPE MODS part 1: groundwork: non-functional changes:
+// rename some functions, comments, general restructuring, etc.
+// New source modules awstape.c, omatape.c, hettape.c and
+// tapeccws.c added, but not yet used (all will be used in a future
+// commit though when tapedev.c code is eventually split)
+//
+// Revision 1.238  2008/03/07 17:46:17  ptl00
+// Add pri, sec, home options to v command
+//
+// Revision 1.237  2008/02/12 08:42:15  fish
+// dyngui tweaks: new def devlist fmt, new debug_cd_cmd hook
+//
+// Revision 1.236  2008/01/25 00:50:18  gsmith
+// Fix invalidate_tlbe processing - Paul Leisy
+//
+// Revision 1.235  2008/01/18 16:19:07  rbowler
+// Help text for sfk command
+//
+// Revision 1.234  2008/01/11 21:33:21  fish
+// new 'ctc' command to enable/disable debug option on demand
+//
+// Revision 1.233  2008/01/04 02:28:51  gsmith
+// sf commands update
+//
+// Revision 1.232  2007/12/10 23:12:02  gsmith
+// Tweaks to OPTION_MIPS_COUNTING processing
+//
+// Revision 1.231  2007/11/30 14:54:32  jmaynard
+// Changed conmicro.cx to hercules-390.org or conmicro.com, as needed.
+//
+// Revision 1.230  2007/11/21 23:33:46  fish
+// remove dead #if 0 code
+//
+// Revision 1.229  2007/11/11 17:14:22  rbowler
+// Add help panrate command
+//
+// Revision 1.228  2007/08/27 20:21:03  rbowler
+// PSW command logmsg format correction
+//
+// Revision 1.227  2007/08/27 11:13:04  rbowler
+// Modify PSW fields by psw command (part 3)
+//
+// Revision 1.226  2007/08/26 21:04:45  rbowler
+// Modify PSW fields by psw command (part 2)
+//
+// Revision 1.225  2007/08/24 16:31:26  rbowler
+// Modify PSW fields by psw command (part 1)
+//
+// Revision 1.224  2007/08/24 12:05:10  rbowler
+// Help for SSD command, sundry punctuation and spelling corrections.
+//
+// Revision 1.223  2007/08/24 11:21:54  rbowler
+// Modify control registers by cr command
+//
+// Revision 1.222  2007/08/07 11:18:30  ivan
+// Remove #if statement within macro parameter that MSVC doesn't seem to like
+//
+// Revision 1.221  2007/08/06 16:48:20  ivan
+// Implement "PARM" option for IPL command (same as VM IPL PARM XXX)
+// Also add command helps for ipl, iplc, sysclear, sysreset
+//
+// Revision 1.220  2007/07/29 10:05:05  fish
+// Fix PR# 34/tape bug causing crash if non-tape devinit
+//
 // Revision 1.219  2007/06/23 00:04:11  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -120,6 +278,7 @@
 
 #include "tapedev.h"
 #include "dasdtab.h"
+#include "ctcadpt.h"
 
 ///////////////////////////////////////////////////////////////////////
 // (forward references, etc)
@@ -130,6 +289,7 @@
 extern void ecpsvm_command(int argc,char **argv);
 #endif
 int process_script_file(char *,int);
+int ProcessPanelCommand (char*);
 
 
 ///////////////////////////////////////////////////////////////////////
@@ -139,12 +299,91 @@ int process_script_file(char *,int);
 #pragma optimize( "", off )
 #endif
 
+int test_p   = 0;
+int test_n   = 0;
+TID test_tid = 0;
+int test_msg_num = 0;
+
+char* test_p_msg = "<pnl,color(lightyellow,black),keep>Test protected message %d...\n";
+char* test_n_msg =                                    "Test normal message %d...\n";
+
+void do_test_msgs()
+{
+    int  i;
+    for (i=0; i < test_n; i++)
+        logmsg(   test_n_msg, test_msg_num++ );
+
+    if (         !test_p) return;
+    for (i=0; i < test_p; i++)
+        logmsg(   test_p_msg, test_msg_num++ );
+
+    if (         !test_n) return;
+    for (i=0; i < test_n; i++)
+        logmsg(   test_n_msg, test_msg_num++ );
+
+}
+
+void* test_thread(void* parg)
+{
+    logmsg("test thread: STARTING\n");
+
+    SLEEP( 5 );
+
+    do_test_msgs();
+
+    logmsg("test thread: EXITING\n");
+    test_tid = 0;
+    return NULL;
+}
+
 int test_cmd(int argc, char *argv[],char *cmdline)
 {
-    UNREFERENCED(argc);
-    UNREFERENCED(argv);
+//  UNREFERENCED(argc);
+//  UNREFERENCED(argv);
     UNREFERENCED(cmdline);
-    cause_crash();
+//  cause_crash();
+
+    if (test_tid)
+    {
+        logmsg("ERROR: test thread still running!\n");
+        return 0;
+    }
+
+    if (argc < 2 || argc > 4)
+    {
+        logmsg("Format: \"$test p=#msgs n=#msgs &\" (args can be in any order)\n");
+        return 0;
+    }
+
+    test_p = 0;
+    test_n = 0;
+
+    if (argc > 1)
+    {
+        if (strncasecmp(argv[1],   "p=",2) == 0) test_p = atoi( &argv[1][2] );
+        if (strncasecmp(argv[1],   "n=",2) == 0) test_n = atoi( &argv[1][2] );
+        if (            argv[1][0] == '&')       test_tid = 1;
+    }
+
+    if (argc > 2)
+    {
+        if (strncasecmp(argv[2],   "p=",2) == 0) test_p = atoi( &argv[2][2] );
+        if (strncasecmp(argv[2],   "n=",2) == 0) test_n = atoi( &argv[2][2] );
+        if (            argv[2][0] == '&')       test_tid = 1;
+    }
+
+    if (argc > 3)
+    {
+        if (strncasecmp(argv[3],   "p=",2) == 0) test_p = atoi( &argv[3][2] );
+        if (strncasecmp(argv[3],   "n=",2) == 0) test_n = atoi( &argv[3][2] );
+        if (            argv[3][0] == '&')       test_tid = 1;
+    }
+
+    if (test_tid)
+        create_thread( &test_tid, DETACHED, test_thread, NULL, "test thread" );
+    else
+        do_test_msgs();
+
     return 0;
 }
 
@@ -270,6 +509,92 @@ int maxrates_cmd(int argc, char *argv[],char *cmdline)
 #endif // OPTION_MIPS_COUNTING
 
 ///////////////////////////////////////////////////////////////////////
+/* message command - Display a line of text at the console           */
+///////////////////////////////////////////////////////////////////////
+
+int message_cmd(int argc,char *argv[], char *cmdline,int withhdr)
+{
+    char    *msgtxt;
+    time_t  mytime;
+    struct  tm *mytm;
+    int     toskip,state,i;
+    msgtxt=NULL;
+    toskip=3;
+    if(argc>2)
+    {
+        if(strcasecmp(argv[2],"AT")==0)
+        {
+            toskip=5;
+        }
+    }
+
+    for(state=0,i=0;cmdline[i];i++)
+    {
+        if(!state)
+        {
+            if(cmdline[i]!=' ')
+            {
+                state=1;
+                toskip--;
+                if(!toskip) break;
+            }
+        }
+        else
+        {
+            if(cmdline[i]==' ')
+            {
+                state=0;
+                if(toskip==1)
+                {
+                    i++;
+                    toskip=0;
+                    break;
+                }
+            }
+        }
+    }
+    if(!toskip)
+    {
+        msgtxt=&cmdline[i];
+    }
+    if(msgtxt && strlen(msgtxt)>0)
+    {
+        if(withhdr)
+        {
+            time(&mytime);
+            mytm=localtime(&mytime);
+            logmsg(
+#if defined(OPTION_MSGCLR)
+                "<pnl,color(white,black)>"
+#endif
+                " %2.2u:%2.2u:%2.2u  * MSG FROM HERCULES: %s\n",
+                    mytm->tm_hour,
+                    mytm->tm_min,
+                    mytm->tm_sec,
+                    msgtxt);
+        }
+        else
+        {
+                logmsg(
+#if defined(OPTION_MSGCLR)
+                "<pnl,color(white,black)>"
+#endif
+                "%s\n",msgtxt);
+        }
+    }
+    return 0;
+}
+
+int msg_cmd(int argc,char *argv[], char *cmdline)
+{
+    return(message_cmd(argc,argv,cmdline,1));
+}
+int msgnoh_cmd(int argc,char *argv[], char *cmdline)
+{
+    return(message_cmd(argc,argv,cmdline,0));
+}
+
+
 /* comment command - do absolutely nothing */
 
 int comment_cmd(int argc, char *argv[],char *cmdline)
@@ -385,7 +710,7 @@ int logopt_cmd(int argc, char *argv[],char *cmdline)
                 logmsg(_("HHCPN197I Log option set: TIMESTAMP\n"));
                 continue;
             }
-            if (strcasecmp(argv[0],"notimestamp") == 0 || 
+            if (strcasecmp(argv[0],"notimestamp") == 0 ||
                 strcasecmp(argv[0],"notime"     ) == 0)
             {
                 sysblk.logoptnotime = 1;
@@ -440,7 +765,6 @@ int start_cmd(int argc, char *argv[], char *cmdline)
         int      stopprt;
         DEVBLK*  dev;
         char*    devclass;
-        char     devnam[256];
         int      rc;
 
         rc=parse_single_devnum(argv[1],&lcss,&devnum);
@@ -455,7 +779,7 @@ int start_cmd(int argc, char *argv[], char *cmdline)
             return -1;
         }
 
-        (dev->hnd->query)(dev, &devclass, sizeof(devnam), devnam);
+        (dev->hnd->query)(dev, &devclass, 0, NULL);
 
         if (strcasecmp(devclass,"PRT"))
         {
@@ -543,7 +867,6 @@ int stop_cmd(int argc, char *argv[], char *cmdline)
         U16      lcss;
         DEVBLK*  dev;
         char*    devclass;
-        char     devnam[256];
         int     rc;
 
         rc=parse_single_devnum(argv[1],&lcss,&devnum);
@@ -558,7 +881,7 @@ int stop_cmd(int argc, char *argv[], char *cmdline)
             return -1;
         }
 
-        (dev->hnd->query)(dev, &devclass, sizeof(devnam), devnam);
+        (dev->hnd->query)(dev, &devclass, 0, NULL);
 
         if (strcasecmp(devclass,"PRT"))
         {
@@ -990,6 +1313,313 @@ int iodelay_cmd(int argc, char *argv[], char *cmdline)
 
 #endif /*OPTION_IODELAY_KLUDGE*/
 
+#if defined( OPTION_TAPE_AUTOMOUNT )
+///////////////////////////////////////////////////////////////////////////////
+/*  automount_cmd  --  show or update the tape AUTOMOUNT directories list */
+
+int automount_cmd(int argc, char *argv[], char *cmdline)
+{
+    int rc;
+
+    if (argc < 2)
+    {
+        logmsg(_("HHCPN200E Missing operand; enter 'HELP AUTOMOUNT' for syntax.\n"));
+        return -1;
+    }
+
+    if (strcasecmp(argv[1],"list") == 0)
+    {
+        TAMDIR* pTAMDIR = sysblk.tamdir;
+
+        if (argc != 2)
+        {
+            logmsg(_("HHCPN201E Invalid syntax; enter 'HELP AUTOMOUNT' for help.\n"));
+            return -1;
+        }
+
+        if (!pTAMDIR)
+        {
+            logmsg(_("HHCPN202E Empty list.\n"));
+            return -1;
+        }
+
+        // List all entries...
+
+        for (; pTAMDIR; pTAMDIR = pTAMDIR->next)
+            logmsg(_("HHCPN203I \"%c%s\"\n")
+                ,pTAMDIR->rej ? '-' : '+'
+                ,pTAMDIR->dir
+                );
+        return 0;
+    }
+
+    if (strcasecmp(argv[1],"add") == 0)
+    {
+        char tamdir[MAX_PATH+1]; /* +1 for optional '+' or '-' prefix */
+        TAMDIR* pTAMDIR = NULL;
+        int was_empty = (sysblk.tamdir == NULL);
+
+        if (argc != 3)
+        {
+            logmsg(_("HHCPN204E Invalid syntax; enter 'HELP AUTOMOUNT' for help.\n"));
+            return -1;
+        }
+
+        // Add the requested entry...
+
+        strlcpy (tamdir, argv[2], sizeof(tamdir));
+        rc = add_tamdir( tamdir, &pTAMDIR );
+
+        // Did that work?
+
+        switch (rc)
+        {
+            default:     /* (oops!) */
+            {
+                logmsg( _("HHCPN205E **LOGIC ERROR** file \"%s\", line %d\n"),
+                    __FILE__, __LINE__);
+                return -1;
+            }
+
+            case 5:     /* ("out of memory") */
+            {
+                logmsg( _("HHCPN206E Out of memory!\n"));
+                return -1;
+            }
+
+            case 1:     /* ("unresolvable path") */
+            case 2:     /* ("path inaccessible") */
+            {
+                logmsg( _("HHCPN207E Invalid AUTOMOUNT directory: \"%s\": %s\n"),
+                       tamdir, strerror(errno));
+                return -1;
+            }
+
+            case 3:     /* ("conflict w/previous") */
+            {
+                logmsg( _("HHCPN208E AUTOMOUNT directory \"%s\""
+                    " conflicts with previous specification\n"),
+                    tamdir);
+                return -1;
+            }
+
+            case 4:     /* ("duplicates previous") */
+            {
+                logmsg( _(" duplicates previous specification\n"),
+                    tamdir);
+                return -1;
+            }
+
+            case 0:     /* ("success") */
+            {
+                logmsg(_("HHCPN210I %s%s AUTOMOUNT directory = \"%s\"\n"),
+                    pTAMDIR->dir == sysblk.defdir ? "Default " : "",
+                    pTAMDIR->rej ? "Disallowed" : "Allowed",
+                    pTAMDIR->dir);
+
+                /* Define default AUTOMOUNT directory if needed */
+
+                if (sysblk.defdir == NULL)
+                {
+                    static char cwd[ MAX_PATH ];
+
+                    VERIFY( getcwd( cwd, sizeof(cwd) ) != NULL );
+                    rc = strlen( cwd );
+                    if (cwd[rc-1] != *PATH_SEP)
+                        strlcat (cwd, PATH_SEP, sizeof(cwd));
+
+                    if (!(pTAMDIR = malloc( sizeof(TAMDIR) )))
+                    {
+                        logmsg( _("HHCPN211E Out of memory!\n"));
+                        sysblk.defdir = cwd; /* EMERGENCY! */
+                    }
+                    else
+                    {
+                        pTAMDIR->dir = strdup (cwd);
+                        pTAMDIR->len = strlen (cwd);
+                        pTAMDIR->rej = 0;
+                        pTAMDIR->next = sysblk.tamdir;
+                        sysblk.tamdir = pTAMDIR;
+                        sysblk.defdir = pTAMDIR->dir;
+                    }
+
+                    logmsg(_("HHCPN212I Default Allowed AUTOMOUNT directory = \"%s\"\n"),
+                        sysblk.defdir);
+                }
+
+                return 0;
+            }
+        }
+    }
+
+    if (strcasecmp(argv[1],"del") == 0)
+    {
+        char tamdir1[MAX_PATH+1] = {0};     // (resolved path)
+        char tamdir2[MAX_PATH+1] = {0};     // (expanded but unresolved path)
+        char workdir[MAX_PATH+1] = {0};     // (work)
+        char *tamdir = tamdir1;             // (-> tamdir2 on retry)
+
+        TAMDIR* pPrevTAMDIR = NULL;
+        TAMDIR* pCurrTAMDIR = sysblk.tamdir;
+
+        int was_empty = (sysblk.tamdir == NULL);
+
+        if (argc != 3)
+        {
+            logmsg(_("HHCPN213E Invalid syntax; enter 'HELP AUTOMOUNT' for help.\n"));
+            return -1;
+        }
+
+        // Convert argument to absolute path ending with a slash
+
+        strlcpy( tamdir2, argv[2], sizeof(tamdir2) );
+        if      (tamdir2[0] == '-') memmove (&tamdir2[0], &tamdir2[1], MAX_PATH);
+        else if (tamdir2[0] == '+') memmove (&tamdir2[0], &tamdir2[1], MAX_PATH);
+
+#if defined(_MSVC_)
+        // (expand any embedded %var% environment variables)
+        rc = expand_environ_vars( tamdir2, workdir, MAX_PATH );
+        if (rc == 0)
+            strlcpy (tamdir2, workdir, MAX_PATH);
+#endif // _MSVC_
+
+        if (0
+#if defined(_MSVC_)
+            || tamdir2[1] == ':'    // (fullpath given?)
+#else // !_MSVC_
+            || tamdir2[0] == '/'    // (fullpath given?)
+#endif // _MSVC_
+            || tamdir2[0] == '.'    // (relative path given?)
+        )
+            tamdir1[0] = 0;         // (then use just given spec)
+        else                        // (else prepend with default)
+            strlcpy( tamdir1, sysblk.defdir, sizeof(tamdir1) );
+
+        // (finish building path to be resolved)
+        strlcat( tamdir1, tamdir2, sizeof(tamdir1) );
+
+        // (try resolving it to an absolute path and
+        //  append trailing path separator if needed)
+
+        if (realpath(tamdir1, workdir) != NULL)
+        {
+            strlcpy (tamdir1, workdir, MAX_PATH);
+            rc = strlen( tamdir1 );
+            if (tamdir1[rc-1] != *PATH_SEP)
+                strlcat (tamdir1, PATH_SEP, MAX_PATH);
+            tamdir = tamdir1;   // (try tamdir1 first)
+        }
+        else
+            tamdir = tamdir2;   // (try only tamdir2)
+
+        rc = strlen( tamdir2 );
+        if (tamdir2[rc-1] != *PATH_SEP)
+            strlcat (tamdir2, PATH_SEP, MAX_PATH);
+
+        // Find entry to be deleted...
+
+        for (;;)
+        {
+            for (pCurrTAMDIR = sysblk.tamdir, pPrevTAMDIR = NULL;
+                pCurrTAMDIR;
+                pPrevTAMDIR = pCurrTAMDIR, pCurrTAMDIR = pCurrTAMDIR->next)
+            {
+                if (strfilenamecmp( pCurrTAMDIR->dir, tamdir ) == 0)
+                {
+                    int def = (sysblk.defdir == pCurrTAMDIR->dir);
+
+                    // Delete the found entry...
+
+                    if (pPrevTAMDIR)
+                        pPrevTAMDIR->next = pCurrTAMDIR->next;
+                    else
+                        sysblk.tamdir = pCurrTAMDIR->next;
+
+                    free( pCurrTAMDIR->dir );
+                    free( pCurrTAMDIR );
+
+                    // (point back to list begin)
+                    pCurrTAMDIR = sysblk.tamdir;
+
+                    logmsg(_("HHCPN214I Ok.%s\n"),
+                        pCurrTAMDIR ? "" : " (list now empty)");
+
+                    // Default entry just deleted?
+
+                    if (def)
+                    {
+                        if (!pCurrTAMDIR)
+                            sysblk.defdir = NULL;  // (no default)
+                        else
+                        {
+                            // Set new default entry...
+
+                            for (; pCurrTAMDIR; pCurrTAMDIR = pCurrTAMDIR->next)
+                            {
+                                if (pCurrTAMDIR->rej == 0)
+                                {
+                                    sysblk.defdir = pCurrTAMDIR->dir;
+                                    break;
+                                }
+                            }
+
+                            // If we couldn't find an existing allowable
+                            // directory entry to use as the new default,
+                            // then add the current directory and use it.
+
+                            if (!pCurrTAMDIR)
+                            {
+                                static char cwd[ MAX_PATH ] = {0};
+
+                                VERIFY( getcwd( cwd, sizeof(cwd) ) != NULL );
+                                rc = strlen( cwd );
+                                if (cwd[rc-1] != *PATH_SEP)
+                                    strlcat (cwd, PATH_SEP, sizeof(cwd));
+
+                                if (!(pCurrTAMDIR = malloc( sizeof(TAMDIR) )))
+                                {
+                                    logmsg( _("HHCPN215E Out of memory!\n"));
+                                    sysblk.defdir = cwd; /* EMERGENCY! */
+                                }
+                                else
+                                {
+                                    pCurrTAMDIR->dir = strdup (cwd);
+                                    pCurrTAMDIR->len = strlen (cwd);
+                                    pCurrTAMDIR->rej = 0;
+                                    pCurrTAMDIR->next = sysblk.tamdir;
+                                    sysblk.tamdir = pCurrTAMDIR;
+                                    sysblk.defdir = pCurrTAMDIR->dir;
+                                }
+                            }
+
+                            logmsg(_("HHCPN216I Default Allowed AUTOMOUNT directory = \"%s\"\n"),
+                                sysblk.defdir);
+                        }
+                    }
+
+                    return 0;   // (success)
+                }
+            }
+
+            // (not found; try tamdir2 if we haven't yet)
+
+            if (tamdir == tamdir2) break;
+            tamdir = tamdir2;
+        }
+
+        if (sysblk.tamdir == NULL)
+            logmsg(_("HHCPN217E Empty list.\n"));
+        else
+            logmsg(_("HHCPN218E Entry not found.\n"));
+        return -1;
+    }
+
+    logmsg(_("HHCPN219E Unsupported function; enter 'HELP AUTOMOUNT' for syntax.\n"));
+    return 0;
+}
+
+#endif /* OPTION_TAPE_AUTOMOUNT */
+
 #if defined( OPTION_SCSI_TAPE )
 
 ///////////////////////////////////////////////////////////////////////
@@ -1007,8 +1637,8 @@ static void try_scsi_refresh( DEVBLK* dev )
     // once mounted has now been manually unmounted for example).
 
     // The reasons for why this is not possible is clearly explained
-    // in the 'force_status_update' function in 'scsitape.c'. All we
-    // can ever hope to do here is either cause an already-running
+    // in the 'update_status_scsitape' function in 'scsitape.c'. All
+    // we can ever hope to do here is either cause an already-running
     // auto-mount thread to exit (if the user has just now disabled
     // auto-mounts) or else cause one to automatically start (if they
     // just enabled auto-mounts and there's no tape already mounted).
@@ -1019,10 +1649,15 @@ static void try_scsi_refresh( DEVBLK* dev )
     // manually issue the 'devinit' command themselves, because, as
     // explained, we unfortunately cannot refresh a mounted status
     // for them (due to the inherent danger of doing so as explained
-    // by the comments in 'force_status_update' in member scsitape.c).
+    // by comments in 'update_status_scsitape' in member scsitape.c).
+
+    GENTMH_PARMS  gen_parms;
+
+    gen_parms.action  = GENTMH_SCSI_ACTION_UPDATE_STATUS;
+    gen_parms.dev     = dev;
 
     broadcast_condition( &dev->stape_exit_cond );   // (force exit if needed)
-    dev->tmh->passedeot( dev );                     // (maybe update status)
+    VERIFY( dev->tmh->generic( &gen_parms ) == 0 ); // (maybe update status)
     usleep(10*1000);                                // (let thread start/end)
 }
 
@@ -1201,22 +1836,125 @@ int cckd_cmd(int argc, char *argv[], char *cmdline)
     return cckd_command(p,1);
 }
 
+
+///////////////////////////////////////////////////////////////////////
+/* ctc command - enable/disable CTC debugging */
+
+int ctc_cmd( int argc, char *argv[], char *cmdline )
+{
+    DEVBLK*  dev;
+    CTCBLK*  pCTCBLK;
+    LCSDEV*  pLCSDEV;
+    LCSBLK*  pLCSBLK;
+    U16      lcss;
+    U16      devnum;
+    BYTE     onoff;
+
+    UNREFERENCED( cmdline );
+
+    // Format:  "ctc  debug  { on | off }  [ <devnum> | ALL ]"
+
+    if (0
+        || argc < 3
+        ||  strcasecmp( argv[1], "debug" ) != 0
+        || (1
+            && strcasecmp( argv[2], "on"  ) != 0
+            && strcasecmp( argv[2], "off" ) != 0
+           )
+        || argc > 4
+        || (1
+            && argc == 4
+            && strcasecmp( argv[3], "ALL" ) != 0
+            && parse_single_devnum( argv[3], &lcss, &devnum) < 0
+           )
+    )
+    {
+        panel_command ("help ctc");
+        return -1;
+    }
+
+    onoff = (strcasecmp( argv[2], "on" ) == 0);
+
+    if (argc < 4 || strcasecmp( argv[3], "ALL" ) == 0)
+    {
+        for ( dev = sysblk.firstdev; dev; dev = dev->nextdev )
+        {
+            if (0
+                || !dev->allocated
+                || 0x3088 != dev->devtype
+                || (CTC_CTCI != dev->ctctype && CTC_LCS != dev->ctctype)
+            )
+                continue;
+
+            if (CTC_CTCI == dev->ctctype)
+            {
+                pCTCBLK = dev->dev_data;
+                pCTCBLK->fDebug = onoff;
+            }
+            else // (CTC_LCS == dev->ctctype)
+            {
+                pLCSDEV = dev->dev_data;
+                pLCSBLK = pLCSDEV->pLCSBLK;
+                pLCSBLK->fDebug = onoff;
+            }
+        }
+
+        logmsg( _("HHCPNXXXI CTC debugging now %s for all CTCI/LCS device groups.\n"),
+                  onoff ? _("ON") : _("OFF") );
+    }
+    else
+    {
+        int i;
+        DEVGRP* pDEVGRP;
+        DEVBLK* pDEVBLK;
+
+        if (!(dev = find_device_by_devnum ( lcss, devnum )))
+        {
+            devnotfound_msg( lcss, devnum );
+            return -1;
+        }
+
+        pDEVGRP = dev->group;
+
+        if (CTC_CTCI == dev->ctctype)
+        {
+            for (i=0; i < pDEVGRP->acount; i++)
+            {
+                pDEVBLK = pDEVGRP->memdev[i];
+                pCTCBLK = pDEVBLK->dev_data;
+                pCTCBLK->fDebug = onoff;
+            }
+        }
+        else if (CTC_LCS == dev->ctctype)
+        {
+            for (i=0; i < pDEVGRP->acount; i++)
+            {
+                pDEVBLK = pDEVGRP->memdev[i];
+                pLCSDEV = pDEVBLK->dev_data;
+                pLCSBLK = pLCSDEV->pLCSBLK;
+                pLCSBLK->fDebug = onoff;
+            }
+        }
+        else
+        {
+            logmsg( _("HHCPN034E Device %d:%4.4X is not a CTCI or LCS device\n"),
+                      lcss, devnum );
+            return -1;
+        }
+
+        logmsg( _("HHCPNXXXI CTC debugging now %s for %s device %d:%4.4X group.\n"),
+                  onoff ? _("ON") : _("OFF"),
+                  CTC_LCS == dev->ctctype ? "LCS" : "CTCI",
+                  lcss, devnum );
+    }
+
+    return 0;
+}
+
 #if defined(OPTION_W32_CTCI)
 
 ///////////////////////////////////////////////////////////////////////
-/* tt32stats command - display CTCI-W32 statistics */
-
-int tt32stats_cmd(int argc, char *argv[], char *cmdline)
-{
-    UNREFERENCED(argc);
-    UNREFERENCED(argv);
-    UNREFERENCED(cmdline);
-
-    logmsg( _("HHCPN186E cmd deprecated; try 'tt32' instead\n") );
-    return -1;
-}
-
-/* tt32stats command - display CTCI-W32 statistics */
+/* tt32 command - control/query CTCI-W32 functionality */
 
 int tt32_cmd( int argc, char *argv[], char *cmdline )
 {
@@ -1404,6 +2142,43 @@ int panrate_cmd(int argc, char *argv[], char *cmdline)
 
 #endif /*PANEL_REFRESH_RATE */
 
+#ifdef OPTION_MSGHLD
+///////////////////////////////////////////////////////////////////////
+/* msghld command - display or set rate at which console refreshes */
+
+int msghld_cmd(int argc, char *argv[], char *cmdline)
+{
+  UNREFERENCED(cmdline);
+  if(argc == 2)
+  {
+    if(!strcasecmp(argv[1], "info"))
+    {
+      logmsg("Current message held time is %d seconds.\n", sysblk.keep_timeout_secs);
+      return(0);
+    }
+    else if(!strcasecmp(argv[1], "clear"))
+    {
+      expire_kept_msgs(1);
+      logmsg("Held messages cleared.\n");
+      return(0);
+    }
+    else
+    {
+      int new_timeout;
+
+      if(sscanf(argv[1], "%d", &new_timeout) && new_timeout >= 0)
+      {
+        sysblk.keep_timeout_secs = new_timeout;
+        logmsg("The message held time is set to %d seconds.\n", sysblk.keep_timeout_secs);
+        return(0);
+      }
+    }
+  }
+  logmsg("msghld: Invalid usage\n");
+  return(0);
+}
+#endif // OPTION_MSGHLD
+
 ///////////////////////////////////////////////////////////////////////
 /* shell command */
 
@@ -1444,6 +2219,8 @@ int cd_cmd(int argc, char *argv[], char *cmdline)
     chdir(path);
     getcwd( cwd, sizeof(cwd) );
     logmsg("%s\n",cwd);
+    if (debug_cd_cmd)
+        debug_cd_cmd( cwd );
     return 0;
 }
 
@@ -1471,7 +2248,7 @@ int pwd_cmd(int argc, char *argv[], char *cmdline)
 }
 
 ///////////////////////////////////////////////////////////////////////
-/* gpr command - display general purpose registers */
+/* gpr command - display or alter general purpose registers */
 
 int gpr_cmd(int argc, char *argv[], char *cmdline)
 {
@@ -1585,15 +2362,16 @@ REGS *regs;
 }
 
 ///////////////////////////////////////////////////////////////////////
-/* cr command - display control registers */
+/* cr command - display or alter control registers */
 
 int cr_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs;
+int   cr_num;
+BYTE  equal_sign, c;
+U64   cr_value;
 
     UNREFERENCED(cmdline);
-    UNREFERENCED(argc);
-    UNREFERENCED(argv);
 
     obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
 
@@ -1604,6 +2382,22 @@ REGS *regs;
         return 0;
     }
     regs = sysblk.regs[sysblk.pcpu];
+
+    if (argc > 1)
+    {
+        if (argc > 2
+            || sscanf( argv[1], "%d%c%"I64_FMT"x%c", &cr_num, &equal_sign, &cr_value, &c ) != 3
+            || '=' != equal_sign || cr_num < 0 || cr_num > 15)
+        {
+            release_lock(&sysblk.cpulock[sysblk.pcpu]);
+            logmsg( _("HHCPN164E Invalid format. .Enter \"help cr\" for help.\n"));
+            return 0;
+        }
+        if ( ARCH_900 == regs->arch_mode )
+            regs->CR_G(cr_num) = (U64)cr_value;
+        else
+            regs->CR_G(cr_num) = (U32)cr_value;
+    }
 
     display_cregs (regs);
 
@@ -1672,15 +2466,18 @@ REGS *regs;
 }
 
 ///////////////////////////////////////////////////////////////////////
-/* psw command - display program status word */
+/* psw command - display or alter program status word */
 
 int psw_cmd(int argc, char *argv[], char *cmdline)
 {
 REGS *regs;
+BYTE  c;
+U64   newia=0;
+int   newam=0, newas=0, newcc=0, newcmwp=0, newpk=0, newpm=0, newsm=0;
+int   updia=0, updas=0, updcc=0, updcmwp=0, updpk=0, updpm=0, updsm=0;
+int   n, errflag, stopflag=0, modflag=0;
 
     UNREFERENCED(cmdline);
-    UNREFERENCED(argc);
-    UNREFERENCED(argv);
 
     obtain_lock(&sysblk.cpulock[sysblk.pcpu]);
 
@@ -1692,6 +2489,199 @@ REGS *regs;
     }
     regs = sysblk.regs[sysblk.pcpu];
 
+    /* Process optional operands */
+    for (n = 1; n < argc; n++)
+    {
+        modflag = 1;
+        errflag = 0;
+        if (strncasecmp(argv[n],"sm=",3) == 0)
+        {
+            /* PSW system mask operand */
+            if (sscanf(argv[n]+3, "%x%c", &newsm, &c) == 1
+                && newsm >= 0 && newsm <= 255)
+                updsm = 1;
+            else
+                errflag = 1;
+        }
+        else if (strncasecmp(argv[n],"pk=",3) == 0)
+        {
+            /* PSW protection key operand */
+            if (sscanf(argv[n]+3, "%d%c", &newpk, &c) == 1
+                && newpk >= 0 && newpk <= 15)
+                updpk = 1;
+            else
+                errflag = 1;
+        }
+        else if (strncasecmp(argv[n],"cmwp=",5) == 0)
+        {
+            /* PSW CMWP bits operand */
+            if (sscanf(argv[n]+5, "%x%c", &newcmwp, &c) == 1
+                && newcmwp >= 0 && newcmwp <= 15)
+                updcmwp = 1;
+            else
+                errflag = 1;
+        }
+        else if (strncasecmp(argv[n],"as=",3) == 0)
+        {
+            /* PSW address-space control operand */
+            if (strcasecmp(argv[n]+3,"pri") == 0)
+                newas = PSW_PRIMARY_SPACE_MODE;
+            else if (strcmp(argv[n]+3,"ar") == 0)
+                newas = PSW_ACCESS_REGISTER_MODE;
+            else if (strcmp(argv[n]+3,"sec") == 0)
+                newas = PSW_SECONDARY_SPACE_MODE;
+            else if (strcmp(argv[n]+3,"home") == 0)
+                newas = PSW_HOME_SPACE_MODE;
+            else
+                errflag = 1;
+            if (errflag == 0) updas = 1;
+        }
+        else if (strncasecmp(argv[n],"cc=",3) == 0)
+        {
+            /* PSW condition code operand */
+            if (sscanf(argv[n]+3, "%d%c", &newcc, &c) == 1
+                && newcc >= 0 && newcc <= 3)
+                updcc = 1;
+            else
+                errflag = 1;
+        }
+        else if (strncasecmp(argv[n],"pm=",3) == 0)
+        {
+            /* PSW program mask operand */
+            if (sscanf(argv[n]+3, "%x%c", &newpm, &c) == 1
+                && newpm >= 0 && newpm <= 15)
+                updpm = 1;
+            else
+                errflag = 1;
+        }
+        else if (strncasecmp(argv[n],"am=",3) == 0)
+        {
+            /* PSW addressing mode operand */
+            if (strcmp(argv[n]+3,"24") == 0)
+                newam = 24;
+            else if (strcmp(argv[n]+3,"31") == 0
+                    && (sysblk.arch_mode == ARCH_390
+                        || sysblk.arch_mode == ARCH_900))
+                newam = 31;
+            else if (strcmp(argv[n]+3,"64") == 0
+                    && sysblk.arch_mode == ARCH_900)
+                newam = 64;
+            else
+                errflag = 1;
+        }
+        else if (strncasecmp(argv[n],"ia=",3) == 0)
+        {
+            /* PSW instruction address operand */
+            if (sscanf(argv[n]+3, "%"I64_FMT"x%c", &newia, &c) == 1)
+                updia = 1;
+            else
+                errflag = 1;
+        }
+        else /* unknown operand keyword */
+            errflag = 1;
+
+        /* Error message if this operand was invalid */
+        if (errflag)
+        {
+            logmsg( _("HHCPN165E Invalid operand %s\n"), argv[n]);
+            stopflag = 1;
+        }
+    } /* end for(n) */
+
+    /* Finish now if any errors occurred */
+    if (stopflag)
+    {
+        release_lock(&sysblk.cpulock[sysblk.pcpu]);
+        return 0;
+    }
+
+    /* Update the PSW system mask, if specified */
+    if (updsm)
+    {
+        regs->psw.sysmask = newsm;
+    }
+
+    /* Update the PSW protection key, if specified */
+    if (updpk)
+    {
+        regs->psw.pkey = newpk << 4;
+    }
+
+    /* Update the PSW CMWP bits, if specified */
+    if (updcmwp)
+    {
+        regs->psw.states = newcmwp;
+    }
+
+    /* Update the PSW address-space control mode, if specified */
+    if (updas
+        && (ECMODE(&regs->psw)
+            || sysblk.arch_mode == ARCH_390
+            || sysblk.arch_mode == ARCH_900))
+    {
+        regs->psw.asc = newas;
+    }
+
+    /* Update the PSW condition code, if specified */
+    if (updcc)
+    {
+        regs->psw.cc = newcc;
+    }
+
+    /* Update the PSW program mask, if specified */
+    if (updpm)
+    {
+        regs->psw.progmask = newpm;
+    }
+
+    /* Update the PSW addressing mode, if specified */
+    switch(newam) {
+    case 64:
+        regs->psw.amode = regs->psw.amode64 = 1;
+        regs->psw.AMASK_G = AMASK64;
+        break;
+    case 31:
+        regs->psw.amode = 1;
+        regs->psw.amode64 = 0;
+        regs->psw.AMASK_G = AMASK31;
+        break;
+    case 24:
+        regs->psw.amode = regs->psw.amode64 = 0;
+        regs->psw.AMASK_G = AMASK24;
+        break;
+    } /* end switch(newam) */
+
+    /* Update the PSW instruction address, if specified */
+    if (updia)
+    {
+        regs->psw.IA_G = newia;
+    }
+
+    /* If any modifications were made, reapply the addressing mode mask
+       to the instruction address and invalidate the instruction pointer */
+    if (modflag)
+    {
+        regs->psw.IA_G &= regs->psw.AMASK_G;
+        regs->aie = NULL;
+    }
+
+    /* Display the PSW field by field */
+    logmsg("psw sm=%2.2X pk=%d cmwp=%X as=%s cc=%d pm=%X am=%s ia=%"I64_FMT"X\n",
+        regs->psw.sysmask,
+        regs->psw.pkey >> 4,
+        regs->psw.states,
+        (regs->psw.asc == PSW_PRIMARY_SPACE_MODE ? "pri" :
+            regs->psw.asc == PSW_ACCESS_REGISTER_MODE ? "ar" :
+            regs->psw.asc == PSW_SECONDARY_SPACE_MODE ? "sec" :
+            regs->psw.asc == PSW_HOME_SPACE_MODE ? "home" : "???"),
+        regs->psw.cc,
+        regs->psw.progmask,
+        (regs->psw.amode == 0 && regs->psw.amode64 == 0 ? "24" :
+            regs->psw.amode == 1 && regs->psw.amode64 == 0 ? "31" :
+            regs->psw.amode == 1 && regs->psw.amode64 == 1 ? "64" : "???"),
+        regs->psw.IA_G);
+
+    /* Display the PSW */
     display_psw (regs);
 
     release_lock(&sysblk.cpulock[sysblk.pcpu]);
@@ -1904,13 +2894,13 @@ char range[256];
 
     /* Determine if this trace is on or off for message */
     on = (trace && sysblk.insttrace) || (!trace && sysblk.inststep);
- 
+
     /* Display message */
     logmsg(_("HHCPN040I Instruction %s %s %s\n"),
            cmdline[0] == 't' ? _("tracing") :
            cmdline[0] == 's' ? _("stepping") : _("break"),
            on ? _("on") : _("off"),
-           range);           
+           range);
 
     return 0;
 }
@@ -2055,18 +3045,60 @@ int ipl_cmd2(int argc, char *argv[], char *cmdline, int clear)
 {
 BYTE c;                                 /* Character work area       */
 int  rc;                                /* Return code               */
-
 int  i;
+#if defined(OPTION_IPLPARM)
+int j;
+size_t  maxb;
+#endif
 U16  lcss;
 U16  devnum;
 char *cdev, *clcss;
 
+    /* Check that target processor type allows IPL */
+    if (sysblk.ptyp[sysblk.pcpu] == SCCB_PTYP_IFA
+     || sysblk.ptyp[sysblk.pcpu] == SCCB_PTYP_SUP)
+    {
+        logmsg(_("HHCPN052E Target CPU %d type %d"
+                " does not allow ipl\n"),
+                sysblk.pcpu, sysblk.ptyp[sysblk.pcpu]);
+        return -1;
+    }
 
+    /* Check the parameters of the IPL command */
     if (argc < 2)
     {
         missing_devnum();
         return -1;
     }
+#if defined(OPTION_IPLPARM)
+#define MAXPARMSTRING   sizeof(sysblk.iplparmstring)
+    sysblk.haveiplparm=0;
+    maxb=0;
+    if(argc>2)
+    {
+        if(strcasecmp(argv[2],"parm")==0)
+        {
+            memset(sysblk.iplparmstring,0,MAXPARMSTRING);
+            sysblk.haveiplparm=1;
+            for(i=3;i<argc && maxb<MAXPARMSTRING;i++)
+            {
+                if(i!=3)
+                {
+                    sysblk.iplparmstring[maxb++]=0x40;
+                }
+                for(j=0;j<(int)strlen(argv[i]) && maxb<MAXPARMSTRING;j++)
+                {
+                    if(islower(argv[i][j]))
+                    {
+                        argv[i][j]=toupper(argv[i][j]);
+                    }
+                    sysblk.iplparmstring[maxb]=host_to_guest(argv[i][j]);
+                    maxb++;
+                }
+            }
+        }
+    }
+#endif
 
     OBTAIN_INTLOCK(NULL);
 
@@ -2079,9 +3111,7 @@ char *cdev, *clcss;
             return -1;
         }
 
-    /* If the ipl device is not a valid hex number we assume */
-    /* This is a load from the service processor             */
-
+    /* The ipl device number might be in format lcss:devnum */
     if((cdev = strchr(argv[1],':')))
     {
         clcss = argv[1];
@@ -2093,8 +3123,10 @@ char *cdev, *clcss;
         cdev = argv[1];
     }
 
+    /* If the ipl device is not a valid hex number we assume */
+    /* This is a load from the service processor             */
     if (sscanf(cdev, "%hx%c", &devnum, &c) != 1)
-        rc = load_hmc(strtok(cmdline+3," \t"), sysblk.pcpu, clear);
+        rc = load_hmc(strtok(cmdline+3+clear," \t"), sysblk.pcpu, clear);
     else
     {
         *--cdev = '\0';
@@ -2208,7 +3240,7 @@ int devlist_cmd(int argc, char *argv[], char *cmdline)
     {
         single_devnum = 1;
 
-        if (parse_single_devnum(argv[1], &lcss, &devnum) < 0)   
+        if (parse_single_devnum(argv[1], &lcss, &devnum) < 0)
         {
             // (error message already issued)
             return -1;
@@ -2244,7 +3276,7 @@ int devlist_cmd(int argc, char *argv[], char *cmdline)
 
     for (dev = sysblk.firstdev; dev && nDevCount <= MAX_DEVLIST_DEVICES; dev = dev->nextdev)
     {
-        if (dev->pmcw.flag5 & PMCW5_V)  // (valid device?)
+        if (dev->allocated)  // (valid device?)
         {
             if (single_devnum && (dev->ssid != ssid || dev->devnum != devnum))
                 continue;
@@ -2278,7 +3310,6 @@ int devlist_cmd(int argc, char *argv[], char *cmdline)
     for (i = nDevCount, pDevBlkPtr = orig_pDevBlkPtrs; i; --i, pDevBlkPtr++)
     {
         dev = *pDevBlkPtr;                  // --> DEVBLK
-        ASSERT(dev->pmcw.flag5 & PMCW5_V);  // (sanity check)
 
         /* Call device handler's query definition function */
 
@@ -2354,7 +3385,7 @@ int qd_cmd(int argc, char *argv[], char *cmdline)
     {
         single_devnum = 1;
 
-        if (parse_single_devnum(argv[1], &lcss, &devnum) < 0)   
+        if (parse_single_devnum(argv[1], &lcss, &devnum) < 0)
             return -1;
         if (!(dev = find_device_by_devnum (lcss, devnum)))
         {
@@ -2376,7 +3407,7 @@ int qd_cmd(int argc, char *argv[], char *cmdline)
 
     for (dev = sysblk.firstdev; dev && nDevCount <= MAX_DEVLIST_DEVICES; dev = dev->nextdev)
     {
-        if (dev->pmcw.flag5 & PMCW5_V)  // (valid device?)
+        if (dev->allocated)  // (valid device?)
         {
             if (single_devnum && (dev->ssid != ssid || dev->devnum != devnum))
                 continue;
@@ -2612,10 +3643,6 @@ BYTE    c;                              /* Character work area       */
 
     if (argc < 2)
     {
-#if 0
-        logmsg( _("HHCPN065E Missing argument(s)\n") );
-        return -1;
-#else // fishtest
         if (sysblk.pgminttr == 0xFFFFFFFFFFFFFFFFULL)
             logmsg("pgmtrace == all\n");
         else if (sysblk.pgminttr == 0)
@@ -2636,7 +3663,6 @@ BYTE    c;                              /* Character work area       */
             );
         }
         return 0;
-#endif
     }
 
     if (sscanf(argv[1], "%x%c", &rupt_num, &c) != 1)
@@ -2932,7 +3958,7 @@ int devtmax_cmd(int argc, char *argv[], char *cmdline)
        and more threads can be created */
 
     if (sysblk.ioq && (!sysblk.devtmax || sysblk.devtnbr < sysblk.devtmax))
-        create_thread(&tid, &sysblk.detattr, device_thread, NULL, "idle device thread");
+        create_thread(&tid, DETACHED, device_thread, NULL, "idle device thread");
 
     /* Wakeup threads in case they need to terminate */
     broadcast_condition (&sysblk.ioqcond);
@@ -2958,16 +3984,17 @@ char   *devascii;                       /* -> Device name            */
 DEVBLK *dev;                            /* -> Device block           */
 U16     devnum;                         /* Device number             */
 U16     lcss;                           /* Logical CSS               */
-int     scan = 0;                       /* 1=Device name is `*'      */
-int     n = 0;                          /* Number devices scanned    */
 int     flag = 1;                       /* sf- flag (default merge)  */
+int     level = 2;                      /* sfk level (default 2)     */
+TID     tid;                            /* sf command thread id      */
+char    c;                              /* work for sscan            */
 
     UNREFERENCED(cmdline);
 
-    if (strlen(argv[0]) < 3 || strchr ("+-cd", argv[0][2]) == NULL)
+    if (strlen(argv[0]) < 3 || strchr ("+-cdk", argv[0][2]) == NULL)
     {
         logmsg( _("HHCPN091E Command must be 'sf+', 'sf-', "
-                                "'sfc', or 'sfd'\n") );
+                                "'sfc', 'sfk' or 'sfd'\n") );
         return -1;
     }
 
@@ -2998,7 +4025,7 @@ int     flag = 1;                       /* sf- flag (default merge)  */
             logmsg( _("HHCPN081E No cckd devices found\n") );
             return -1;
         }
-        scan = 1;
+        dev = NULL;
     }
     else
     {
@@ -3032,6 +4059,17 @@ int     flag = 1;                       /* sf- flag (default merge)  */
         argv++; argc--;
     }
 
+    /* For `sfk' the operand is an integer -1 .. 4 */
+    if (action == 'k' && argc > 1)
+    {
+        if (sscanf(argv[1], "%d%c", &level, &c) != 1 || level < -1 || level > 4)
+        {
+            logmsg( _("HHCPN087E Operand must be a number -1 .. 4\n"));
+            return -1;
+        }
+        argv++; argc--;
+    }
+
     /* No other operands allowed */
     if (argc > 1)
     {
@@ -3039,32 +4077,51 @@ int     flag = 1;                       /* sf- flag (default merge)  */
         return -1;
     }
 
-    /* Perform the action */
-    while (dev)
+    /* Set sf- flags in either cckdblk or the cckd extension */
+    if (action == '-')
     {
-        if (scan) logmsg( _("HHCPN085I Processing device %d:%4.4X\n"),
-                            SSID_TO_LCSS(dev->ssid), dev->devnum );
-
-        switch (action) {
-        case '+': cckd_sf_add (dev);
-                  break;
-        case '-': cckd_sf_remove (dev, flag);
-                  break;
-        case 'c': cckd_sf_comp (dev);
-                  break;
-        case 'd': cckd_sf_stats (dev);
-                  break;
+        if (dev)
+        {
+            CCKDDASD_EXT *cckd = dev->cckd_ext;
+            cckd->sfmerge = flag == 1;
+            cckd->sfforce = flag == 2;
         }
-        n++;
+        else
+        {
+            cckdblk.sfmerge = flag == 1;
+            cckdblk.sfforce = flag == 2;
+        }
+    }
+    /* Set sfk level in either cckdblk or the cckd extension */
+    else if (action == 'k')
+    {
+        if (dev)
+        {
+            CCKDDASD_EXT *cckd = dev->cckd_ext;
+            cckd->sflevel = level;
+        }
+        else
+            cckdblk.sflevel = level;
+    }
 
-        /* Next cckd device if scanning */
-        if (scan)
-            for (dev=dev->nextdev; dev && !dev->cckd_ext; dev=dev->nextdev);
-        else dev = NULL;
-
-    } /* while (dev) */
-
-    if (scan) logmsg( _("HHCPN092I %d devices processed\n"), n );
+    /* Process the command */
+    switch (action) {
+        case '+': if (create_thread(&tid, DETACHED, cckd_sf_add, dev, "sf+ command"))
+                      cckd_sf_add(dev);
+                  break;
+        case '-': if (create_thread(&tid, DETACHED, cckd_sf_remove, dev, "sf- command"))
+                      cckd_sf_remove(dev);
+                  break;
+        case 'c': if (create_thread(&tid, DETACHED, cckd_sf_comp, dev, "sfc command"))
+                      cckd_sf_comp(dev);
+                  break;
+        case 'd': if (create_thread(&tid, DETACHED, cckd_sf_stats, dev, "sfd command"))
+                      cckd_sf_stats(dev);
+                  break;
+        case 'k': if (create_thread(&tid, DETACHED, cckd_sf_chk, dev, "sfk command"))
+                      cckd_sf_chk(dev);
+                  break;
+    }
 
     return 0;
 }
@@ -3119,11 +4176,20 @@ char   **init_argv;
     /* Prevent accidental re-init'ing of already loaded tape drives */
     if (nomountedtapereinit)
     {
-        if (0
-            || TAPEDEVT_SCSITAPE == dev->tapedevt
-            || (argc >= 3 && strcmp(argv[2], TAPE_UNLOADED) != 0)
+        char*  devclass;
+
+        ASSERT( dev->hnd && dev->hnd->query );
+        dev->hnd->query( dev, &devclass, 0, NULL );
+
+        if (1
+            && strcmp(devclass,"TAPE") == 0
+            && (0
+                || TAPEDEVT_SCSITAPE == dev->tapedevt
+                || (argc >= 3 && strcmp(argv[2], TAPE_UNLOADED) != 0)
+               )
         )
         {
+            ASSERT( dev->tmh && dev->tmh->tapeloaded );
             if (dev->tmh->tapeloaded( dev, NULL, 0 ))
             {
                 release_lock (&dev->lock);
@@ -3624,7 +4690,7 @@ int ipending_cmd(int argc, char *argv[], char *cmdline)
         logmsg( _("          CPU%4.4X: state %s\n"),
                sysblk.regs[i]->cpuad,states[sysblk.regs[i]->cpustate]);
         logmsg( _("          CPU%4.4X: instcount %" I64_FMT "d\n"),
-               sysblk.regs[i]->cpuad,(long long)sysblk.regs[i]->instcount);
+               sysblk.regs[i]->cpuad,(long long)INSTCOUNT(sysblk.regs[i]));
         logmsg( _("          CPU%4.4X: siocount %" I64_FMT "d\n"),
                sysblk.regs[i]->cpuad,(long long)sysblk.regs[i]->siototal);
         copy_psw(sysblk.regs[i], curpsw);
@@ -4068,6 +5134,72 @@ int icount_cmd(int argc, char *argv[], char *cmdline)
             }
             break;
           }
+          case 0xC4:
+          {
+            for(i2 = 0; i2 < 16; i2++)
+            {
+              if(sysblk.imapc4[i2])
+              {
+                opcode1[i] = i1;
+                opcode2[i] = i2;
+                count[i++] = sysblk.imapc4[i2];
+                total += sysblk.imapc4[i2];
+                if(i == 499)
+                {
+                  logmsg("Sorry, too many instructions\n");
+                  free(opcode1);
+                  free(opcode2);
+                  free(count);
+                  return 0;
+                }
+              }
+            }
+            break;
+          }
+          case 0xC6:
+          {
+            for(i2 = 0; i2 < 16; i2++)
+            {
+              if(sysblk.imapc6[i2])
+              {
+                opcode1[i] = i1;
+                opcode2[i] = i2;
+                count[i++] = sysblk.imapc6[i2];
+                total += sysblk.imapc6[i2];
+                if(i == 499)
+                {
+                  logmsg("Sorry, too many instructions\n");
+                  free(opcode1);
+                  free(opcode2);
+                  free(count);
+                  return 0;
+                }
+              }
+            }
+            break;
+          }
+          case 0xC8:
+          {
+            for(i2 = 0; i2 < 16; i2++)
+            {
+              if(sysblk.imapc8[i2])
+              {
+                opcode1[i] = i1;
+                opcode2[i] = i2;
+                count[i++] = sysblk.imapc8[i2];
+                total += sysblk.imapc8[i2];
+                if(i == 499)
+                {
+                  logmsg("Sorry, too many instructions\n");
+                  free(opcode1);
+                  free(opcode2);
+                  free(count);
+                  return 0;
+                }
+              }
+            }
+            break;
+          }
           case 0xE3:
           {
             for(i2 = 0; i2 < 256; i2++)
@@ -4230,7 +5362,7 @@ int icount_cmd(int argc, char *argv[], char *cmdline)
         {
           if(count[i2] > count[i3])
             i3 = i2;
-        } 
+        }
         /* Exchange */
         opcode1[499] = opcode1[i1];
         opcode2[499] = opcode2[i1];
@@ -4295,6 +5427,21 @@ int icount_cmd(int argc, char *argv[], char *cmdline)
             break;
           }
           case 0xC2:
+          {
+            logmsg("          INST=%2.2Xx%1.1X\tCOUNT=%10" I64_FMT "u\t(%2d%)\n", opcode1[i1], opcode2[i1], count[i1], (int) (count[i1] * 100 / total));
+            break;
+          }
+          case 0xC4:
+          {
+            logmsg("          INST=%2.2Xx%1.1X\tCOUNT=%10" I64_FMT "u\t(%2d%)\n", opcode1[i1], opcode2[i1], count[i1], (int) (count[i1] * 100 / total));
+            break;
+          }
+          case 0xC6:
+          {
+            logmsg("          INST=%2.2Xx%1.1X\tCOUNT=%10" I64_FMT "u\t(%2d%)\n", opcode1[i1], opcode2[i1], count[i1], (int) (count[i1] * 100 / total));
+            break;
+          }
+          case 0xC8:
           {
             logmsg("          INST=%2.2Xx%1.1X\tCOUNT=%10" I64_FMT "u\t(%2d%)\n", opcode1[i1], opcode2[i1], count[i1], (int) (count[i1] * 100 / total));
             break;
@@ -4407,6 +5554,24 @@ int icount_cmd(int argc, char *argv[], char *cmdline)
                         logmsg("          INST=%2.2Xx%1.1X\tCOUNT=%" I64_FMT "u\n",  /*@Z9*/
                             i1, i2, sysblk.imapc2[i2]);                     /*@Z9*/
                 break;                                                      /*@Z9*/
+            case 0xC4:
+                for(i2 = 0; i2 < 16; i2++)
+                    if(sysblk.imapc4[i2])
+                        logmsg("          INST=%2.2Xx%1.1X\tCOUNT=%" I64_FMT "u\n",
+                            i1, i2, sysblk.imapc4[i2]);
+                break;
+            case 0xC6:
+                for(i2 = 0; i2 < 16; i2++)
+                    if(sysblk.imapc6[i2])
+                        logmsg("          INST=%2.2Xx%1.1X\tCOUNT=%" I64_FMT "u\n",
+                            i1, i2, sysblk.imapc6[i2]);
+                break;
+            case 0xC8:
+                for(i2 = 0; i2 < 16; i2++)
+                    if(sysblk.imapc8[i2])
+                        logmsg("          INST=%2.2Xx%1.1X\tCOUNT=%" I64_FMT "u\n",
+                            i1, i2, sysblk.imapc8[i2]);
+                break;
             case 0xE3:
                 for(i2 = 0; i2 < 256; i2++)
                     if(sysblk.imape3[i2])
@@ -5067,7 +6232,15 @@ DLL_EXPORT int aia_cmd(int argc, char *argv[], char *cmdline)
 }
 
 ///////////////////////////////////////////////////////////////////////
-/* tlb - display tlb table */
+/* tlb - display tlb table                                           */
+/*                                                                   */
+/* NOTES:                                                            */
+/*   The "tlbid" field is part of TLB_VADDR so it must be extracted  */
+/*   whenever it's used or displayed. The TLB_VADDR does not contain */
+/*   all of the effective address bits so they are created on-the-fly*/
+/*   with (i << shift) The "main" field of the tlb contains an XOR   */
+/*   hash of effective address. So MAINADDR() macro is used to remove*/
+/*   the hash before it's displayed.                                 */
 
 int tlb_cmd(int argc, char *argv[], char *cmdline)
 {
@@ -5108,7 +6281,10 @@ int tlb_cmd(int argc, char *argv[], char *cmdline)
          regs->tlb.TLB_PTE_G(i),(int)(regs->tlb.TLB_VADDR_G(i) & bytemask),
          regs->tlb.common[i],regs->tlb.protect[i],
          (regs->tlb.acc[i] & ACC_READ) != 0,(regs->tlb.acc[i] & ACC_WRITE) != 0,
-         regs->tlb.skey[i],regs->tlb.main[i] - regs->mainstor);
+         regs->tlb.skey[i],
+         MAINADDR(regs->tlb.main[i],
+                  ((regs->tlb.TLB_VADDR_G(i) & pagemask) | (i << shift)))
+                  - regs->mainstor);
         matches += ((regs->tlb.TLB_VADDR(i) & bytemask) == regs->tlbID);
     }
     logmsg("%d tlbID matches\n", matches);
@@ -5133,7 +6309,10 @@ int tlb_cmd(int argc, char *argv[], char *cmdline)
              regs->tlb.TLB_PTE_G(i),(int)(regs->tlb.TLB_VADDR_G(i) & bytemask),
              regs->tlb.common[i],regs->tlb.protect[i],
              (regs->tlb.acc[i] & ACC_READ) != 0,(regs->tlb.acc[i] & ACC_WRITE) != 0,
-             regs->tlb.skey[i],regs->tlb.main[i]);
+             regs->tlb.skey[i],
+             MAINADDR(regs->tlb.main[i],
+                     ((regs->tlb.TLB_VADDR_G(i) & pagemask) | (i << shift)))
+                    - regs->mainstor);
             matches += ((regs->tlb.TLB_VADDR(i) & bytemask) == regs->tlbID);
         }
         logmsg("SIE: %d tlbID matches\n", matches);
@@ -5193,13 +6372,13 @@ int count_cmd(int argc, char *argv[], char *cmdline)
     {
         for (i = 0; i < MAX_CPU; i++)
             if (IS_CPU_ONLINE(i))
-                sysblk.regs[i]->instcount = 0;
+                sysblk.regs[i]->instcount = sysblk.regs[i]->prevcount = 0;
         for (i = 0; i < OPTION_COUNTING; i++)
             sysblk.count[i] = 0;
     }
     for (i = 0; i < MAX_CPU; i++)
         if (IS_CPU_ONLINE(i))
-            instcount += sysblk.regs[i]->instcount;
+            instcount += INSTCOUNT(sysblk.regs[i]);
     logmsg ("  i: %12" I64_FMT "d\n", instcount);
 
     for (i = 0; i < OPTION_COUNTING; i++)
@@ -5420,11 +6599,99 @@ int traceopt_cmd(int argc, char *argv[], char *cmdline)
         }
     }
     logmsg(_("HHCPN162I Hercules instruction trace displayed in %s mode\n"),
-        sysblk.showregsnone ? _("noregs") : 
-        sysblk.showregsfirst ? _("regsfirst") : 
+        sysblk.showregsnone ? _("noregs") :
+        sysblk.showregsfirst ? _("regsfirst") :
                         _("traditional"));
     return 0;
 }
+
+#ifdef OPTION_CMDTGT
+///////////////////////////////////////////////////////////////////////
+/* cmdtgt - Specify the command target */
+int cmdtgt_cmd(int argc, char *argv[], char *cmdline)
+{
+  int print = 1;
+
+  UNREFERENCED(cmdline);
+  if(argc == 2)
+  {
+    if(!strcasecmp(argv[1], "herc"))
+      sysblk.cmdtgt = 0;
+    else if(!strcasecmp(argv[1], "scp"))
+      sysblk.cmdtgt = 1;
+    else if(!strcasecmp(argv[1], "pscp"))
+      sysblk.cmdtgt = 2;
+    else if(!strcasecmp(argv[1], "?"))
+      ;
+    else
+      print = 0;
+  }
+  else
+    print = 0;
+
+  if(print)
+  {
+    switch(sysblk.cmdtgt)
+    {
+      case 0:
+      {
+        logmsg("cmdtgt: Commands are sent to hercules\n");
+        break;
+      }
+      case 1:
+      {
+        logmsg("cmdtgt: Commands are sent to scp\n");
+        break;
+      }
+      case 2:
+      {
+        logmsg("cmdtgt: Commands are sent as priority messages to scp\n");
+        break;
+      }
+    }
+  }
+  else
+    logmsg("cmdtgt: Use cmdtgt [herc | scp | pscp | ?]\n");
+
+  return 0;
+}
+
+///////////////////////////////////////////////////////////////////////
+/* scp - Send scp command in any mode */
+int scp_cmd(int argc, char *argv[], char *cmdline)
+{
+  UNREFERENCED(argv);
+  if(argc == 1)
+    scp_command(" ", 0);
+  else
+    scp_command(&cmdline[4], 0);
+  return 0;
+}
+
+///////////////////////////////////////////////////////////////////////
+/* pscp - Send a priority message in any mode */
+int prioscp_cmd(int argc, char *argv[], char *cmdline)
+{
+  UNREFERENCED(argv);
+  if(argc == 1)
+    scp_command(" ", 1);
+  else
+    scp_command(&cmdline[5], 1);
+  return 0;
+}
+
+///////////////////////////////////////////////////////////////////////
+/* herc - Send a Hercules command in any mode */
+int herc_cmd(int argc, char *argv[], char *cmdline)
+{
+  UNREFERENCED(argv);
+  if(argc == 1)
+    ProcessPanelCommand(" ");
+  else
+    ProcessPanelCommand(&cmdline[5]);
+  return 0;
+}
+#endif // OPTION_CMDTGT
 
 ///////////////////////////////////////////////////////////////////////
 // Handle externally defined commands...
@@ -5451,17 +6718,19 @@ typedef int CMDFUNC(int argc, char *argv[], char *cmdline);
 typedef struct _CMDTAB
 {
     const char* pszCommand;     /* command          */
+    const size_t cmdAbbrev;      /* Min abbreviation */
     CMDFUNC*    pfnCommand;     /* handler function */
     const char* pszCmdDesc;     /* description      */
 }
 CMDTAB;
 
-#define COMMAND(cmd,func,desc)  { cmd, func, desc },
+#define COMMAND(cmd,func,desc)  { cmd, 0, func, desc },
+#define COMMANDA(cmd,abbrev,func,desc)  { cmd, abbrev, func, desc },
 
 ///////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////
 ///////////////////////////////////////////////////////////////////////
-// Define all panel command here...
+// Define all panel commands here...
 
 int  ListAllCommands (int argc, char *argv[], char *cmdline);  /*(forward reference)*/
 int  HelpCommand     (int argc, char *argv[], char *cmdline);  /*(forward reference)*/
@@ -5475,6 +6744,9 @@ COMMAND ( "?",         ListAllCommands, "list all commands" )
 COMMAND ( "help",      HelpCommand,   "command specific help\n" )
 
 COMMAND ( "*",         comment_cmd,   "(log comment to syslog)\n" )
+COMMANDA( "message", 1,msg_cmd,       "display message on console a la VM" )
+COMMANDA( "msg",     1,msg_cmd,       "same as message"         )
+COMMAND ( "msgnoh",    msgnoh_cmd,    "same as message - no header\n" )
 
 COMMAND ( "hst",       History,       "history of commands" )
 #if defined(OPTION_HAO)
@@ -5522,11 +6794,11 @@ COMMAND ( "sysreset",  sysr_cmd,      "Issue SYSTEM Reset manual operation" )
 COMMAND ( "sysclear",  sysc_cmd,      "Issue SYSTEM Clear Reset manual operation" )
 COMMAND ( "store",     store_cmd,     "store CPU status at absolute zero\n" )
 
-COMMAND ( "psw",       psw_cmd,       "display program status word" )
+COMMAND ( "psw",       psw_cmd,       "display or alter program status word" )
 COMMAND ( "gpr",       gpr_cmd,       "display or alter general purpose registers" )
 COMMAND ( "fpr",       fpr_cmd,       "display floating point registers" )
 COMMAND ( "fpc",       fpc_cmd,       "display floating point control register" )
-COMMAND ( "cr",        cr_cmd,        "display control registers" )
+COMMAND ( "cr",        cr_cmd,        "display or alter control registers" )
 COMMAND ( "ar",        ar_cmd,        "display access registers" )
 COMMAND ( "pr",        pr_cmd,        "display prefix register" )
 COMMAND ( "timerint",  timerint_cmd,  "display or set timers update interval" )
@@ -5546,6 +6818,9 @@ COMMAND ( "devinit",   devinit_cmd,   "reinitialize device" )
 COMMAND ( "devlist",   devlist_cmd,   "list device or all devices\n" )
 COMMAND ( "qd",        qd_cmd,        "query dasd\n" )
 
+#if defined( OPTION_TAPE_AUTOMOUNT )
+COMMAND ( "automount", automount_cmd, "show/update allowable tape automount directories\n" )
+#endif /* OPTION_TAPE_AUTOMOUNT */
 #if defined( OPTION_SCSI_TAPE )
 COMMAND ( "scsimount", scsimount_cmd, "automatic SCSI tape mounts\n" )
 #endif /* defined( OPTION_SCSI_TAPE ) */
@@ -5589,13 +6864,16 @@ COMMAND ( "lsdep",     lsdep_cmd,     "list module dependencies\n" )
 #ifdef OPTION_IODELAY_KLUDGE
 COMMAND ( "iodelay",   iodelay_cmd,   "display or set I/O delay value" )
 #endif
+COMMAND ( "ctc",       ctc_cmd,       "enable/disable CTC debugging" )
 #if defined(OPTION_W32_CTCI)
-COMMAND ( "tt32stats", tt32stats_cmd, "(deprecated; use 'tt32' cmd instead)" )
 COMMAND ( "tt32",      tt32_cmd,      "control/query CTCI-W32 functionality" )
 #endif
 COMMAND ( "toddrag",   toddrag_cmd,   "display or set TOD clock drag factor" )
 #ifdef PANEL_REFRESH_RATE
 COMMAND ( "panrate",   panrate_cmd,   "display or set rate at which console refreshes" )
+#endif
+#ifdef OPTION_MSGHLD
+COMMAND ( "msghld",    msghld_cmd, "display or set the timeout of held messages")
 #endif
 COMMAND ( "syncio",    syncio_cmd,    "display syncio devices statistics" )
 #if defined(OPTION_INSTRUCTION_COUNTING)
@@ -5640,6 +6918,13 @@ COMMAND ( "traceopt",  traceopt_cmd,  "Instruction trace display options\n" )
 #define   TEST_CMD "$test"          // (hidden internal command)
 COMMAND ( TEST_CMD, test_cmd,        "(hidden internal command)" )
 
+#ifdef OPTION_CMDTGT
+COMMAND ( "cmdtgt",    cmdtgt_cmd,    "Specify the command target\n" )
+COMMAND ( "herc",      herc_cmd,      "Hercules command\n")
+COMMAND ( "scp",       scp_cmd,       "Send scp command\n")
+COMMAND ( "pscp",      prioscp_cmd,   "Send prio message scp command\n")
+#endif // OPTION_CMDTGT
+
 COMMAND ( NULL, NULL, NULL )         /* (end of table) */
 };
 
@@ -5655,6 +6940,7 @@ int ProcessPanelCommand (char* pszCmdLine)
     char*    pszSaveCmdLine  = NULL;
     char*    cl              = NULL;
     int      rc              = -1;
+    int      cmdl;
 
     if (!pszCmdLine || !*pszCmdLine)
     {
@@ -5700,10 +6986,25 @@ int ProcessPanelCommand (char* pszCmdLine)
     if (cmd_argc)
         for (pCmdTab = Commands; pCmdTab->pszCommand; pCmdTab++)
         {
-            if (!strcasecmp(cmd_argv[0], pCmdTab->pszCommand))
+            if (!pCmdTab->cmdAbbrev)
             {
-                rc = pCmdTab->pfnCommand(cmd_argc, (char**)cmd_argv, pszSaveCmdLine);
-                goto ProcessPanelCommandExit;
+                if(!strcasecmp(cmd_argv[0], pCmdTab->pszCommand))
+                {
+                    rc = pCmdTab->pfnCommand(cmd_argc, (char**)cmd_argv, pszSaveCmdLine);
+                    goto ProcessPanelCommandExit;
+                }
+            }
+            else
+            {
+#if !defined(MAX)
+#define MAX(_x,_y) ( ( ( _x ) > ( _y ) ) ? ( _x ) : ( _y ) )
+#endif
+                cmdl=MAX(strlen(cmd_argv[0]),pCmdTab->cmdAbbrev);
+                if(!strncasecmp(cmd_argv[0],pCmdTab->pszCommand,cmdl))
+                {
+                    rc = pCmdTab->pfnCommand(cmd_argc, (char**)cmd_argv, pszSaveCmdLine);
+                    goto ProcessPanelCommandExit;
+                }
             }
         }
 
@@ -5713,9 +7014,9 @@ int ProcessPanelCommand (char* pszCmdLine)
     if (0
         || !strncasecmp(pszSaveCmdLine,"sf+",3)
         || !strncasecmp(pszSaveCmdLine,"sf-",3)
-        || !strncasecmp(pszSaveCmdLine,"sf=",3)
         || !strncasecmp(pszSaveCmdLine,"sfc",3)
         || !strncasecmp(pszSaveCmdLine,"sfd",3)
+        || !strncasecmp(pszSaveCmdLine,"sfk",3)
     )
     {
         rc = ShadowFile_cmd(cmd_argc,(char**)cmd_argv,pszSaveCmdLine);
@@ -5731,6 +7032,7 @@ int ProcessPanelCommand (char* pszCmdLine)
 
     /* Error: unknown/unsupported command... */
     ASSERT( cmd_argv[0] );
+
     logmsg( _("HHCPN139E Command \"%s\" not found; enter '?' for list.\n"),
               cmd_argv[0] );
 
@@ -5777,8 +7079,8 @@ int ListAllCommands(int argc, char *argv[], char *cmdline)
 
     logmsg( "  %-9.9s    %s \n", "sf+dev",    _("add shadow file") );
     logmsg( "  %-9.9s    %s \n", "sf-dev",    _("delete shadow file") );
-    logmsg( "  %-9.9s    %s \n", "sf=dev ..", _("rename shadow file") );
     logmsg( "  %-9.9s    %s \n", "sfc",       _("compress shadow files") );
+    logmsg( "  %-9.9s    %s \n", "sfk",       _("check shadow files") );
     logmsg( "  %-9.9s    %s \n", "sfd",       _("display shadow file stats") );
 
     logmsg("\n");
@@ -5814,7 +7116,7 @@ HELPTAB;
 
 HELPTAB HelpTab[] =
 {
-/*        command         additional hep text...
+/*        command         additional help text...
         (max 9 chars)
 */
 CMDHELP ( "*",         "The '*' comment command simply provides a convenient means\n"
@@ -5830,6 +7132,21 @@ CMDHELP ( "help",      "Enter \"help cmd\" where cmd is the command you need hel
                        "parameters and is not meant to replace reading the documentation.\n"
                        )
 
+CMDHELP ( "quiet",     "'quiet' either disables automatic screen refreshing if it is\n"
+                       "currently enabled or enables it if it is currently disabled.\n"
+                       "When disabled you will no be able to see the response of any\n"
+                       "entered commands nor any messages issued by the system nor be\n"
+                       "able to scroll the display, etc. Basically all screen updating\n"
+                       "is disabled. Entering 'quiet' again re-enables screen updating.\n"
+                       )
+
+CMDHELP ( "ctc",       "Format:  \"ctc  debug  { on | off }  [ <devnum> | ALL ]\".\n\n"
+
+                       "Enables/disables debug packet tracing for the specified CTCI/LCS\n"
+                       "device group(s) identified by <devnum> or for all CTCI/LCS device\n"
+                       "groups if <devnum> is not specified or specified as 'ALL'.\n"
+                       )
+
 #if defined( OPTION_W32_CTCI )
 CMDHELP ( "tt32",      "Format:  \"tt32   debug | nodebug | stats <devnum>\".\n\n"
 
@@ -5837,6 +7154,23 @@ CMDHELP ( "tt32",      "Format:  \"tt32   debug | nodebug | stats <devnum>\".\n\
                        "or displays TunTap32 stats for the specified CTC device.\n"
                        )
 #endif /* defined( OPTION_W32_CTCI ) */
+
+#if defined( OPTION_TAPE_AUTOMOUNT )
+
+CMDHELP ( "automount", "Format:  \"automount  { add <dir> | del <dir> | list }\".\n\n"
+
+                       "Adds or deletes entries from the list of allowable/unallowable tape\n"
+                       "automount directories, or lists all currently defined list entries,\n"
+                       "if any.\n"
+                       "\n"
+                       "The format of the <dir> directory operand for add/del operations is\n"
+                       "identical to that as described in the documentation for the AUTOMOUNT\n"
+                       "configuration file statement (i.e. prefix with '+' or '-' as needed).\n"
+                       "\n"
+                       "The automount feature is approriately enabled or disabled for all tape\n"
+                       "devices as needed depending on the updated empty/non-empty list state.\n"
+                       )
+#endif /* OPTION_TAPE_AUTOMOUNT */
 
 #if defined( OPTION_SCSI_TAPE )
 CMDHELP ( "scsimount", "Format:    \"scsimount  [ no | yes | 0-99 ]\".\n\n"
@@ -5892,6 +7226,33 @@ CMDHELP ( "start",     "Entering the 'start' command by itself simply starts a s
                        "printer device <devn>.\n"
                        )
 
+#if defined(OPTION_IPLPARM)
+CMDHELP ( "ipl",       "Format: \"ipl nnnn [parm xxxxxxxxxxxxxx]\"\n"
+                       "Performs the Initial Program Load manual control function. The operand 'nnnn'\n"
+                       "can either be a device address or the name of a .ins file to be loaded.\n"
+                       "An optional 'parm' keyword followed by a string can also be passed to the IPL\n"
+                       "command processor. The string will be loaded into the low-order 32 bits of the\n"
+                       "general purpose registers (4 characters per register for up to 64 bytes).\n"
+                       "The PARM option behaves similarly to the VM IPL command.\n"
+                       )
+#else
+CMDHELP ( "ipl",       "Format: \"ipl nnnn\"\n"
+                       "Performs the Initial Program Load manual control function. The operand 'nnnn'\n"
+                       "can either be a device address or the name of a .ins file to be loaded.\n"
+                       )
+#endif
+CMDHELP ( "iplc",      "Performs the Load Clear manual control function. See \"ipl\".\n")
+
+CMDHELP ( "sysreset",  "Performs the System Reset manual control function. A CPU and I/O\n"
+                       "subsystem reset are performed.\n")
+
+CMDHELP ( "sysclear",  "Performs the System Reset Clear manual control function. Same as\n"
+                       "the \"sysreset\" command but also clears main storage to 0. Also, registers\n"
+                       "control registers, etc.. are reset to their initial value. At this\n"
+                       "point, the system is essentially in the same state as it was just after\n"
+                       "having been started\n")
+
+
 CMDHELP ( "stop",      "Entering the 'stop' command by itself simply stops a running\n"
                        "CPU, whereas 'stop <devn>' presses the virtual stop button on\n"
                        "printer device <devn>, usually causing an INTREQ.\n"
@@ -5907,20 +7268,47 @@ CMDHELP ( "!message",  "To enter a system control program (i.e. guest operating 
                        "priority command on the hercules console, simply prefix the command\n"
                        "with an exclamation point '!'.\n"
                        )
+
+CMDHELP ( "ssd",       "The SSD (signal shutdown) command signals an imminent hypervisor shutdown to\n"
+                       "the guest.  Guests who support this are supposed to perform a shutdown upon\n"
+                       "receiving this request.\n"
+                       "An implicit ssd command is given on a hercules \"quit\" command if the guest\n"
+                       "supports ssd.  In that case hercules shutdown will be delayed until the guest\n"
+                       "has shutdown or a 2nd quit command is given.\n"
+                       )
 #endif
 
-CMDHELP ( "gpr",       "Format: gpr [nn=xxxxxxxxxxxxxxxx]\" where 'nn' is the optional register\n"
+CMDHELP ( "psw",       "Format: \"psw [operand ...]\" where 'operand ...' is one or more optional\n"
+                       "parameters which modify the contents of the Program Status Word.\n"
+                       "sm=xx modifies the PSW system mask (xx is 2 hex digits)\n"
+                       "pk=n modifies the PSW protection key (n is decimal 0 to 15)\n"
+                       "cmwp=x modifies the EC/M/W/P bits of the PSW (x is one hex digit)\n"
+                       "as=pri|sec|ar|home modifies the PSW address-space control bits\n"
+                       "cc=n modifies the PSW condition code (n is decimal 0 to 3)\n"
+                       "pm=x modifies the PSW program mask (x is one hex digit)\n"
+                       "ia=xxx modifies the PSW instruction address (xxx is 1 to 16 hex digits)\n"
+                       "as=24|31|64 modifies the addressing mode bits of the PSW\n"
+                       "Enter \"psw\" by itself to display the current PSW without altering it.\n"
+                       )
+
+CMDHELP ( "gpr",       "Format: \"gpr [nn=xxxxxxxxxxxxxxxx]\" where 'nn' is the optional register\n"
                        "number (0 to 15) and 'xxxxxxxxxxxxxxxx' is the register value in hexadecimal\n"
                        "(1-8 hex digits for 32-bit registers or 1-16 hex digits for 64-bit registers).\n"
                        "Enter \"gpr\" by itself to display the register values without altering them.\n"
+                       )
+CMDHELP ( "cr",        "Format: \"cr [nn=xxxxxxxxxxxxxxxx]\" where 'nn' is the optional control register\n"
+                       "number (0 to 15) and 'xxxxxxxxxxxxxxxx' is the control register value in hex\n"
+                       "(1-8 hex digits for 32-bit registers or 1-16 hex digits for 64-bit registers).\n"
+                       "Enter \"cr\" by itself to display the control registers without altering them.\n"
                        )
 CMDHELP ( "r",         "Format: \"r addr[.len]\" or \"r addr-addr\" to display real\n"
                        "storage, or \"r addr=value\" to alter real storage, where 'value'\n"
                        "is a hex string of up to 32 pairs of digits.\n"
                        )
-CMDHELP ( "v",         "Format: \"v addr[.len]\" or \"v addr-addr\" to display virtual\n"
-                       "storage, or \"v addr=value\" to alter virtual storage, where 'value'\n"
-                       "is a hex string of up to 32 pairs of digits.\n"
+CMDHELP ( "v",         "Format: \"v [P|S|H] addr[.len]\" or \"v [P|S|H] addr-addr\" to display virtual\n"
+                       "storage, or \"v [P|S|H] addr=value\" to alter virtual storage, where 'value'\n"
+                       "is a hex string of up to 32 pairs of digits. The optional 'P' or 'S' or 'H'\n"
+                       "will force Primary, Secondary, or Home translation instead of current PSW mode.\n"
                        )
 
 CMDHELP ( "attach",    "Format: \"attach devn type [arg...]\n"
@@ -6029,6 +7417,23 @@ CMDHELP ( "loadtext",  "Format: \"loadtext filename [address]\". This command is
                        "and \"END\" 80 byte records (i.e. an object deck).\n"
                        )
 
+#ifdef PANEL_REFRESH_RATE
+CMDHELP ( "panrate",   "Format: \"panrate [nnn | fast | slow]\". Sets or displays the panel refresh rate.\n"
+                       "panrate nnn sets the refresh rate to nnn milliseconds.\n"
+                       "panrate fast sets the refresh rate to " MSTRING(PANEL_REFRESH_RATE_FAST) " milliseconds.\n"
+                       "panrate slow sets the refresh rate to " MSTRING(PANEL_REFRESH_RATE_SLOW) " milliseconds.\n"
+                       "If no operand is specified, panrate displays the current refresh rate.\n"
+                       )
+#endif
+
+#ifdef OPTION_MSGHLD
+CMDHELP ( "msghld",    "Format: \"msghld [value | info | clear]\".\n"
+                       "  value: timeout value of held message in seconds\n"
+                       "  info:  displays the timeout value\n"
+                       "  clear: releases the held messages\n"
+                       )
+#endif
+
 #if defined(OPTION_CONFIG_SYMBOLS)
 CMDHELP ( "defsym",    "Format: \"defsym symbol [value]\". Defines symbol 'symbol' to contain value 'value'.\n"
                        "The symbol can then be the object of a substitution for later panel commands.\n"
@@ -6073,6 +7478,19 @@ CMDHELP ( "traceopt",  "Format: \"traceopt [regsfirst | noregs | traditional]\".
                        "the command without any argument simply displays the current mode.\n"
                        )
 
+CMDHELP ( "sfk",       "Format: \"sfk{*|xxxx} [n]\". Performs a chkdsk on the active shadow file\n"
+                       "where xxxx is the device number (*=all cckd devices)\n"
+                       "and n is the optional check level (default is 2):\n"
+                       " -1 devhdr, cdevhdr, l1 table\n"
+                       " 0 devhdr, cdevhdr, l1 table, l2 tables\n"
+                       " 1 devhdr, cdevhdr, l1 table, l2 tables, free spaces\n"
+                       " 2 devhdr, cdevhdr, l1 table, l2 tables, free spaces, trkhdrs\n"
+                       " 3 devhdr, cdevhdr, l1 table, l2 tables, free spaces, trkimgs\n"
+                       " 4 devhdr, cdevhdr. Build everything else from recovery\n"
+                       "You probably don't want to use `4' unless you have a backup and are\n"
+                       "prepared to wait a long time.\n"
+                       )
+
 CMDHELP ( "logopt",    "Format: \"logopt [timestamp | notimestamp]\".   Sets logging options.\n"
                        "\"timestamp\" inserts a time stamp in front of each log message.\n"
                        "\"notimestamp\" displays log messages with no time stamps.  Entering\n"
@@ -6110,6 +7528,13 @@ CMDHELP ( "maxrates",  "Format: \"maxrates [nnnn]\" where 'nnnn' is the desired 
                        " the current highest rates observed during the defined intervals.\n"
                        )
 #endif // OPTION_MIPS_COUNTING
+
+#ifdef OPTION_CMDTGT
+CMDHELP ( "cmdtgt",    "Format: \"cmdtgt [herc | scp | pscp | ?]\". Specify the command target.\n")
+CMDHELP ( "herc",      "Format: \"herc [cmd]\". Send hercules cmd in any cmdtgt mode.\n")
+CMDHELP ( "scp",       "Format: \"scp [cmd]\". Send scp cmd in any cmdtgt mode.\n")
+CMDHELP ( "pscp",      "Format: \"pscp [cmd]\". Send priority message cmd to scp in any cmdtgt mode.\n")
+#endif // OPTION_CMDTGT
 
 CMDHELP ( NULL, NULL )         /* (end of table) */
 };
@@ -6154,6 +7579,7 @@ void *panel_command (void *cmdline)
     char  cmd[MAX_CMD_LEN];             /* Copy of panel command     */
     char *pCmdLine;
     unsigned i;
+    int noredisp;
 
     pCmdLine = cmdline; ASSERT(pCmdLine);
     /* every command will be stored in history list */
@@ -6162,24 +7588,95 @@ void *panel_command (void *cmdline)
         history_add(cmdline);
 
     /* Copy panel command to work area, skipping leading blanks */
+
+    /* If the command starts with a -, then strip it and indicate
+     * we do not want command redisplay
+     */
+
+    noredisp=0;
     while (*pCmdLine && isspace(*pCmdLine)) pCmdLine++;
     i = 0;
     while (*pCmdLine && i < (MAX_CMD_LEN-1))
     {
-        cmd[i] = *pCmdLine;
-        i++;
+        if(i==0 && *pCmdLine=='-')
+        {
+            noredisp=1;
+            /* and remove blanks again.. */
+            while (*pCmdLine && isspace(*pCmdLine)) pCmdLine++;
+        }
+        else
+        {
+            cmd[i] = *pCmdLine;
+            i++;
+        }
         pCmdLine++;
     }
     cmd[i] = 0;
 
     /* Ignore null commands (just pressing enter)
-       unless instruction stepping is enabled. */
-    if (!sysblk.inststep && 0 == cmd[0])
+       unless instruction stepping is enabled or
+       commands are being sent to the SCP by default. */
+    if (!sysblk.inststep && (sysblk.cmdtgt == 0) && (0 == cmd[0]))
         return NULL;
 
     /* Echo the command to the control panel */
-    logmsg( "%s\n", cmd);
+    if(!noredisp)
+    {
+        logmsg( "%s\n", cmd);
+    }
 
+#ifdef OPTION_CMDTGT
+    /* check for cmdtgt, herc, scp or pscp command */
+    if(!strncasecmp(cmd, "cmdtgt ",7) || !strncasecmp(cmd, "herc ", 5) ||
+       !strncasecmp(cmd, "scp ", 4) || !strncasecmp(cmd, "pscp ", 5))
+    {
+      ProcessPanelCommand(cmd);
+      return NULL;
+    }
+
+    /* Send command to the selected command target */
+    switch(sysblk.cmdtgt)
+    {
+      case 0: // cmdtgt herc
+      {
+        /* Stay compatible */
+#ifdef _FEATURE_SYSTEM_CONSOLE
+        if(cmd[0] == '.' || cmd[0] == '!')
+        {
+          if(!cmd[1])
+          {
+            cmd[1] = ' ';
+            cmd[2] = 0;
+          }
+          scp_command(cmd + 1, cmd[0] == '!');
+        }
+        else
+#endif /*_FEATURE_SYSTEM_CONSOLE*/
+          ProcessPanelCommand(cmd);
+        break;
+      }
+      case 1: // cmdtgt scp
+      {
+        if(!cmd[0])
+        {
+          cmd[0] = ' ';
+          cmd[1] = 0;
+        }
+        scp_command(cmd, 0);
+        break;
+      }
+      case 2: // cmdtgt pscp
+      {
+        if(!cmd[0])
+        {
+          cmd[0] = ' ';
+          cmd[1] = 0;
+        }
+        scp_command(cmd, 1);
+        break;
+      }
+    }
+#elif // OPTION_CMDTGT
 #ifdef _FEATURE_SYSTEM_CONSOLE
     if ('.' == cmd[0] || '!' == cmd[0])
     {
@@ -6190,6 +7687,8 @@ void *panel_command (void *cmdline)
 #endif /*_FEATURE_SYSTEM_CONSOLE*/
 
     ProcessPanelCommand(cmd);
+#endif // OPTION_CMDTGT
+
     return NULL;
 }
 

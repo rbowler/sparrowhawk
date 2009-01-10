@@ -2,12 +2,21 @@
 //   w32util.h        Windows porting functions
 //////////////////////////////////////////////////////////////////////////////////////////
 // (c) Copyright "Fish" (David B. Trout), 2005-2007. Released under the Q Public License
-// (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
+// (http://www.hercules-390.org/herclic.html) as modifications to Hercules.
 //////////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: w32util.h,v 1.10 2007/06/23 00:04:19 ivan Exp $
+// $Id: w32util.h,v 1.13 2008/11/23 22:27:43 rbowler Exp $
 //
 // $Log: w32util.h,v $
+// Revision 1.13  2008/11/23 22:27:43  rbowler
+// Fix win64 type conversion warnings in w32util.c
+//
+// Revision 1.12  2007/11/30 14:54:34  jmaynard
+// Changed conmicro.cx to hercules-390.org or conmicro.com, as needed.
+//
+// Revision 1.11  2007/08/04 19:04:34  fish
+// gethostid
+//
 // Revision 1.10  2007/06/23 00:04:19  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -175,6 +184,9 @@ W32_DLL_IMPORT BYTE *hostpath( BYTE *outpath, const BYTE *inpath, size_t buffsiz
 // (only returns access-mode flags and not any others)
 W32_DLL_IMPORT int get_file_accmode_flags( int fd );
 
+// Retrieve unique host id
+W32_DLL_IMPORT long gethostid( void );
+
 // Initialize/Deinitialize sockets package...
 W32_DLL_IMPORT int  socket_init   ( void );
 W32_DLL_IMPORT int  socket_deinit ( void );
@@ -195,7 +207,7 @@ W32_DLL_IMPORT void socket_keepalive( int sfd, int idle_time, int probe_interval
 W32_DLL_IMPORT int get_process_directory( char* dirbuf, size_t bufsiz );
 
 // Expand environment variables... (e.g. %SystemRoot%, etc); 0==success
-W32_DLL_IMPORT int expand_environ_vars( const char* inbuff, char* outbuff, size_t outbufsiz );
+W32_DLL_IMPORT int expand_environ_vars( const char* inbuff, char* outbuff, DWORD outbufsiz );
 
 // Initialize Hercules HOSTINFO structure
 W32_DLL_IMPORT void w32_init_hostinfo( HOST_INFO* pHostInfo );
@@ -216,7 +228,7 @@ W32_DLL_IMPORT FILE*  w32_fdopen ( int their_fd, const char* their_mode );
 W32_DLL_IMPORT size_t w32_fwrite ( const void* buff, size_t size, size_t count, FILE* stream );
 W32_DLL_IMPORT int    w32_fprintf( FILE* stream, const char* format, ... );
 W32_DLL_IMPORT int    w32_fclose ( FILE* stream );
-W32_DLL_IMPORT int    w32_get_stdin_char ( char* pCharBuff, size_t wait_millisecs );
+W32_DLL_IMPORT int    w32_get_stdin_char ( char* pCharBuff, int wait_millisecs );
 W32_DLL_IMPORT pid_t  w32_poor_mans_fork ( char*  pszCommandLine, int* pnWriteToChildStdinFD );
 W32_DLL_IMPORT void   w32_set_thread_name( TID tid, char* name );
 

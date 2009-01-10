@@ -1,9 +1,58 @@
-/* FEATALL.H    (c) Copyright Jan Jaeger, 2000-2007                  */
+/* FEATALL.H    (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              Architecture-dependent macro definitions             */
 
-// $Id: featall.h,v 1.125 2007/06/23 00:04:09 ivan Exp $
+// $Id: featall.h,v 1.140 2009/01/02 19:21:51 jj Exp $
 //
 // $Log: featall.h,v $
+// Revision 1.140  2009/01/02 19:21:51  jj
+// DVD-RAM IPL
+// RAMSAVE
+// SYSG Integrated 3270 console fixes
+//
+// Revision 1.139  2008/12/24 22:35:53  rbowler
+// Framework for integrated 3270 and ASCII console features
+//
+// Revision 1.138  2008/09/02 06:07:33  fish
+// Add OPTION_MSGHLD back again
+//
+// Revision 1.137  2008/08/29 11:11:06  fish
+// Fix message-keep logic  (i.e. sticky/held messages)
+//
+// Revision 1.136  2008/08/23 12:34:05  bernard
+// OPTION_MSGHLD sticky messages
+//
+// Revision 1.135  2008/08/04 22:06:00  rbowler
+// DIAG308 function codes for Program-directed re-IPL
+//
+// Revision 1.134  2008/08/02 09:04:28  bernard
+// SCP message colors
+//
+// Revision 1.133  2008/07/20 12:10:40  bernard
+// OPTION_CMDTGT
+//
+// Revision 1.132  2008/07/08 05:35:49  fish
+// AUTOMOUNT redesign: support +allowed/-disallowed dirs
+// and create associated 'automount' panel command - Fish
+//
+// Revision 1.131  2008/03/01 12:19:04  rbowler
+// Rename new features to include the word facility
+//
+// Revision 1.130  2008/02/28 10:11:50  rbowler
+// STFL bit settings for new features in zPOP-06
+//
+// Revision 1.129  2008/02/27 17:09:22  bernard
+// introduce FEATURE_GENERAL_INSTRUCTIONS_EXTENSION_FEATURE
+//
+// Revision 1.128  2008/02/27 14:15:17  bernard
+// Implemented feature_message_security_assist_extension_2
+//
+// Revision 1.127  2007/11/30 15:14:14  rbowler
+// Permit String-Instruction facility to be activated in S/370 mode
+//
+// Revision 1.126  2007/08/06 16:48:20  ivan
+// Implement "PARM" option for IPL command (same as VM IPL PARM XXX)
+// Also add command helps for ipl, iplc, sysclear, sysreset
+//
 // Revision 1.125  2007/06/23 00:04:09  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -74,12 +123,22 @@
                                            interrupt selects instead
                                            of inter-thread signaling */
 #define OPTION_TIMESTAMP_LOGFILE        /* Hardcopy logfile HH:MM:SS */
+#define OPTION_IPLPARM                  /* IPL PARM a la VM          */
 #ifndef FISH_HANG
 #define OPTION_PTTRACE                  /* Pthreads tracing          */
 #endif
-//#define OPTION_DEBUG_MESSAGES           // Prefix msgs with filename
-                                        // and line# if DEBUG build
+//#define OPTION_DEBUG_MESSAGES         /* Prefix msgs with filename
+//                                         and line# if DEBUG build  */
 #define OPTION_SET_STSI_INFO            /* Set STSI info in cfg file */
+
+#define OPTION_TAPE_AUTOMOUNT           /* "Automount" CCWs support  */
+#define OPTION_CMDTGT                   /* the cmdtgt command        */
+#define OPTION_MSGCLR                   /* Colored messages          */
+#define OPTION_MSGHLD                   /* Sticky messages           */
+
+#if defined(OPTION_MSGHLD) && !defined(OPTION_MSGCLR)
+  #error OPTION_MSGHLD requires OPTION_MSGCLR
+#endif // defined(OPTION_MSGHLD) && !defined(OPTION_MSGCLR)
 
 /*********************************************************************\
  *********************************************************************
@@ -126,8 +185,10 @@
 #undef FEATURE_CHSC
 #undef FEATURE_COMPARE_AND_MOVE_EXTENDED
 #undef FEATURE_COMPARE_AND_SWAP_AND_STORE                       /*407*/
+#undef FEATURE_COMPARE_AND_SWAP_AND_STORE_FACILITY_2            /*208*/
 #undef FEATURE_COMPRESSION
 #undef FEATURE_CONDITIONAL_SSKE                                 /*407*/
+#undef FEATURE_CONFIGURATION_TOPOLOGY_FACILITY                  /*208*/
 #undef FEATURE_CPU_RECONFIG
 #undef FEATURE_CPUID_FORMAT_1
 #undef FEATURE_DAT_ENHANCEMENT
@@ -136,10 +197,12 @@
 #undef FEATURE_DUAL_ADDRESS_SPACE
 #undef FEATURE_ECPSVM
 #undef FEATURE_EMULATE_VM
+#undef FEATURE_ENHANCED_DAT_FACILITY                            /*208*/
 #undef FEATURE_ESAME
 #undef FEATURE_ESAME_N3_ESA390
 #undef FEATURE_ETF2_ENHANCEMENT                                 /*@Z9*/
 #undef FEATURE_ETF3_ENHANCEMENT                                 /*@Z9*/
+#undef FEATURE_EXECUTE_EXTENSIONS_FACILITY                      /*208*/
 #undef FEATURE_EXPANDED_STORAGE
 #undef FEATURE_EXPEDITED_SIE_SUBSET
 #undef FEATURE_EXTENDED_IMMEDIATE                               /*@Z9*/
@@ -153,6 +216,7 @@
 #undef FEATURE_FETCH_PROTECTION_OVERRIDE
 #undef FEATURE_FPS_ENHANCEMENT                                  /*DFP*/
 #undef FEATURE_FPS_EXTENSIONS
+#undef FEATURE_GENERAL_INSTRUCTIONS_EXTENSION_FACILITY
 #undef FEATURE_HERCULES_DIAGCALLS
 #undef FEATURE_HEXADECIMAL_FLOATING_POINT
 #undef FEATURE_HFP_EXTENSIONS
@@ -162,6 +226,8 @@
 #undef FEATURE_IEEE_EXCEPTION_SIMULATION                        /*407*/
 #undef FEATURE_IMMEDIATE_AND_RELATIVE
 #undef FEATURE_INCORRECT_LENGTH_INDICATION_SUPPRESSION
+#undef FEATURE_INTEGRATED_3270_CONSOLE
+#undef FEATURE_INTEGRATED_ASCII_CONSOLE
 #undef FEATURE_INTERPRETIVE_EXECUTION
 #undef FEATURE_INTERVAL_TIMER
 #undef FEATURE_IO_ASSIST
@@ -171,23 +237,28 @@
 #undef FEATURE_LONG_DISPLACEMENT
 #undef FEATURE_MESSAGE_SECURITY_ASSIST
 #undef FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_1              /*@Z9*/
+#undef FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_2
 #undef FEATURE_MIDAW                                            /*@Z9*/
 #undef FEATURE_MOVE_PAGE_FACILITY_2
+#undef FEATURE_MOVE_WITH_OPTIONAL_SPECIFICATIONS                /*208*/
 #undef FEATURE_MSSF_CALL
 #undef FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE
-#undef FEATURE_MVCOS                                            /*407*/
 #undef FEATURE_MVS_ASSIST
 #undef FEATURE_PAGE_PROTECTION
+#undef FEATURE_PARSING_ENHANCEMENT_FACILITY                     /*208*/
 #undef FEATURE_PERFORM_LOCKED_OPERATION
 #undef FEATURE_PER
 #undef FEATURE_PER2
 #undef FEATURE_PER3                                             /*@Z9*/
 #undef FEATURE_PFPO                                             /*407*/
 #undef FEATURE_PRIVATE_SPACE
+#undef FEATURE_PROGRAM_DIRECTED_REIPL                           /*@Z9*/
 #undef FEATURE_PROTECTION_INTERCEPTION_CONTROL
 #undef FEATURE_QUEUED_DIRECT_IO
 #undef FEATURE_REGION_RELOCATE
+#undef FEATURE_RESTORE_SUBCHANNEL_FACILITY                      /*208*/
 #undef FEATURE_RESUME_PROGRAM
+#undef FEATURE_SCEDIO
 #undef FEATURE_S370_CHANNEL
 #undef FEATURE_S390_DAT
 #undef FEATURE_S370E_EXTENDED_ADDRESSING
@@ -201,6 +272,7 @@
 #undef FEATURE_STORE_CLOCK_FAST                                 /*@Z9*/
 #undef FEATURE_STORE_FACILITY_LIST_EXTENDED                     /*@Z9*/
 #undef FEATURE_STORE_SYSTEM_INFORMATION
+#undef FEATURE_STRING_INSTRUCTION
 #undef FEATURE_SUBSPACE_GROUP
 #undef FEATURE_SUPPRESSION_ON_PROTECTION
 #undef FEATURE_SYSTEM_CONSOLE

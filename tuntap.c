@@ -15,9 +15,12 @@
 // that works on all platforms with (hopefully) equal results.
 //
 
-// $Id: tuntap.c,v 1.45 2007/06/23 00:04:19 ivan Exp $
+// $Id: tuntap.c,v 1.46 2008/02/07 00:29:04 rbowler Exp $
 //
 // $Log: tuntap.c,v $
+// Revision 1.46  2008/02/07 00:29:04  rbowler
+// Solaris build support by Jeff Savit
+//
 // Revision 1.45  2007/06/23 00:04:19  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -26,6 +29,9 @@
 //
 
 #include "hstdinc.h"
+
+/* jbs 1/19/2008 added ifdef on __SOLARIS__ */
+#if !defined(__SOLARIS__)
 
 #include "hercules.h"
 #include "tuntap.h"
@@ -981,3 +987,5 @@ void build_herc_iface_mac ( BYTE* out_mac, const BYTE* in_ip )
     *(out_mac+4) = *(in_ip+2);
     *(out_mac+5) = *(in_ip+3);
 }
+
+#endif /*  !defined(__SOLARIS__)  jbs*/

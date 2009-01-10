@@ -1,3 +1,167 @@
+08 Jan 2009 Cosmetic improvement to CPU type display on startup - Jay
+            Maynard
+07 Jan 2009 Remove --enable-universal-binary configure option; doesn't work
+            on Leopard due to libtool compiler options - Jay Maynard
+07 Jan 2009 Preliminary changes for 3.06 - Jay Maynard
+07 Jan 2009 Added x86_64 assembler byteswap assists - Jay Maynard
+07 Jan 2009 msghld command with clear option - Bernard van der Helm
+07 Jan 2009 msghldsec command - Bernard van der Helm
+02 Jan 2009 Integrated 3270 console fixes - Jan Jaeger
+02 Jan 2009 DVD-RAM IPL and RAMSAVE support - Jan Jaeger
+02 Jan 2009 Optional ECHO/NOECHO to Diag8cmd statement - Ivan Warren
+31 Dec 2008 Integrated 3270 (SYSG) console - Roger Bowler
+30 Dec 2008 Allow $(LPARNAME) in herclogo file - Roger Bowler
+23 Dec 2008 Allow symbol substitution in OAT files - Roger Bowler
+22 Dec 2008 Implement Compare And Swap And Store Facility 2 - Ivan Warren
+21 Dec 2008 Diag 224 fix - Ivan Warren
+21 Dec 2008 Various SERVC READ_xxx_INFO fixes for specialty engines - Ivan Warren
+08 Dec 2008 Fix Issue with ESA Guest on z/Arch and >2GB Storage - Ivan Warren
+06 Dec 2008 Enable STFLE in ESA/390 mode - Ivan Warren
+04 Dec 2008 Add ability to configure group name in --enable-setuid-hercifc= - Roger Bowler
+02 Dec 2008 Support for PANTITLE when console is an xterm window - Roger Bowler
+24 Nov 2008 Add processor type IL for IFL on engines statement - Jan Jaeger
+02 Nov 2008 Correction to dasdtab entries for 3375 and 3380 - Roger Bowler
+01 Nov 2008 Fix tapedev gettapetype_bydata function for HET/AWS tapes that
+            start with a tapemark -- Liam Cold [liamcold@yahoo.com] by Fish
+26 Oct 2008 Store_is within CMPSC will zero the remaining bits in the working byte,
+            just like other famous manufacturers will do. All former generated compressed
+            code will expand correctly, don't worry!! But their can be a difference
+            in the compressed output. (This is the case when bits are on, but those
+            are the unused bits after the last index symbol). - Bernard van der Helm
+24 Oct 2008 Fix RC file not processed nor HAO thread engaged if -d daemon mode - Fish
+11 Oct 2008 Fix MSVC build failure when 'rebase' utility doesn't exist - Fish
+07 Sep 2008 Fix zero ilc problem after branch trace - Greg
+04 Sep 2008 Fix 64-bit length problem in cdsk_valid_trk - Tony Harminc by Greg
+29 Aug 2008 Panel display extended cursor handling (Windows only) - Fish
+29 Aug 2008 Fix message-keep logic (sticky/held messages) - Fish
+29 Aug 2008 Fix some New Panel data input painting issues - Fish
+23 Aug 2008 Implemented sticky and held messages completed - Bernard van der Helm
+22 Aug 2008 Fix TOD clock race condition identified by Fred Feucht
+            (fredfeucht) - by Marcin Cieslak [saper@system.pl] - Fish
+21 Aug 2008 Fix i/o-interrupt-queue race condition - Fish
+19 Aug 2008 Init LCS interface ASAP to fix wrong MAC being used - Fish
+13 Aug 2008 Fix bad guest IA after host interrupt during branch trace - Greg
+04 Aug 2008 DIAG308 function codes (still incomplete) - Roger Bowler
+02 Aug 2008 Implement SCP message colors - Bernard van der Helm
+29 Jul 2008 Fix buffer mgmt bug in hao_thread causing garbage - Fish
+24 Jul 2008 Implementation of cmdtgt version 2 - Bernard van der Helm
+20 Jul 2008 Implementation of cmdtgt command - Bernard van der Helm
+18 Jul 2008 Fix PSF order 18 suborder 01 PSF and SSD length - Fish
+17 Jul 2008 Fix LCS write FCS (Frame Check Sequence) and other bugs - Fish
+16 Jul 2008 Increase time-interval accuracy to 1ms for Windows build - Fish
+10 Jul 2008 panel support for scrolling up/down one line - Fish
+08 Jul 2008 AUTOMOUNT redesign: support +allowed/-disallowed dirs
+            and create associated 'automount' panel command - Fish
+22 Jun 2008 Fix tape messages print format bug causing crash - Fish
+28 May 2008 AUTOMOUNT fixed and enhanced so it actually works now - Fish
+28 May 2008 Misleading VTAPE support renamed to AUTOMOUNT instead - Fish
+24 May 2008 VTAPE automount support (CCW 0x4B + 0xE4) - Fish
+22 May 2008 Attempt to fix my *nix SCSI tape BSR over tapemark bug
+            identified by Bob Schneider [bschneider@pingdata.net] - Fish
+22 May 2008 Tape file extension neutrality support - Fish
+22 May 2008 Flex FakeTape support - Fish
+22 May 2008 Fix read timeout bug in LCS logic - Fish
+19 May 2008 PSF order 18 suborders (0E,41) and order 1D by Jacob Dekel - Roger Bowler
+04 May 2008 Fix CGDR,CGXR to handle values exceeding 2G - Roger Bowler
+25 Apr 2008 CGER result incorrect for values over 2G - Roger Bowler
+22 Apr 2008 Correction to CXGR instruction - Roger Bowler
+21 Apr 2008 CEGR result incorrect if source exceeds 6 digits - Roger Bowler
+20 Apr 2008 CDGR result incorrect if source exceeds 14 digits - Roger Bowler
+18 Apr 2008 Fix incorrect results from THDER,THDR instructions - Roger Bowler
+16 Apr 2008 Fix condition code in LCEBR,LCDBR,LCXBR instructions - Roger Bowler
+16 Apr 2008 Fix FIEBR,FIDBR,FIXBR to respect BFP rounding mode - Roger Bowler
+08 Apr 2008 Add execute relative long instruction - Bernard van der Helm
+31 Mar 2008 Fix SCSI tape i/o performance: now 10x faster! - Fish
+30 Mar 2008 Fix SCSI tape EOV (end of volume) processing - Fish
+29 Mar 2008 More complete/extensive 3490/3590 tape support - Fish
+28 Mar 2008 Fix incorrect registers when cc=1 for TRTE,TRTRE - Roger Bowler
+28 Mar 2008 Add generic, readblkid, locateblk tape media handler vectors - Fish
+28 Mar 2008 SCSI --blkid-24 option - Fish
+23 Mar 2008 Fix incorrect bit selection for RNSBG,RISBG,ROSBG,RXSBG - Roger Bowler
+23 Mar 2008 Move With Optional Specifications Facility (MVCOS) - Roger Bowler
+13 Mar 2008 Return Byte Mpx for Chan 0 according to GA22-7000-4 - Ivan Warren
+12 Mar 2008 Fix residual read-only setting for tape device - Kevin Leonard
+12 Mar 2008 Fix store operation of ASI, AGSI, ALSI and AGLSI - Jan Jaeger
+08 Mar 2008 General Instructions Extension Facility - Roger Bowler
+07 Mar 2008 Add pri, sec, home options [P|S|H] to "v" command - Paul Leisy
+05 Mar 2008 Fix PLO fc=3 fc=19 and qword alignment chks - Paul Leisy
+04 Mar 2008 Fix CFC cond code - fetch right operand size - Paul Leisy
+04 Mar 2008 LEGACYSENSEID config stmt added - see hercconf.html - Ivan Warren
+03 Mar 2008 Fix BSM/BASSM mode switch trace - Paul Leisy
+02 Mar 2008 re-disable SenseID on 8809,3410,3420 (breaks MTS) - Ivan Warren
+29 Feb 2008 Fix TRAP in z/arch mode - Paul Leisy
+29 Feb 2008 Added feature parsing_enhancement_facility - Bernard
+28 Feb 2008 Fix RP in z/arch mode and mode switch trace - Paul Leisy
+27 Feb 2008 Added feature message_security_assist_extension_2 - Bernard
+22 Feb 2008 Fix BSA pic06 in z/arch mode - Paul Leisy
+20 Feb 2008 Fix BSA pic06/05 and branch to odd addrs pic06 - Paul Leisy
+17 Feb 2008 Enable Posix 1003.1e capabilities to restrict setuid-0
+            programs to just the necessary privileges - Ivan Warren
+15 Feb 2008 Fix PC, RP pic13, STCKE byte 0 and two PER bugs - Paul Leisy
+12 Feb 2008 Fix 3880 SNSID length (thanks De!) - Greg
+12 Feb 2008 Fixes for SPKA, BASR, TBEDR, PR - Paul Leisy
+12 Feb 2008 dyngui tweaks: new def devlist fmt, new debug_cd_cmd hook - Fish
+11 Feb 2008 Fixed intermediate errors cmpsc - Bernard
+07 Feb 2008 Solaris build support by Jeff Savit - Roger Bowler
+24 Jan 2008 Fix invalidate_tlbe processing - Paul Leisy by Greg
+23 Jan 2008 Fix and optimize TR instruction - Greg
+23 Jan 2008 Modifications for VS9 C++ 2008 Express by Charlie Brint - Roger Bowler
+21 Jan 2008 Activate ETF3 and ETF2/ETF3-Enhancements in ESA/390 mode - Roger Bowler
+21 Jan 2008 Permit Extended-Translation-Facility-3 to be activated in S/370 and ESA/390 modes - Roger Bowler
+16 Jan 2008 Data exception for only UNPRECEDED nonzero bit34 ece entries - Fish
+14 Jan 2008 Additional ISO-8859-1 to European EBCDIC codepages - Roger Bowler
+11 Jan 2008 new 'ctc' command to enable/disable debug option on demand - Fish
+03 Jan 2008 sf commands update - Greg Smith
+01 Jan 2008 Data exception on nonzero bit34 in ece entry - Bernard van der Helm
+31 Dec 2007 Data exceptions on fetching ece, cce and sd1 - Bernard van der Helm
+31 Dec 2007 Data excep in CMPSC expansion psl and cls = 0 - Bernard van der Helm
+29 Dec 2007 Some errors in UTF translation - Bernard van der Helm
+29 Dec 2007 Tweak OPTION_MIPS_COUNTING tweak to prevent crash - Fish
+24 Dec 2007 Compression check output, input swapped to input, output - Bernard van der Helm
+11 Dec 2007 Enable SENSE ID CCW for 2703,3410,3420
+10 Dec 2007 Tweaks to OPTION_MIPS_COUNTING processing - Greg
+02 Dec 2007 Permit Extended-Translation-Facility-2 to be activated in S/370 mode - Roger Bowler
+02 Dec 2007 Enable B9xx,EBxx opcodes in S/370 mode for ETF2 - Roger Bowler
+02 Dec 2007 Permit Extended-Translation facility to be activated in S/370 mode - Roger Bowler
+02 Dec 2007 Permit Compare-and-Move-Extended facility to be activated in S/370 mode - Roger Bowler
+01 Dec 2007 Fix cckdcdsk/cckdcomp/cckdutil no message o/p issue - Fish
+30 Nov 2007 Change all references to conmicro.cx to hercules-390.org - Jay
+            Maynard
+30 Nov 2007 Permit String-Instruction facility to be activated in S/370 mode -
+            Roger Bowler
+28 Nov 2007 Allow ALLOW DATA CHECK to precede LOAD UCS AND FOLD on 1403 for
+            TSS/370 - Jay Maynard
+22 Nov 2007 Store Doubleword Monitor Code for z/Arch on succesful MC -
+            Ivan Warren
+20 Nov 2007 LRE support (try #1) - Greg
+18 Nov 2007 Activate Message-Security-Assist-Extension-1 facility in ESA/390 -
+            Roger Bowler
+18 Nov 2007 Permit Immediate-and-Relative facility to be activated in S/370
+            mode - Roger Bowler
+16 Nov 2007 Add HFP-multiply-add/subtract facility to ESA/390 - Roger Bowler
+15 Nov 2007 Correct PIC6 when loading DRM bits into FPC - Roger Bowler
+15 Nov 2007 Correct CPSDR instruction - Roger Bowler
+15 Nov 2007 Correct ESA/390 EPSW instruction - Roger Bowler
+13 Nov 2007 Support for AWSTAPE segmented blocks - Roger Bowler
+02 Nov 2007 Fix runaway CPU for self inflicted SIGP 9 - Ivan Warren
+04 Sep 2007 Use integer arithmetic calculating cpupct - Greg
+31 Aug 2007 Catch addr-excp when SIE DAT points outside Mainstore - Ivan Warren
+28 Aug 2007 cckdutil fix for 64-bit - zhackules by Greg
+28 Aug 2007 Fix many TUNSETIFF-EINVAL error messages - Greg
+26 Aug 2007 Fix missed unfixed 31 Aug 2006 non-SCSI tape Locate bug - Fish
+24 Aug 2007 Modify control registers by cr command - Roger Bowler
+16 Aug 2007 Backout 28 Jul fix for LCS (fix was only meant for CTCI) - Fish
+06 Aug 2007 Rework CPU execution loop - Greg
+06 Aug 2007 Filled ipl, iplc, sysclear, sysreset in HELPTAB - Ivan Warren
+06 Aug 2007 implement IPL PARM a la VM - Ivan Warren
+29 Jul 2007 Fix PR# 34/tape bug causing crash if non-tape devinit - Fish
+28 Jul 2007 Fix day-1 CTCI/LCS bug - Vince Weaver [vince@deater.net] by Fish
+24 Jul 2007 Force command-reject (until we can get it coded right)
+            for 3590 Medium Sense (x'C2') and Mode Sense (x'CF') - Fish
+24 Jul 2007 Default to --blkid-32 and --no-erg for 3590 SCSI - Fish
+24 Jul 2007 Fix tape Synchronize CCW (x'43') to do actual commit - Fish
+24 Jul 2007 Fix Windows SCSI tape Locate and Read-Block-Id SNAFU - Fish
+19 Jul 2007 Disable DIAG 308 Re-IPL feature until it is complete - Ivan Warren
 21 Jun 2007 revert config_cpu.pat due to problems in testing - Greg
 20 Jun 2007 3.05 release doc changes - Jay Maynard
 18 Jun 2007 make 3990-6 default control unit for 3390 devices - Greg

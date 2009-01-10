@@ -4,9 +4,36 @@
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 
-// $Id: esa390.h,v 1.94 2007/06/23 00:04:09 ivan Exp $
+// $Id: esa390.h,v 1.103 2008/12/25 21:30:31 ivan Exp $
 //
 // $Log: esa390.h,v $
+// Revision 1.103  2008/12/25 21:30:31  ivan
+// STSI Update part II : Add secondary CPU capacity in 1.2.2 SYSIB
+//
+// Revision 1.102  2008/12/25 21:14:31  ivan
+// STSI Update part 1 : add CPU Type percentage fields in 1.1.1 SYSIB
+//
+// Revision 1.101  2008/12/22 16:31:49  jj
+// *** empty log message ***
+//
+// Revision 1.100  2008/12/22 16:30:47  jj
+// Fix EDAT typo
+//
+// Revision 1.99  2008/12/22 16:22:19  jj
+// EDAT definitions
+//
+// Revision 1.98  2008/12/22 15:20:12  jj
+// Some EDAT definitions
+//
+// Revision 1.97  2008/12/08 20:38:20  ivan
+// Fix SIE DAT Issue with ESA/390 Guest on z/Arch host with >2GB of storage
+//
+// Revision 1.96  2008/03/04 17:09:14  rbowler
+// Add CRT,CGRT,CIT,CGIT,CLRT,CLGRT,CLFIT,CLGIT instructions
+//
+// Revision 1.95  2008/02/28 10:11:50  rbowler
+// STFL bit settings for new features in zPOP-06
+//
 // Revision 1.94  2007/06/23 00:04:09  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -218,6 +245,7 @@ typedef struct _TLB  {
 typedef struct _DAT {
         RADR    raddr;                  /* Real address              */
         RADR    aaddr;                  /* Absolute address          */
+        RADR    rpfra;                  /* Real page frame address   */
         RADR    asd;                    /* Address space designator: */
                                         /*   STD or ASCE             */
         int     stid;                   /* Address space indicator   */
@@ -242,6 +270,7 @@ typedef struct _DAT {
 #define CR0_PAGE_SIZE   0x00C00000      /* Page size for S/370...    */
 #define CR0_PAGE_SZ_2K  0x00400000      /* ...2K pages               */
 #define CR0_PAGE_SZ_4K  0x00800000      /* ...4K pages               */
+#define CR0_ZPAG_SZ_1M  0x00800000      /* ...1M pages           EDAT*/
 #define CR0_SEG_SIZE    0x00380000      /* Segment size for S/370... */
 #define CR0_SEG_SZ_64K  0x00000000      /* ...64K segments           */
 #define CR0_SEG_SZ_1M   0x00100000      /* ...1M segments            */
@@ -374,29 +403,37 @@ typedef struct _DAT {
 
 /* Region table entry bit definitions (ESAME mode) */
 #define REGTAB_TO       0xFFFFFFFFFFFFF000ULL /* Table origin        */
+#define REGTAB_P        0x200           /* DAT Protection bit    EDAT*/
 #define REGTAB_TF       0x0C0           /* Table offset              */
 #define REGTAB_I        0x020           /* Region invalid            */
 #define REGTAB_TT       0x00C           /* Table type                */
 #define REGTAB_TL       0x003           /* Table length              */
-#define REGTAB_RESV     0xF10           /* Reserved bits - ignored   */
+#define REGTAB_RESV     0xD10           /* Reserved bits - ignored   */
 
 /* Segment table entry bit definitions (ESAME mode) */
 #define ZSEGTAB_PTO     0xFFFFFFFFFFFFF800ULL /* Page table origin   */
+#define ZSEGTAB_SFAA    0xFFFFFFFFFFF00000ULL /* Seg Fr Abs Addr EDAT*/
+#define ZSEGTAB_AV      0x10000         /* ACCF Validity Control EDAT*/
+#define ZSEGTAB_ACC     0x0F000         /* Access Control Bits   EDAT*/
+#define ZSEGTAB_F       0x800           /* Fetch Protection      EDAT*/
+#define ZSEGTAB_FC      0x400           /* Format control        EDAT*/
 #define ZSEGTAB_P       0x200           /* Page protection bit       */
+#define ZSEGTAB_CO      0x100           /* Change-rec override   EDAT*/
 #define ZSEGTAB_I       0x020           /* Invalid segment           */
 #define ZSEGTAB_C       0x010           /* Common segment            */
 #define ZSEGTAB_TT      0x00C           /* Table type                */
-#define ZSEGTAB_RESV    0x5C3           /* Reserved bits - ignored   */
+#define ZSEGTAB_RESV    0x0C3           /* Reserved bits - ignored   */
 
 /* Page table entry bit definitions (ESAME mode) */
 #define ZPGETAB_PFRA    0xFFFFFFFFFFFFF000ULL /* Page frame real addr*/
 #define ZPGETAB_I       0x400           /* Invalid page              */
 #define ZPGETAB_P       0x200           /* Protected page            */
 #define ZPGETAB_ESVALID 0x100           /* Valid in expanded storage */
+#define ZPGETAB_CO      0x100           /* Change-rec override   EDAT*/
 #define ZPGETAB_ESREF   0x080           /* ES Referenced             */
 #define ZPGETAB_ESCHA   0x040           /* ES Changed                */
 #define ZPGETAB_ESLCK   0x020           /* ES Locked                 */
-#define ZPGETAB_RESV    0x900           /* Reserved bits - must be 0 */
+#define ZPGETAB_RESV    0x800           /* Reserved bits - must be 0 */
 
 /* Segment table designation bit definitions (ESA/390 mode) */
 #define STD_SSEVENT     0x80000000      /* Space switch event        */
@@ -1318,6 +1355,8 @@ typedef struct _MBK {
                                            is installed              */
 #define STFL_0_STFL_EXTENDED    0x01    /* Store facility list    @Z9
                                            extended is installed  @Z9*/
+#define STFL_1_ENHANCED_DAT     0x80    /* Enhanced-DAT facility  208
+                                           is installed           208*/
 #define STFL_1_SENSE_RUN_STATUS 0x40    /* Sense running status   @Z9
                                            facility is installed  @Z9*/
 #define STFL_1_CONDITIONAL_SSKE 0x20    /* Conditional SSKE facility
@@ -1344,6 +1383,8 @@ typedef struct _MBK {
                                            facility 2 enhancement @Z9*/
 #define STFL_3_STORE_CLOCK_FAST 0x40    /* Store clock fast       @Z9
                                            enhancement installed  @Z9*/
+#define STFL_3_PARSING_ENHANCE  0x20    /* Parsing-Enhancement    208
+                                           facility is installed  208*/
 #define STFL_3_MVCOS            0x10    /* MVCOS instruction
                                            is installed           407*/
 #define STFL_3_TOD_CLOCK_STEER  0x08    /* TOD clock steering     @Z9
@@ -1356,6 +1397,10 @@ typedef struct _MBK {
                                            facility is installed     */
 #define STFL_4_CSSF2            0x40    /* Compare-and-Swap-and-Store
                                            facility 2 is installed   */
+#define STFL_4_GEN_INST_EXTN    0x20    /* General-Instr-Extn     208
+                                           facility is installed  208*/
+#define STFL_4_EXECUTE_EXTN     0x10    /* Execute-Extensions     208
+                                           facility is installed  208*/
 #define STFL_5_FPS_ENHANCEMENT  0x40    /* Floating point support    
                                            enhancements (FPR-GR-loading
                                            FPS-sign-handling, and
@@ -1879,13 +1924,22 @@ typedef struct _ZPB2 {
 #define STSI_GPR1_RESERVED      0xFFFF0000
 
 typedef struct _SYSIB111 {              /* Basic Machine Config      */
-        BYTE    resv1[4*8];             /* Reserved                  */
+        BYTE    flag1;                  /* 1.1.1 SYSIB Flag          */
+#define SYSIB111_PFLAG  0x80            /* Type percentage present   */
+        BYTE    resv1[31];              /* Reserved                  */
         BYTE    manufact[4*4];          /* Manufacturer              */
         BYTE    type[4*1];              /* Type                      */
         BYTE    resv2[4*3];             /* Reserved                  */
-        BYTE    model[4*4];             /* Model                     */
+        BYTE    modcapaid[4*4];         /* Model capacity identifier */
         BYTE    seqc[4*4];              /* Sequence Code             */
         BYTE    plant[4*1];             /* Plant of manufacture      */
+        BYTE    model[4*4];             /* System Model              */
+        BYTE    mpci[4*4];              /* Model Perm Capacity ID    */
+        BYTE    mtci[4*4];              /* Model Temp Capacity ID    */
+        U32     mcaprating;             /* Model Capacity Rating     */
+        U32     mpcaprating;            /* Model Perm Capacity Rating*/
+        U32     mtcaprating;            /* Model temp Capacity Rating*/
+        BYTE    typepct[5];             /* Secondary CPU types pct   */
     }   SYSIB111;
 
 typedef struct _SYSIB121 {              /* Basic Machine CPU         */
@@ -1897,7 +1951,8 @@ typedef struct _SYSIB121 {              /* Basic Machine CPU         */
     }   SYSIB121;
 
 typedef struct _SYSIB122 {              /* Basic Machine CPUs        */
-        BYTE    resv1[4*8];             /* Reserved                  */
+        BYTE    resv1[4*7];             /* Reserved                  */
+        BYTE    sccap[4*1];             /* Secondary CPU Capability  */
         BYTE    cap[4*1];               /* CPU capability            */
         BYTE    totcpu[2*1];            /* Total CPU count           */
         BYTE    confcpu[2*1];           /* Configured CPU count      */
@@ -2044,6 +2099,7 @@ typedef struct _PTFFQSI {               /* Query Steering Information*/
 #define DXC_IEEE_DIV_ZERO_IISE  0x43    /* IEEE div by zero(IISE) DFP*/
 #define DXC_IEEE_INVALID_OP     0x80    /* IEEE invalid operation    */
 #define DXC_IEEE_INV_OP_IISE    0x83    /* IEEE invalid op (IISE) DFP*/
+#define DXC_COMPARE_AND_TRAP    0xFF    /* Compare-and-trap exception*/
 /* Note: IISE = IEEE-interruption-simulation event */
 
 /* Decimal rounding modes */

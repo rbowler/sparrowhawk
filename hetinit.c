@@ -9,9 +9,12 @@
 || ----------------------------------------------------------------------------
 */
 
-// $Id: hetinit.c,v 1.24 2007/06/23 00:04:10 ivan Exp $
+// $Id: hetinit.c,v 1.25 2008/11/04 04:50:46 fish Exp $
 //
 // $Log: hetinit.c,v $
+// Revision 1.25  2008/11/04 04:50:46  fish
+// Ensure consistent utility startup
+//
 // Revision 1.24  2007/06/23 00:04:10  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -74,17 +77,7 @@ main( int argc, char *argv[] )
     char *o_owner;
     char *o_volser;
 
-    set_codepage( NULL );
-
-#ifdef EXTERNALGUI
-    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
-    {
-        extgui = 1;
-        argc--;
-        setvbuf(stderr, NULL, _IONBF, 0);
-        setvbuf(stdout, NULL, _IONBF, 0);
-    }
-#endif /*EXTERNALGUI*/
+    INITIALIZE_UTILITY("hetinit");
 
     hetb = NULL;
 

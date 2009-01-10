@@ -651,6 +651,10 @@ SOURCE=.\general2.c
 # End Source File
 # Begin Source File
 
+SOURCE=.\general3.c
+# End Source File
+# Begin Source File
+
 SOURCE=.\getopt.c
 # End Source File
 # Begin Source File
@@ -876,6 +880,10 @@ SOURCE=.\logger.h
 # Begin Source File
 
 SOURCE=.\logmsg.c
+# End Source File
+# Begin Source File
+
+SOURCE=.\losc.c
 # End Source File
 # Begin Source File
 

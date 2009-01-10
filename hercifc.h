@@ -6,9 +6,12 @@
 //              (C) Copyright James A. Pierson, 2002-2007
 //
 
-// $Id: hercifc.h,v 1.13 2007/06/23 00:04:10 ivan Exp $
+// $Id: hercifc.h,v 1.14 2008/02/07 00:29:04 rbowler Exp $
 //
 // $Log: hercifc.h,v $
+// Revision 1.14  2008/02/07 00:29:04  rbowler
+// Solaris build support by Jeff Savit
+//
 // Revision 1.13  2007/06/23 00:04:10  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -98,7 +101,7 @@ typedef struct _CTLREQ
   union
   {
     struct ifreq     ifreq;
-#if !defined(__APPLE__) && !defined(__FreeBSD__)
+#if !defined(__APPLE__) && !defined(__FreeBSD__) && !defined(__SOLARIS__)
     struct rtentry   rtentry;
 #endif
   }

@@ -6,9 +6,27 @@
 /* prototypes required by Hercules in the MSVC environment           */
 /*-------------------------------------------------------------------*/
 
-// $Id: hercwind.h,v 1.15 2007/06/23 00:04:10 ivan Exp $
+// $Id: hercwind.h,v 1.19 2008/06/22 05:54:30 fish Exp $
 //
 // $Log: hercwind.h,v $
+// Revision 1.19  2008/06/22 05:54:30  fish
+// Fix print-formatting issue (mostly in tape modules)
+// that can sometimes, in certain circumstances,
+// cause herc to crash.  (%8.8lx --> I32_FMTX, etc)
+//
+// Revision 1.18  2008/05/28 16:37:48  fish
+// #define PATH_MAX  from _MAX_PATH if available
+//
+// Revision 1.17  2008/03/25 11:41:31  fish
+// SCSI TAPE MODS part 1: groundwork: non-functional changes:
+// rename some functions, comments, general restructuring, etc.
+// New source modules awstape.c, omatape.c, hettape.c and
+// tapeccws.c added, but not yet used (all will be used in a future
+// commit though when tapedev.c code is eventually split)
+//
+// Revision 1.16  2008/02/19 17:18:36  rbowler
+// Missing u_int8_t causes crypto compile errors on Solaris
+//
 // Revision 1.15  2007/06/23 00:04:10  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -18,6 +36,9 @@
 
 #if !defined(_HERCWIND_H)
 #define _HERCWIND_H
+
+// (just a handy macro to have around)
+#define  IsEventSet(h)  (WaitForSingleObject(h,0) == WAIT_OBJECT_0)
 
 // PROGRAMMING NOTE: Cygwin has a bug in setvbuf requiring us
 // to do an 'fflush()' after each stdout/err write, and it doesn't
@@ -70,7 +91,15 @@
 
 ///////////////////////////////////////////////////////////////////////
 
-#define PATH_MAX        FILENAME_MAX
+#ifdef                  _MAX_PATH
+  #define   PATH_MAX    _MAX_PATH
+#else
+  #ifdef                FILENAME_MAX
+    #define PATH_MAX    FILENAME_MAX
+  #else
+    #define PATH_MAX    260
+  #endif
+#endif
 
 struct dirent {
         long            d_ino;          
@@ -129,6 +158,7 @@ typedef int             mode_t;
 
 #define HAVE_STRUCT_IN_ADDR_S_ADDR
 #define HAVE_U_INT
+#define HAVE_U_INT8_T
 #define HAVE_LIBMSVCRT
 #define HAVE_SYS_MTIO_H         // (ours is called 'w32mtio.h')
 
@@ -167,6 +197,11 @@ typedef int             mode_t;
 #define HAVE_DECL_SIOCDELRT       0     // (unsupported by CTCI-W32)
 #define HAVE_DECL_SIOCDIFADDR     0     // (unsupported by CTCI-W32)
 
+// SCSI tape handling transparency/portability
+
+#define HAVE_DECL_MTEOTWARN       1     // (always true since I made it up!)
+#define HAVE_DECL_MTEWARN         1     // (same as HAVE_DECL_MTEOTWARN)
+
 // GNUWin32 PCRE (Perl-Compatible Regular Expressions) support...
 
 #if defined(HAVE_PCRE)
@@ -175,5 +210,35 @@ typedef int             mode_t;
   #include PCRE_INCNAME                 // (passed by makefile)
   #define  OPTION_HAO                   // Hercules Automatic Operator
 #endif
+
+#if defined( _WIN64 )
+  #define  SIZEOF_SIZE_T      8
+#else
+  #define  SIZEOF_SIZE_T      4
+#endif
+
+#define DBGTRACE DebugTrace
+
+inline void DebugTrace(char* fmt, ...)
+{
+    const int chunksize = 512;
+    int buffsize = 0;
+    char* buffer = NULL;
+    int rc = -1;
+	va_list args;
+	va_start( args, fmt );
+    do
+    {
+        if (buffer) free( buffer );
+        buffsize += chunksize;
+        buffer = malloc( buffsize );
+        if (!buffer) __debugbreak();
+	    rc = vsnprintf( buffer, buffsize, fmt, args);
+    }
+    while (rc < 0 || rc >= buffsize);
+    OutputDebugStringA( buffer );
+    free( buffer );
+	va_end( args );
+}
 
 #endif /*!defined(_HERCWIND_H)*/

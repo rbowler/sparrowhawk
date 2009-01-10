@@ -111,6 +111,10 @@ EXEEXT = @EXEEXT@
 F77 = @F77@
 FFLAGS = @FFLAGS@
 GMSGFMT = @GMSGFMT@
+GREP = @GREP@
+HERCIFC_GROUPNAME = @HERCIFC_GROUPNAME@
+HERCIFC_GROUPSET_FALSE = @HERCIFC_GROUPSET_FALSE@
+HERCIFC_GROUPSET_TRUE = @HERCIFC_GROUPSET_TRUE@
 INSTALL_DATA = @INSTALL_DATA@
 INSTALL_LTDL_FALSE = @INSTALL_LTDL_FALSE@
 INSTALL_LTDL_TRUE = @INSTALL_LTDL_TRUE@
@@ -161,15 +165,9 @@ USE_DLLTOOL_TRUE = @USE_DLLTOOL_TRUE@
 USE_NLS = @USE_NLS@
 VERSION = @VERSION@
 XGETTEXT = @XGETTEXT@
-ac_ct_AR = @ac_ct_AR@
-ac_ct_AS = @ac_ct_AS@
 ac_ct_CC = @ac_ct_CC@
 ac_ct_CXX = @ac_ct_CXX@
-ac_ct_DLLTOOL = @ac_ct_DLLTOOL@
 ac_ct_F77 = @ac_ct_F77@
-ac_ct_OBJDUMP = @ac_ct_OBJDUMP@
-ac_ct_RANLIB = @ac_ct_RANLIB@
-ac_ct_STRIP = @ac_ct_STRIP@
 am__fastdepCC_FALSE = @am__fastdepCC_FALSE@
 am__fastdepCC_TRUE = @am__fastdepCC_TRUE@
 am__fastdepCXX_FALSE = @am__fastdepCXX_FALSE@
@@ -186,24 +184,31 @@ build_cpu = @build_cpu@
 build_os = @build_os@
 build_vendor = @build_vendor@
 datadir = @datadir@
+datarootdir = @datarootdir@
+docdir = @docdir@
+dvidir = @dvidir@
 exec_prefix = @exec_prefix@
 host = @host@
 host_alias = @host_alias@
 host_cpu = @host_cpu@
 host_os = @host_os@
 host_vendor = @host_vendor@
+htmldir = @htmldir@
 includedir = @includedir@
 infodir = @infodir@
 install_sh = @install_sh@
 libdir = @libdir@
 libexecdir = @libexecdir@
+localedir = @localedir@
 localstatedir = @localstatedir@
 mandir = @mandir@
 mkdir_p = @mkdir_p@
 modexecdir = @modexecdir@
 oldincludedir = @oldincludedir@
+pdfdir = @pdfdir@
 prefix = @prefix@
 program_transform_name = @program_transform_name@
+psdir = @psdir@
 sbindir = @sbindir@
 sharedstatedir = @sharedstatedir@
 sysconfdir = @sysconfdir@
@@ -218,7 +223,7 @@ dist_pkgdata_DATA = cckddasd.html fishgui.html  hercconf.html hercfaq.html     \
         hercmsrd.html hercmssd.html hercmsta.html hercmstc.html hercmste.html \
         hercmstm.html hercmsts.html hercmstt.html hercmstu.html hercmsvm.html \
         hercnew.html  hercrdr.html  hercrnot.html hercsupp.html herctcp.html    \
-        hercules.html index.html    tasks.html    hercules.css
+        hercules.html index.html    shared.html   tasks.html    hercules.css
 
 include_sources = include/header.htmlpart include/footer.htmlpart
 include_pkgdatadir = $(pkgdatadir)/include

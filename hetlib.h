@@ -12,9 +12,12 @@
 || ----------------------------------------------------------------------------
 */
 
-// $Id: hetlib.h,v 1.17 2007/06/23 00:04:11 ivan Exp $
+// $Id: hetlib.h,v 1.18 2007/07/24 22:36:33 fish Exp $
 //
 // $Log: hetlib.h,v $
+// Revision 1.18  2007/07/24 22:36:33  fish
+// Fix tape Synchronize CCW (x'43') to do actual commit
+//
 // Revision 1.17  2007/06/23 00:04:11  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -185,6 +188,7 @@ HET_DLL_IMPORT int het_read( HETB *hetb, void *sbuf );
 HET_DLL_IMPORT int het_write_header( HETB *hetb, int len, int flags1, int flags2 );
 HET_DLL_IMPORT int het_write( HETB *hetb, void *sbuf, int slen );
 HET_DLL_IMPORT int het_tapemark( HETB *hetb );
+HET_DLL_IMPORT int het_sync( HETB *hetb );
 HET_DLL_IMPORT int het_cntl( HETB *hetb, int func, unsigned long val );
 HET_DLL_IMPORT int het_locate( HETB *hetb, int block );
 HET_DLL_IMPORT int het_bsb( HETB *hetb );

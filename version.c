@@ -1,7 +1,7 @@
 /* VERSION.C    (c) Copyright Roger Bowler, 1999-2007                */
 /*              Hercules Version Display Module                      */
 
-// $Id: version.c,v 1.49 2007/06/23 00:04:19 ivan Exp $
+// $Id: version.c,v 1.50 2007/12/07 12:50:22 rbowler Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module displays the Hercules program name, version, build    */
@@ -9,6 +9,9 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: version.c,v $
+// Revision 1.50  2007/12/07 12:50:22  rbowler
+// Show multi_byte assist status at startup
+//
 // Revision 1.49  2007/06/23 00:04:19  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -146,7 +149,8 @@ static const char *build_info[] = {
  && !defined( ASSIST_CMPXCHG8  ) \
  && !defined( ASSIST_CMPXCHG16 ) \
  && !defined( ASSIST_FETCH_DW  ) \
- && !defined( ASSIST_STORE_DW  )
+ && !defined( ASSIST_STORE_DW  ) \
+ && !defined( MULTI_BYTE_ASSIST)
     " (none)",
 #else
   #if defined( ASSIST_CMPXCHG1 )
@@ -166,6 +170,9 @@ static const char *build_info[] = {
   #endif
   #if defined( ASSIST_STORE_DW )
                     " store_dw"
+  #endif
+  #if defined( MULTI_BYTE_ASSIST )
+                    " multi_byte"
   #endif
     ,
 #endif

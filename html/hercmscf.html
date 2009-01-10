@@ -11,7 +11,7 @@ Hercules Version 3: System Messages: CF - Configuration Processing</TITLE>
 This page describes the terminal emulation messages for the Hercules S/370,
 ESA/390, and z/Architecture emulator.
 <h3>Messages</h3>
-<dl>
+<dl class="messages">
 <dt><code><a name="HHCCF001S">
 HHCCF001S Error reading file <em>filename</em> line <em>lineno</em>:
 <em>error</em>
@@ -537,8 +537,8 @@ device type.
   <dd>config.c, function build_config
   </dl>
 <dt><code><a name="HHCCF036S">
-HHCCF035S Error in <em>filename</em> line <em>lineno</em>:
-<em>number</em> is not a valid device number
+HHCCF036S Error in <em>filename</em> line <em>lineno</em>:
+<em>number</em> is not a valid device number(s) specification
 </a></code>
 <dd><dl>
   <dt>Meaning
@@ -576,19 +576,21 @@ failed. The error is described by <code><em>error</em></code>.
   </dl>
 <dt><a name="HHCCF039W"><pre>
 HHCCF039W PGMPRDOS LICENSED specified.
-          Licensed program product operating systems are enabled.
+          A licensed program product operating system is running.
           You are responsible for meeting all conditions of your
-          software license.</pre>
+          software licenses.</pre>
 </a>
 <dd><dl>
   <dt>Meaning
   <dd>The configuration parameter <code>PGMPRDOS LICENSED</code> was
-specified. This message is issued to remind you that compliance with the
-terms of the license for your system's software is your responsibility.
+  specified and Hercules has detected that the operating system is a
+  licensed program product. This message is issued to remind you that
+  compliance with the terms of the license for your system's software
+  is your responsibility.
   <dt>Action
   <dd>Be sure you know what you're doing.
   <dt>Issued by
-  <dd>config.c, function build_config
+  <dd>losc.c, function losc_check
   </dl>
 <dt><code><a name="HHCCF040E">
 HHCCF040E Cannot create CPU <em>number</em> thread: <em>error</em>
@@ -956,7 +958,7 @@ HHCCF075E No more than 1 Logical Channel Subsystem Identification may be specifi
   encountered while parsing the Logical Channel Subsystem Identification component. There can
   be only one Logical Channel Subsystem Identification for a device or group of devices.
   <dt>Action
-  <dd>Correct the device number or device number group specification and either reissue the 
+  <dd>Correct the device number or device number group specification and either reissue the
   command or restart the hercules engine (depending on whether the error occured while issuing a command
   or while starting the engine).
   <dt>Issued by
@@ -968,11 +970,11 @@ HHCCF076E Non numeric Logical Channel Subsystem Identification XX
 <dd><dl>
   <dt>Meaning
   <dd>While specifying a device number or device number group, a non decimal value was
-  encountered while parsing the Logical Channel Subsystem Identification component. The 
+  encountered while parsing the Logical Channel Subsystem Identification component. The
   Logical Channel Subsystem Identification for a device or group of devices must be specified as
   a numeric value.
   <dt>Action
-  <dd>Correct the device number or device number group specification and either reissue the 
+  <dd>Correct the device number or device number group specification and either reissue the
   command or restart the hercules engine (depending on whether the error occured while issuing a command
   or while starting the engine).
   <dt>Issued by
@@ -984,15 +986,36 @@ HHCCF077E Logical Channel Subsystem Identification NN exceeds maximum of 3
 <dd><dl>
   <dt>Meaning
   <dd>While specifying a device number or device number group, a Logical Channel Identification
-  was encountered that exceeded the architecture maximum value of MM. 
+  was encountered that exceeded the architecture maximum value of MM.
   The Logical Channel Subsystem Identification for a device or group of devices must be within 0
   and 3 (inclusive).
   <dt>Action
-  <dd>Correct the device number or device number group specification and either reissue the 
+  <dd>Correct the device number or device number group specification and either reissue the
   command or restart the hercules engine (depending on whether the error occured while issuing a command
   or while starting the engine).
   <dt>Issued by
   <dd>config.c, function parse_lcss
+  </dl>
+
+
+<dt><code><a name="HHCCF079A">
+HHCCF079A A licensed program product operating system has been detected.
+</a></code>
+<dd><dl>
+  <dt>Meaning
+  <dd>Hercules has detected that the operating system is a licensed
+  program product, but the <code>PGMPRDOS LICENSED</code> parameter
+  was not specified in the Hercules configuration file.
+  <dt>Action
+  <dd>Hercules enters the stopped state. To run this operating system
+  you must obtain a license from the operating system supplier and
+  specify the <code>PGMPRDOS LICENSED</code> parameter in the
+  configuration file. If you are unable to obtain a valid license
+  allowing you to run this operating system on your machine, you must
+  use another operating system (such as MVS3.8J or Linux for System z)
+  which does not require a license.
+  <dt>Issued by
+  <dd>losc.c, function losc_check
   </dl>
 
 
@@ -1087,10 +1110,10 @@ HHCCF085S <em>fname1</em> Open error file <em>fname2</em>: <em>error</em>
 <p>
 If you have a question about Hercules, see the
 <a href="hercfaq.html">Hercules Frequently-Asked Questions</a> page.
+
 <p><center><hr width=15% noshade>
 <a href="hercmsg.html"><img src="images/back.gif" border=0 alt="back"></a>
 </center>
-<small>
-<p>Last updated 19 October 2005
+<p class="lastupd">Last updated $Date: 2008/12/02 14:01:02 $ $Revision: 1.21 $</p>
 </BODY>
 </HTML>

@@ -90,6 +90,10 @@
    you don't. */
 #undef HAVE_DECL_LOGIN_NAME_MAX
 
+/* Define to 1 if you have the declaration of `MTEWARN', and to 0 if you
+   don't. */
+#undef HAVE_DECL_MTEWARN
+
 /* Define to 1 if you have the declaration of `SIGBUS', and to 0 if you don't.
    */
 #undef HAVE_DECL_SIGBUS
@@ -253,6 +257,9 @@
 /* Define to 1 if you have the `ldexpl' function. */
 #undef HAVE_LDEXPL
 
+/* Define to 1 if you have the `cap' library (-lcap). */
+#undef HAVE_LIBCAP
+
 /* Define to 1 if you have the `dl' library (-ldl). */
 #undef HAVE_LIBDL
 
@@ -271,8 +278,14 @@
 /* Define to 1 if you have the `nsl' library (-lnsl). */
 #undef HAVE_LIBNSL
 
+/* Define to 1 if you have the `pthread' library (-lpthread). */
+#undef HAVE_LIBPTHREAD
+
 /* Define to 1 if you have the `resolv' library (-lresolv). */
 #undef HAVE_LIBRESOLV
+
+/* Define to 1 if you have the `rt' library (-lrt). */
+#undef HAVE_LIBRT
 
 /* Define to 1 if you have the `socket' library (-lsocket). */
 #undef HAVE_LIBSOCKET
@@ -445,6 +458,9 @@
 /* Define to 1 if you have the `sysconf' function. */
 #undef HAVE_SYSCONF
 
+/* Define to 1 if you have the <sys/capability.h> header file. */
+#undef HAVE_SYS_CAPABILITY_H
+
 /* Define to 1 if you have the <sys/dir.h> header file, and it defines `DIR'.
    */
 #undef HAVE_SYS_DIR_H
@@ -470,6 +486,9 @@
 
 /* Define to 1 if you have the <sys/param.h> header file. */
 #undef HAVE_SYS_PARAM_H
+
+/* Define to 1 if you have the <sys/prctl.h> header file. */
+#undef HAVE_SYS_PRCTL_H
 
 /* Define to 1 if you have the <sys/resource.h> header file. */
 #undef HAVE_SYS_RESOURCE_H
@@ -599,6 +618,9 @@
 /* Define to disable sigabend_handler (please describe this better) */
 #undef NO_SIGABEND_HANDLER
 
+/* Define to enable posix draft 1003.1e capabilities */
+#undef OPTION_CAPABILITIES
+
 /* Define to enable symbolic substitutions in configuration file */
 #undef OPTION_CONFIG_SYMBOLS
 
@@ -640,22 +662,22 @@
 /* Directory where the HTTP server will find documents */
 #undef PKGDATADIR
 
-/* The size of a `int', as computed by sizeof. */
+/* The size of `int', as computed by sizeof. */
 #undef SIZEOF_INT
 
-/* The size of a `int *', as computed by sizeof. */
+/* The size of `int *', as computed by sizeof. */
 #undef SIZEOF_INT_P
 
-/* The size of a `long', as computed by sizeof. */
+/* The size of `long', as computed by sizeof. */
 #undef SIZEOF_LONG
 
-/* The size of a `off_t', as computed by sizeof. */
+/* The size of `off_t', as computed by sizeof. */
 #undef SIZEOF_OFF_T
 
-/* The size of a `size_t', as computed by sizeof. */
+/* The size of `size_t', as computed by sizeof. */
 #undef SIZEOF_SIZE_T
 
-/* The size of a `struct bytestruct', as computed by sizeof. */
+/* The size of `struct bytestruct', as computed by sizeof. */
 #undef SIZEOF_STRUCT_BYTESTRUCT
 
 /* Define to 1 if you have the ANSI C header files. */
@@ -698,5 +720,5 @@
 /* Define to a type to use for `error_t' if it is not otherwise available. */
 #undef error_t
 
-/* Define to `long' if <sys/types.h> does not define. */
+/* Define to `long int' if <sys/types.h> does not define. */
 #undef off_t

@@ -1,9 +1,65 @@
-/* FEAT900.H    (c) Copyright Jan Jaeger, 2000-2007                  */
+/* FEAT900.H    (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              ESAME feature definitions                            */
 
-// $Id: feat900.h,v 1.72 2007/06/23 00:04:09 ivan Exp $
+// $Id: feat900.h,v 1.89 2009/01/02 19:21:51 jj Exp $
 //
 // $Log: feat900.h,v $
+// Revision 1.89  2009/01/02 19:21:51  jj
+// DVD-RAM IPL
+// RAMSAVE
+// SYSG Integrated 3270 console fixes
+//
+// Revision 1.88  2008/12/29 11:04:29  jj
+// Disable 3270 & ASCII console features
+//
+// Revision 1.87  2008/12/29 11:03:10  jj
+// Move HMC disk I/O functions to scedasd.c
+//
+// Revision 1.86  2008/12/24 22:35:53  rbowler
+// Framework for integrated 3270 and ASCII console features
+//
+// Revision 1.85  2008/12/22 00:29:10  ivan
+// Implement February 2008 z/Arch Compare And Swap And Store Facility 2
+// Update FAQ to reflect change
+// update FAQ to also indicate z/Arch DAT Enhancement is implemented
+//
+// Revision 1.84  2008/08/04 22:06:00  rbowler
+// DIAG308 function codes for Program-directed re-IPL
+//
+// Revision 1.83  2008/04/08 17:13:06  bernard
+// Added execute relative long instruction
+//
+// Revision 1.82  2008/03/23 06:20:47  rbowler
+// Activate Move-with-Optional-Specifications Facility for ESAME
+//
+// Revision 1.81  2008/03/08 23:34:30  rbowler
+// Activate General Instructions Extension Facility for ESAME
+//
+// Revision 1.80  2008/03/01 12:19:04  rbowler
+// Rename new features to include the word facility
+//
+// Revision 1.79  2008/02/29 16:25:48  bernard
+// Enabled Parsing Enhancement Facility
+//
+// Revision 1.78  2008/02/28 11:05:13  rbowler
+// Deactivate new features not yet coded
+//
+// Revision 1.77  2008/02/28 10:11:50  rbowler
+// STFL bit settings for new features in zPOP-06
+//
+// Revision 1.76  2008/02/27 17:09:58  bernard
+// introduce FEATURE_GENERAL_INSTRUCTIONS_EXTENSION_FEATURE
+//
+// Revision 1.75  2008/02/27 14:14:50  bernard
+// Implemented feature_message_security_assist_extension_2
+//
+// Revision 1.74  2007/11/30 15:14:14  rbowler
+// Permit String-Instruction facility to be activated in S/370 mode
+//
+// Revision 1.73  2007/07/19 17:53:55  ivan
+// Disable DIAG 308. Current implementation isn't complete enough to allow
+// for a proper 2.6.21 linux kernel IPL
+//
 // Revision 1.72  2007/06/23 00:04:09  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -55,19 +111,22 @@
 #define FEATURE_CHSC
 #define FEATURE_COMPARE_AND_MOVE_EXTENDED
 #define FEATURE_COMPARE_AND_SWAP_AND_STORE                      /*407*/
+#define FEATURE_COMPARE_AND_SWAP_AND_STORE_FACILITY_2           /*ISW*/
 #define FEATURE_COMPRESSION
 #define FEATURE_CONDITIONAL_SSKE                                /*407*/
+//#define FEATURE_CONFIGURATION_TOPOLOGY_FACILITY                 /*208*/
 #define FEATURE_CPU_RECONFIG
 #define FEATURE_CPUID_FORMAT_1
 #define FEATURE_DAT_ENHANCEMENT
 #define FEATURE_DAT_ENHANCEMENT_FACILITY_2                      /*@Z9*/
 #define FEATURE_DECIMAL_FLOATING_POINT                          /*DFP*/
-#define FEATURE_DIAG308_REIPL
 #define FEATURE_DUAL_ADDRESS_SPACE
 #define FEATURE_EMULATE_VM
+//#define FEATURE_ENHANCED_DAT_FACILITY                           /*208*/
 #define FEATURE_ESAME
 #define FEATURE_ETF2_ENHANCEMENT                                /*@Z9*/
 #define FEATURE_ETF3_ENHANCEMENT                                /*@Z9*/
+#define FEATURE_EXECUTE_EXTENSIONS_FACILITY                     /*208*/
 #define FEATURE_EXPANDED_STORAGE
 #define FEATURE_EXPEDITED_SIE_SUBSET
 #define FEATURE_EXTENDED_IMMEDIATE                              /*@Z9*/
@@ -81,6 +140,7 @@
 #define FEATURE_FETCH_PROTECTION_OVERRIDE
 #define FEATURE_FPS_ENHANCEMENT                                 /*DFP*/
 #define FEATURE_FPS_EXTENSIONS
+#define FEATURE_GENERAL_INSTRUCTIONS_EXTENSION_FACILITY         /*208*/
 #define FEATURE_HERCULES_DIAGCALLS
 #define FEATURE_HEXADECIMAL_FLOATING_POINT
 #define FEATURE_HFP_EXTENSIONS
@@ -90,6 +150,8 @@
 #define FEATURE_IEEE_EXCEPTION_SIMULATION                       /*407*/
 #define FEATURE_IMMEDIATE_AND_RELATIVE
 #define FEATURE_INCORRECT_LENGTH_INDICATION_SUPPRESSION
+#define FEATURE_INTEGRATED_3270_CONSOLE
+//#define FEATURE_INTEGRATED_ASCII_CONSOLE
 #define FEATURE_INTERPRETIVE_EXECUTION
 #define FEATURE_IO_ASSIST
 #define FEATURE_LINKAGE_STACK
@@ -98,21 +160,26 @@
 #define FEATURE_LONG_DISPLACEMENT
 #define FEATURE_MESSAGE_SECURITY_ASSIST
 #define FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_1             /*@Z9*/
+#define FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_2
 #define FEATURE_MIDAW                                           /*@Z9*/
 #define FEATURE_MOVE_PAGE_FACILITY_2
-//#define FEATURE_MVCOS                                           /*407*/
+#define FEATURE_MOVE_WITH_OPTIONAL_SPECIFICATIONS               /*208*/
 #define FEATURE_MVS_ASSIST
 #define FEATURE_PAGE_PROTECTION
+#define FEATURE_PARSING_ENHANCEMENT_FACILITY                    /*208*/
 #define FEATURE_PERFORM_LOCKED_OPERATION
 #define FEATURE_PER
 #define FEATURE_PER2
 #define FEATURE_PER3                                            /*@Z9*/
 //#define FEATURE_PFPO                                            /*407*/
 #define FEATURE_PRIVATE_SPACE
+//#define FEATURE_PROGRAM_DIRECTED_REIPL /*DIAG308 incomplete*/  /*@Z9*/
 #define FEATURE_PROTECTION_INTERCEPTION_CONTROL
 #define FEATURE_QUEUED_DIRECT_IO
+//#define FEATURE_RESTORE_SUBCHANNEL_FACILITY                     /*208*/
 #define FEATURE_RESUME_PROGRAM
 #define FEATURE_REGION_RELOCATE
+#define FEATURE_SCEDIO
 #define FEATURE_SENSE_RUNNING_STATUS                            /*@Z9*/
 #define FEATURE_SERVICE_PROCESSOR
 #define FEATURE_SET_ADDRESS_SPACE_CONTROL_FAST
@@ -122,6 +189,7 @@
 #define FEATURE_STORE_CLOCK_FAST
 #define FEATURE_STORE_FACILITY_LIST_EXTENDED                    /*@Z9*/
 #define FEATURE_STORE_SYSTEM_INFORMATION
+#define FEATURE_STRING_INSTRUCTION
 #define FEATURE_SUBSPACE_GROUP
 #define FEATURE_SUPPRESSION_ON_PROTECTION
 #define FEATURE_SYSTEM_CONSOLE

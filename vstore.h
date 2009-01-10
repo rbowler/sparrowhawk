@@ -4,7 +4,7 @@
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 
-// $Id: vstore.h,v 1.78 2007/06/23 00:04:19 ivan Exp $
+// $Id: vstore.h,v 1.83 2008/04/02 21:52:19 rbowler Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module contains various functions which store, fetch, and    */
@@ -23,6 +23,7 @@
 /* vfetch8      Fetch an eight-byte integer from virtual storage     */
 /* instfetch    Fetch instruction from virtual storage               */
 /* move_chars   Move characters using specified keys and addrspaces  */
+/* move_charx   Move characters with optional specifications         */
 /* validate_operand   Validate addressing, protection, translation   */
 /*-------------------------------------------------------------------*/
 /* And provided by means of macro's address wrapping versions of     */
@@ -34,6 +35,21 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: vstore.h,v $
+// Revision 1.83  2008/04/02 21:52:19  rbowler
+// Fix PIC4 when MVCOS operand finishes on page boundary
+//
+// Revision 1.82  2008/03/23 06:13:07  rbowler
+// Add MVCOS instruction (part 3)
+//
+// Revision 1.81  2008/03/23 03:03:45  gsmith
+// 22 Mar 2008 fix unbalanced comment - Peter J Farley III - by Greg
+//
+// Revision 1.80  2008/03/16 00:09:57  rbowler
+// Add MVCOS instruction (part 2)
+//
+// Revision 1.79  2008/02/20 23:47:22  ptl00
+// Fix branch to odd address so pgm old is bumped
+//
 // Revision 1.78  2007/06/23 00:04:19  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -643,8 +659,10 @@ int     len;                            /* Length for page crossing  */
 
     /* Program check if instruction address is odd */
     if ( unlikely(offset & 0x01) )
+    {
+        if (!exec) regs->instinvalid = 1;
         regs->program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
-
+    }
     pagesz = unlikely(addr < 0x800) ? 0x800 : PAGEFRAME_PAGESIZE;
 
 #if defined(FEATURE_PER)
@@ -860,6 +878,8 @@ int     len2, len3;                     /* Lengths to copy           */
      *     (a) dest and source boundary cross at the same time
      *     (b) dest boundary crossed first
      *     (c) source boundary crossed first
+     * Note: since the operand length is limited to 256 bytes,
+     *       neither operand can cross more than one 2K boundary.
      */
 
     if ( NOCROSS2K(addr1,len) )
@@ -928,6 +948,104 @@ int     len2, len3;                     /* Lengths to copy           */
     ITIMER_UPDATE(addr1,len,regs);
 
 } /* end function ARCH_DEP(move_chars) */
+
+
+#if defined(FEATURE_MOVE_WITH_OPTIONAL_SPECIFICATIONS)
+/*-------------------------------------------------------------------*/
+/* Move characters with optional specifications                      */
+/*                                                                   */
+/* Input:                                                            */
+/*      addr1   Effective address of first operand                   */
+/*      space1  Address space for first operand:                     */
+/*                 USE_PRIMARY_SPACE                                 */
+/*                 USE_SECONDARY_SPACE                               */
+/*                 USE_ARMODE + access register number               */
+/*                 USE_HOME_SPACE                                    */
+/*      key1    Bits 0-3=first operand access key, 4-7=zeroes        */
+/*      addr2   Effective address of second operand                  */
+/*      space1  Address space for second operand (values as space1)  */
+/*      key2    Bits 0-3=second operand access key, 4-7=zeroes       */
+/*      len     Operand length (range 0-4096)                        */
+/*      regs    Pointer to the CPU register context                  */
+/*                                                                   */
+/*      This function implements the MVCOS instruction which moves   */
+/*      up to 4096 characters using the address space and key        */
+/*      specified by the caller for each operand.  Results are       */
+/*      unpredictable if destructive overlap exists.                 */
+/*                                                                   */
+/*      The space1 and space2 parameters force the use of the        */
+/*      specified address space, or the use of the specified         */
+/*      access register, regardless of the current PSW addressing    */
+/*      mode.                                                        */
+/*                                                                   */
+/*      A program check may be generated if either logical address   */
+/*      causes an addressing, protection, or translation exception,  */
+/*      and in this case the function does not return.               */
+/*-------------------------------------------------------------------*/
+_VSTORE_C_STATIC void ARCH_DEP(move_charx) (VADR addr1, int space1,
+       BYTE key1, VADR addr2, int space2, BYTE key2,
+       int len, REGS *regs)
+{
+BYTE   *main1, *main2;                  /* Main storage pointers     */
+int     len1, len2, len3;               /* Work areas for lengths    */
+
+    /* Ultra quick out if copying zero bytes */
+    if (unlikely(len == 0))
+        return;
+
+    ITIMER_SYNC(addr2,len-1,regs);
+
+    /* Quick out if copying just 1 byte */
+    if (unlikely(len == 1))
+    {
+        main2 = MADDR (addr2, space2, regs, ACCTYPE_READ, key2);
+        main1 = MADDR (addr1, space1, regs, ACCTYPE_WRITE, key1);
+        *main1 = *main2;
+        ITIMER_UPDATE(addr1,len-1,regs);
+        return;
+    }
+
+    /* Translate addresses of leftmost operand bytes */
+    main2 = MADDR (addr2, space2, regs, ACCTYPE_READ, key2);
+    main1 = MADDR (addr1, space1, regs, ACCTYPE_WRITE, key1);
+
+    /* Copy the largest chunks which do not cross a 2K
+       boundary of either source or destination operand */
+    while (len > 0)
+    {
+        /* Calculate distance to next 2K boundary */
+        len1 = NOCROSS2KL(addr1,len) ? len :
+                (int)(0x800 - (addr1 & 0x7FF));
+        len2 = NOCROSS2KL(addr2,len) ? len :
+                (int)(0x800 - (addr2 & 0x7FF));
+        len3 = len1 < len2 ? len1 : len2;
+
+        /* Copy bytes from source to destination */
+        concpy (regs, main1, main2, len3);
+
+        /* Calculate virtual addresses for next chunk */
+        addr1 = (addr1 + len3) & ADDRESS_MAXWRAP(regs);
+        addr2 = (addr2 + len3) & ADDRESS_MAXWRAP(regs);
+
+        /* Adjust remaining length */
+        len -= len3;
+
+        /* Exit if no more bytes to move */
+        if (len == 0) break;
+
+        /* Adjust addresses for start of next chunk, or
+           translate again if a 2K boundary was crossed */
+        main2 = (addr2 & 0x7FF) ? main2 + len3 :
+                    MADDR (addr2, space2, regs, ACCTYPE_READ, key2);
+        main1 = (addr1 & 0x7FF) ? main1 + len3 :
+                    MADDR (addr1, space1, regs, ACCTYPE_WRITE, key1);
+
+    } /* end while(len) */
+
+    ITIMER_UPDATE(addr1,len-1,regs);
+
+} /* end function ARCH_DEP(move_charx) */
+#endif /*defined(FEATURE_MOVE_WITH_OPTIONAL_SPECIFICATIONS)*/
 
 
 /*-------------------------------------------------------------------*/

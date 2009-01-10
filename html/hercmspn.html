@@ -11,7 +11,7 @@ Hercules Version 3: System Messages: PN - Control Panel</TITLE>
 This page describes the control panel messages for the Hercules S/370,
 ESA/390, and z/Architecture emulator.
 <h3>Messages</h3>
-<dl>
+<dl class="messages">
 <dt><code><a name="HHCPN001I">
 HHCPN001I Control panel thread started: tid=<em>threadid</em>,
 pid=<em>processid</em>
@@ -181,6 +181,20 @@ desired. Any unprocessed commands may be issued manually.
   <dt>Issued by
   <dd>panel.c, function process_rc_file
   </dl>
+<dt><code><a name="HHCPN052E">
+HHCPN052E Target CPU <em>nnnn</em> type <em>cputype</em> does not allow ipl
+</a></code>
+<dd><dl>
+  <dt>Meaning
+  <dd>An ipl command was issued but the target CPU <code><em>nnnn</em></code>
+      is a processor engine of type <code><em>cputype</em></code> which does
+      not support the initial program load procedure.
+  <dt>Action
+  <dd>Use the cpu command to set the target CPU to a processor of type CP,
+      IFL, or ICF, then re-issue the ipl command.
+  <dt>Issued by
+  <dd>hsccmd.c, function ipl_cmd2
+  </dl>
 <dt><code><a name="HHCPN180E">
 HHCPN180E 'sh' commands are disabled
 </a></code>
@@ -195,14 +209,14 @@ entered via the Hercules hardware console will not be processed.
   <dt>Issued by
   <dd>hsccmd.c, function sh_cmd
   </dl>
-</dl>
 <dt><code><a name="HHCPN181E">
-HHCPN181E Device number s:CCUU not found
+HHCPN181E Device number <em>s:CCUU</em> not found
 </a></code>
 <dd><dl>
   <dt>Meaning
-  <dd>The device number "CCUU" on Logical Channel Subsystem "s" was not found
-      in the configuration.
+  <dd>The device number <code><em>CCUU</em></code>
+      on Logical Channel Subsystem <code><em>s</em></code>
+      was not found in the configuration.
   <dt>Action
   <dd>Reissue the command with an existing device number.
   <dt>Issued by
@@ -213,10 +227,10 @@ HHCPN181E Device number s:CCUU not found
 <p>
 If you have a question about Hercules, see the
 <a href="hercfaq.html">Hercules Frequently-Asked Questions</a> page.
+
 <p><center><hr width=15% noshade>
 <a href="hercmsg.html"><img src="images/back.gif" border=0 alt="back"></a>
 </center>
-<small>
-<p>Last updated 3 October 2003
+<p class="lastupd">Last updated $Date: 2008/11/25 23:00:11 $ $Revision: 1.13 $</p>
 </BODY>
 </HTML>

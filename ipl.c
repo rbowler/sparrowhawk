@@ -1,10 +1,10 @@
-/* IPL.C        (c) Copyright Roger Bowler, 1999-2007                */
+/* IPL.C        (c) Copyright Roger Bowler, 1999-2009                */
 /*              ESA/390 Initial Program Loader                       */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: ipl.c,v 1.101 2007/06/23 00:04:14 ivan Exp $
+// $Id: ipl.c,v 1.108 2009/01/02 19:21:51 jj Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements the Initial Program Load (IPL) function of */
@@ -17,6 +17,30 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: ipl.c,v $
+// Revision 1.108  2009/01/02 19:21:51  jj
+// DVD-RAM IPL
+// RAMSAVE
+// SYSG Integrated 3270 console fixes
+//
+// Revision 1.107  2008/12/29 11:03:10  jj
+// Move HMC disk I/O functions to scedasd.c
+//
+// Revision 1.106  2008/12/04 08:34:40  jj
+// Fix CDROM ipl when loading at non page boundary - reported by Harold Grovesteen
+//
+// Revision 1.105  2008/08/21 18:34:48  fish
+// Fix i/o-interrupt-queue race condition
+//
+// Revision 1.104  2007/12/10 23:12:02  gsmith
+// Tweaks to OPTION_MIPS_COUNTING processing
+//
+// Revision 1.103  2007/08/26 21:04:45  rbowler
+// Modify PSW fields by psw command (part 2)
+//
+// Revision 1.102  2007/08/06 16:48:20  ivan
+// Implement "PARM" option for IPL command (same as VM IPL PARM XXX)
+// Also add command helps for ipl, iplc, sysclear, sysreset
+//
 // Revision 1.101  2007/06/23 00:04:14  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -38,7 +62,6 @@
 #include "hercules.h"
 #include "opcode.h"
 #include "inline.h"
-#include <assert.h>
 #if defined(OPTION_FISHIO)
 #include "w32chan.h"
 #endif // defined(OPTION_FISHIO)
@@ -134,16 +157,13 @@ int ARCH_DEP(system_reset) (int cpu, int clear)
 /*  in phase three, the IPL PSW is loaded and the CPU is started.    */
 /*-------------------------------------------------------------------*/
 
-static int ARCH_DEP(common_load_begin)  (int cpu, int clear);
-static int ARCH_DEP(common_load_finish) (REGS *regs);
-
 int     orig_arch_mode;                 /* Saved architecture mode   */
 PSW     captured_zpsw;                  /* Captured z/Arch PSW       */
 
 /*-------------------------------------------------------------------*/
 /* Common LOAD (IPL) begin: system-reset (register/storage clearing) */
 /*-------------------------------------------------------------------*/
-static int ARCH_DEP(common_load_begin) (int cpu, int clear)
+int ARCH_DEP(common_load_begin) (int cpu, int clear)
 {
     REGS *regs;
 
@@ -223,6 +243,16 @@ BYTE    chanstat;                       /* IPL device channel status */
         HDC1(debug_cpu_state, regs);
         return -1;
     }
+#if defined(OPTION_IPLPARM)
+    if(sysblk.haveiplparm)
+    {
+        for(i=0;i<16;i++)
+        {
+            regs->GR_L(i)=fetch_fw(&sysblk.iplparmstring[i*4]);
+        }
+        sysblk.haveiplparm=0;
+    }
+#endif
 
     /* Set Main Storage Reference and Update bits */
     STORAGE_KEY(regs->PX, regs) |= (STORKEY_REF | STORKEY_CHANGE);
@@ -254,10 +284,12 @@ BYTE    chanstat;                       /* IPL device channel status */
     OBTAIN_INTLOCK(NULL);
 
     /* Clear the interrupt pending and device busy conditions */
-    DEQUEUE_IO_INTERRUPT(&dev->ioint);
-    DEQUEUE_IO_INTERRUPT(&dev->pciioint);
-    DEQUEUE_IO_INTERRUPT(&dev->attnioint);
-    dev->busy = dev->pending = dev->pcipending = dev->attnpending = 0;
+    obtain_lock (&sysblk.iointqlk);
+    DEQUEUE_IO_INTERRUPT_QLOCKED(&dev->ioint);
+    DEQUEUE_IO_INTERRUPT_QLOCKED(&dev->pciioint);
+    DEQUEUE_IO_INTERRUPT_QLOCKED(&dev->attnioint);
+    release_lock(&sysblk.iointqlk);
+    dev->busy = 0;
     dev->scsw.flag2 = 0;
     dev->scsw.flag3 = 0;
 
@@ -316,108 +348,9 @@ BYTE    chanstat;                       /* IPL device channel status */
 } /* end function load_ipl */
 
 /*-------------------------------------------------------------------*/
-/* function load_hmc simulates the load from the service processor   */
-/*   the filename pointed to is a descriptor file which has the      */
-/*   following format:                                               */
-/*                                                                   */
-/*   '*' in col 1 is comment                                         */
-/*   core image file followed by address where it should be loaded   */
-/*                                                                   */
-/* For example:                                                      */
-/*                                                                   */
-/* * Linux/390 cdrom boot image                                      */
-/* boot_images/tapeipl.ikr 0x00000000                                */
-/* boot_images/initrd 0x00800000                                     */
-/* boot_images/parmfile 0x00010480                                   */
-/*                                                                   */
-/* The location of the image files is relative to the location of    */
-/* the descriptor file.                         Jan Jaeger 10-11-01  */
-/*                                                                   */
-/*-------------------------------------------------------------------*/
-int ARCH_DEP(load_hmc) (char *fname, int cpu, int clear)
-{
-REGS   *regs;                           /* -> Regs                   */
-FILE   *fp;
-char    inputline[1024];
-char    dirname[1024];                  /* dirname of ins file       */
-char   *dirbase;
-char    filename[1024];                 /* filename of image file    */
-char    pathname[1024];                 /* pathname of image file    */
-U32     fileaddr;
-int     rc, rx;                         /* Return codes (work)       */
-
-    /* Get started */
-    if (ARCH_DEP(common_load_begin) (cpu, clear) != 0)
-        return -1;
-
-    /* The actual IPL proper starts here... */
-
-    regs = sysblk.regs[cpu];    /* Point to IPL CPU's registers */
-
-    if(fname == NULL)                   /* Default ipl from DASD     */
-        fname = "hercules.ins";         /*   from hercules.ins       */
-
-    /* remove filename from pathname */
-    hostpath(pathname, fname, sizeof(filename));
-    strlcpy(dirname,pathname,sizeof(dirname));
-    dirbase = strrchr(dirname,'/');
-    if(dirbase) *(++dirbase) = '\0';
-
-    fp = fopen(pathname, "r");
-    if(fp == NULL)
-    {
-        logmsg(_("HHCCP031E Load from %s failed: %s\n"),fname,strerror(errno));
-        return -1;
-    }
-
-    do
-    {
-        rc = fgets(inputline,sizeof(inputline),fp) != NULL;
-        assert(sizeof(pathname) == 1024);
-        rx = sscanf(inputline,"%1024s %i",pathname,&fileaddr);
-        hostpath(filename, pathname, sizeof(filename));
-
-        /* If no load address was found load to location zero */
-        if(rc && rx < 2)
-            fileaddr = 0;
-
-        if(rc && rx > 0 && *filename != '*' && *filename != '#')
-        {
-            /* Prepend the directory name if one was found
-               and if no full pathname was specified */
-            if(dirbase &&
-#ifndef WIN32
-                filename[0] != '/'
-#else // WIN32
-                filename[1] != ':'
-#endif // !WIN32
-            )
-            {
-                strlcpy(pathname,dirname,sizeof(pathname));
-                strlcat(pathname,filename,sizeof(pathname));
-            }
-            else
-                strlcpy(pathname,filename,sizeof(pathname));
-
-            if( ARCH_DEP(load_main) (pathname, fileaddr) < 0 )
-            {
-                fclose(fp);
-                HDC1(debug_cpu_state, regs);
-                return -1;
-            }
-            sysblk.main_clear = sysblk.xpnd_clear = 0;
-        }
-    } while(rc);
-    fclose(fp);
-
-    /* Finish up... */
-    return ARCH_DEP(common_load_finish) (regs);
-} /* end function load_hmc */
-
-/*-------------------------------------------------------------------*/
 /* Common LOAD (IPL) finish: load IPL PSW and start CPU              */
 /*-------------------------------------------------------------------*/
-static int ARCH_DEP(common_load_finish) (REGS *regs)
+int ARCH_DEP(common_load_finish) (REGS *regs)
 {
     /* Zeroize the interrupt code in the PSW */
     regs->psw.intcode = 0;
@@ -467,7 +400,7 @@ int             i;                      /* Array subscript           */
     for (i = 0; i < MAX_CPU; i++)
         regs->emercpu[i] = 0;
     regs->instinvalid = 1;
-    regs->instcount = 0;
+    regs->instcount = regs->prevcount = 0;
 
     /* Clear interrupts */
     SET_IC_INITIAL_MASK(regs);
@@ -525,6 +458,7 @@ int ARCH_DEP(initial_cpu_reset) (REGS *regs)
     memset ( regs->cr,             0, sizeof(regs->cr)            );
     regs->fpc    = 0;
     regs->PX     = 0;
+    regs->psw.AMASK_G = AMASK24;
     /* 
      * ISW20060125 : Since we reset the prefix, we must also adjust 
      * the PSA ptr
@@ -572,55 +506,6 @@ int ARCH_DEP(initial_cpu_reset) (REGS *regs)
     return 0;
 } /* end function initial_cpu_reset */
 
-/*-------------------------------------------------------------------*/
-/* Function to Load (read) specified file into absolute main storage */
-/*-------------------------------------------------------------------*/
-int ARCH_DEP(load_main) (char *fname, RADR startloc)
-{
-int fd;     
-int len;
-int rc = 0;
-RADR pageaddr;
-U32  pagesize;
-char pathname[MAX_PATH];
-
-    hostpath(pathname, fname, sizeof(pathname));
-
-    fd = open (pathname, O_RDONLY|O_BINARY);
-    if (fd < 0)
-    {
-        logmsg(_("HHCCP033E load_main: %s: %s\n"), fname, strerror(errno));
-        return fd;
-    }
-
-    pagesize = PAGEFRAME_PAGESIZE - (startloc & PAGEFRAME_BYTEMASK);
-    pageaddr = startloc;
-
-    do {
-        if (pageaddr >= sysblk.mainsize)
-        {
-            logmsg(_("HHCCP034W load_main: terminated at end of mainstor\n"));
-            close(fd);
-            return rc;
-        }
-
-        len = read(fd, sysblk.mainstor + pageaddr, pagesize);
-        if (len > 0)
-        {
-            STORAGE_KEY(pageaddr, &sysblk) |= STORKEY_REF|STORKEY_CHANGE;
-            rc += len;
-        }
-        pageaddr += PAGEFRAME_PAGESIZE;
-        pageaddr &= PAGEFRAME_PAGEMASK;
-        pagesize  = PAGEFRAME_PAGESIZE;
-    }
-    while (len == (int)pagesize);
-
-    close(fd);
-
-    return rc;
-} /* end function load_main */
-
 #if !defined(_GEN_ARCH)
 
 #if defined(_ARCHMODE2)
@@ -657,30 +542,6 @@ int load_ipl (U16 lcss, U16 devnum, int cpu, int clear)
         case ARCH_900:
             /* z/Arch always starts out in ESA390 mode */
             return s390_load_ipl (lcss, devnum, cpu, clear);
-#endif
-    }
-    return -1;
-}
-
-/*-------------------------------------------------------------------*/
-/*  Service Processor Load    (load/ipl from the specified file)     */
-/*-------------------------------------------------------------------*/
-
-int load_hmc (char *fname, int cpu, int clear)
-{
-    switch(sysblk.arch_mode) {
-#if defined(_370)
-        case ARCH_370:
-            return s370_load_hmc (fname, cpu, clear);
-#endif
-#if defined(_390)
-        case ARCH_390:
-            return s390_load_hmc (fname, cpu, clear);
-#endif
-#if defined(_900)
-        case ARCH_900:
-            /* z/Arch always starts out in ESA390 mode */
-            return s390_load_hmc (fname, cpu, clear);
 #endif
     }
     return -1;
@@ -732,28 +593,6 @@ int system_reset (int cpu, int clear)
         case ARCH_900:
             /* z/Arch always starts out in ESA390 mode */
             return s390_system_reset (cpu, clear);
-#endif
-    }
-    return -1;
-}
-
-/*-------------------------------------------------------------------*/
-/* Load/Read specified file into absolute main storage               */
-/*-------------------------------------------------------------------*/
-int load_main (char *fname, RADR startloc)
-{
-    switch(sysblk.arch_mode) {
-#if defined(_370)
-        case ARCH_370:
-            return s370_load_main (fname, startloc);
-#endif
-#if defined(_390)
-        case ARCH_390:
-            return s390_load_main (fname, startloc);
-#endif
-#if defined(_900)
-        case ARCH_900:
-            return z900_load_main (fname, startloc);
 #endif
     }
     return -1;

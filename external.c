@@ -1,7 +1,7 @@
 /* EXTERNAL.C   (c) Copyright Roger Bowler, 1999-2007                */
 /*              ESA/390 External Interrupt and Timer                 */
 
-// $Id: external.c,v 1.71 2007/06/23 00:04:09 ivan Exp $
+// $Id: external.c,v 1.72 2008/12/28 22:00:57 rbowler Exp $
 
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
@@ -25,6 +25,9 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: external.c,v $
+// Revision 1.72  2008/12/28 22:00:57  rbowler
+// Issue message if service signal interrupt occurs while stepping or tracing
+//
 // Revision 1.71  2007/06/23 00:04:09  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -331,8 +334,11 @@ U16     cpuad;                          /* Originating CPU address   */
             sysblk.servparm =
                 APPLY_PREFIXING (sysblk.servparm, regs->PX);
 
-//      logmsg (_("External interrupt: Service signal %8.8X\n"),
-//              sysblk.servparm);
+        if (CPU_STEPPING_OR_TRACING_ALL)
+        {
+            logmsg (_("HHCCP027I External interrupt: Service signal %8.8X\n"),
+                    sysblk.servparm);
+        }
 
         /* Store service signal parameter at PSA+X'80' */
         psa = (void*)(regs->mainstor + regs->PX);

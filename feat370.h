@@ -1,9 +1,33 @@
 /* FEAT370.H    (c) Copyright Jan Jaeger, 2000-2007                  */
 /*              S/370 feature definitions                            */
 
-// $Id: feat370.h,v 1.23 2007/06/23 00:04:09 ivan Exp $
+// $Id: feat370.h,v 1.31 2008/09/18 11:12:58 rbowler Exp $
 //
 // $Log: feat370.h,v $
+// Revision 1.31  2008/09/18 11:12:58  rbowler
+// Permit General Instructions Extension facility to be activated in S/370 mode
+//
+// Revision 1.30  2008/01/21 22:20:35  rbowler
+// Correct previous changelog entry (ETF3 not ETF2)
+//
+// Revision 1.29  2008/01/21 14:02:13  rbowler
+// Permit Extended-Translation-Facility-3 in S/370 and ESA/390 modes
+//
+// Revision 1.28  2007/12/02 16:34:23  rbowler
+// Permit Extended-Translation-Facility-2 to be activated in S/370 mode
+//
+// Revision 1.27  2007/12/02 15:45:17  rbowler
+// Permit Extended-Translation facility to be activated in S/370 mode
+//
+// Revision 1.26  2007/12/02 15:32:46  rbowler
+// Permit Compare-and-Move-Extended facility to be activated in S/370 mode
+//
+// Revision 1.25  2007/11/30 15:14:14  rbowler
+// Permit String-Instruction facility to be activated in S/370 mode
+//
+// Revision 1.24  2007/11/18 22:18:51  rbowler
+// Permit FEATURE_IMMEDIATE_AND_RELATIVE to be activated in S/370 mode
+//
 // Revision 1.23  2007/06/23 00:04:09  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -37,6 +61,28 @@
 #define FEATURE_S370E_EXTENDED_ADDRESSING
 #define FEATURE_TEST_BLOCK
 #define FEATURE_ECPSVM
+
+/* The following ESA/390 features can be retrofitted to S/370 and
+   may be activated if desired by uncommenting the appropriate
+   define statements below and performing a complete rebuild */
+//#define FEATURE_IMMEDIATE_AND_RELATIVE
+//#define FEATURE_STRING_INSTRUCTION
+//#define FEATURE_COMPARE_AND_MOVE_EXTENDED
+//#define FEATURE_EXTENDED_TRANSLATION
+//#define FEATURE_EXTENDED_TRANSLATION_FACILITY_2
+
+/* The following ESAME features can be retrofitted to S/370 and
+   may be activated if desired by uncommenting the appropriate
+   define statements below and performing a complete rebuild */
+//#define FEATURE_EXTENDED_TRANSLATION_FACILITY_3
+//#define FEATURE_ETF2_ENHANCEMENT
+//#define FEATURE_ETF3_ENHANCEMENT
+//#define FEATURE_LONG_DISPLACEMENT
+//#define FEATURE_GENERAL_INSTRUCTIONS_EXTENSION_FACILITY
+//#define FEATURE_MESSAGE_SECURITY_ASSIST
+//#define FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_1
+//#define FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_2
+//#define FEATURE_PARSING_ENHANCEMENT_FACILITY
 
 #endif /*defined(OPTION_370_MODE)*/
 /* end of FEAT370.H */

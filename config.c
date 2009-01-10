@@ -1,13 +1,26 @@
 /* CONFIG.C     (c) Copyright Jan Jaeger, 2000-2007                  */
 /*              Device configuration functions                       */
 
-// $Id: config.c,v 1.199 2007/06/23 00:04:04 ivan Exp $
+// $Id: config.c,v 1.203 2008/11/04 05:56:31 fish Exp $
 
 /*-------------------------------------------------------------------*/
 /* The original configuration builder is now called bldcfg.c         */
 /*-------------------------------------------------------------------*/
 
 // $Log: config.c,v $
+// Revision 1.203  2008/11/04 05:56:31  fish
+// Put ensure consistent create_thread ATTR usage change back in
+//
+// Revision 1.202  2008/11/03 15:31:57  rbowler
+// Back out consistent create_thread ATTR modification
+//
+// Revision 1.201  2008/10/18 09:32:20  fish
+// Ensure consistent create_thread ATTR usage
+//
+// Revision 1.200  2008/07/08 05:35:49  fish
+// AUTOMOUNT redesign: support +allowed/-disallowed dirs
+// and create associated 'automount' panel command - Fish
+//
 // Revision 1.199  2007/06/23 00:04:04  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -115,7 +128,7 @@ char  thread_name[16];
     snprintf(thread_name,sizeof(thread_name),"cpu%d thread",cpu);
     thread_name[sizeof(thread_name)-1]=0;
 
-    if ( create_thread (&sysblk.cputid[cpu], &sysblk.detattr, cpu_thread,
+    if ( create_thread (&sysblk.cputid[cpu], DETACHED, cpu_thread,
                         &cpu, thread_name)
        )
     {
@@ -1008,6 +1021,7 @@ parse_single_devnum__INTERNAL(const char *spec,
     return 0;
 }
 
+DLL_EXPORT
 int
 parse_single_devnum(const char *spec,
                     U16 *lcss,

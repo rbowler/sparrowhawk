@@ -1,7 +1,7 @@
 /* CONSOLE.C    (c)Copyright Roger Bowler, 1999-2007                 */
 /*              ESA/390 Console Device Handler                       */
 
-// $Id: console.c,v 1.93 2007/06/23 16:13:54 jmaynard Exp $
+// $Id: console.c,v 1.104 2009/01/02 19:21:50 jj Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for console        */
@@ -53,6 +53,41 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: console.c,v $
+// Revision 1.104  2009/01/02 19:21:50  jj
+// DVD-RAM IPL
+// RAMSAVE
+// SYSG Integrated 3270 console fixes
+//
+// Revision 1.103  2008/12/30 15:40:01  rbowler
+// Allow $(LPARNAME) in herclogo file
+//
+// Revision 1.102  2008/12/29 13:02:38  rbowler
+// herclogo symbol $(ccuu) should display lower case device number
+//
+// Revision 1.101  2008/12/29 12:55:12  rbowler
+// Duplicate SYSG console definition message issued incorrectly
+//
+// Revision 1.100  2008/12/28 21:05:08  rbowler
+// Integrated 3270 (SYSG) console attn/read commands
+//
+// Revision 1.99  2008/12/28 15:30:09  jj
+// SYSG and SYSA mods
+//
+// Revision 1.98  2008/12/27 23:34:37  rbowler
+// Integrated 3270 (SYSG) console send command
+//
+// Revision 1.97  2008/11/04 05:56:31  fish
+// Put ensure consistent create_thread ATTR usage change back in
+//
+// Revision 1.96  2008/11/03 15:31:57  rbowler
+// Back out consistent create_thread ATTR modification
+//
+// Revision 1.95  2008/10/18 09:32:20  fish
+// Ensure consistent create_thread ATTR usage
+//
+// Revision 1.94  2007/11/21 22:54:14  fish
+// Use new BEGIN_DEVICE_CLASS_QUERY macro
+//
 // Revision 1.93  2007/06/23 16:13:54  jmaynard
 // Fixing two messages out of internationalization by removing redundant
 // carriage returns.
@@ -1834,13 +1869,18 @@ char                    *logoout;
         set_symbol("HOSTOSVER",cons_hostinfo.version);
         set_symbol("HOSTARCH",cons_hostinfo.machine);
         set_symbol("HOSTNUMCPUS",num_procs);
+        set_symbol("LPARNAME",str_lparname());
         snprintf(conmsg,sizeof(conmsg),"%3.3X",dev->devnum);
         set_symbol("CUU",conmsg);
         snprintf(conmsg,sizeof(conmsg),"%3.3x",dev->devnum);
         set_symbol("cuu",conmsg);
         snprintf(conmsg,sizeof(conmsg),"%4.4X",dev->devnum);
+  #if defined(_FEATURE_INTEGRATED_3270_CONSOLE)
+        if (dev == sysblk.sysgdev)
+           strncpy(conmsg,"SYSG",sizeof(conmsg));
+  #endif /*defined(_FEATURE_INTEGRATED_3270_CONSOLE)*/
         set_symbol("CCUU",conmsg);
-        snprintf(conmsg,sizeof(conmsg),"%4.4X",dev->devnum);
+        snprintf(conmsg,sizeof(conmsg),"%4.4x",dev->devnum);
         set_symbol("ccuu",conmsg);
         snprintf(conmsg,sizeof(conmsg),"%d",SSID_TO_LCSS(dev->ssid));
         set_symbol("CSS",conmsg);
@@ -1878,8 +1918,13 @@ char                    *logoout;
        IF...
          (1) this is NOT a 3287 printer device, -AND-
          (2) this is NOT the System-370 mode initial power-on state
+         and it is not the SYSG console
     */
-    if ( class != 'P' && !INITIAL_POWERON_370() )
+    if (class != 'P'
+  #if defined(_FEATURE_INTEGRATED_3270_CONSOLE)
+        && dev != sysblk.sysgdev
+  #endif /*defined(_FEATURE_INTEGRATED_3270_CONSOLE)*/
+        && !INITIAL_POWERON_370())
         device_attention (dev, CSW_DE);
 
     /* Try to detect dropped connections */
@@ -2133,7 +2178,7 @@ BYTE                   unitstat;        /* Status after receive data */
             }
 
             /* Create a thread to complete the client connection */
-            if ( create_thread (&tidneg, &sysblk.detattr,
+            if ( create_thread (&tidneg, DETACHED,
                         connect_client, &csock, "connect_client")
                )
             {
@@ -2200,12 +2245,17 @@ BYTE                   unitstat;        /* Status after receive data */
                 /*           I do not know what is this */
                 /*   console: CCUU attention requests raised */
 
+                /* Do not raise attention interrupt for the SYSG console */
+
                 /* Do NOT raise attention interrupt if this is */
                 /* the System-370 mode initial power-on state */
 
                 if (1
                     && dev->connected
                     && dev->devtype != 0x3287
+              #if defined(_FEATURE_INTEGRATED_3270_CONSOLE)
+                    && dev != sysblk.sysgdev
+              #endif /*defined(_FEATURE_INTEGRATED_3270_CONSOLE)*/
                     && !INITIAL_POWERON_370()
                 )
                 {
@@ -2217,6 +2267,14 @@ BYTE                   unitstat;        /* Status after receive data */
                             dev->devnum,
                             (rc == 0 ? "raised" : "rejected"), rc);
                 }
+
+              #if defined(_FEATURE_INTEGRATED_3270_CONSOLE)
+                /* For the SYSG console, generate an external interrupt */
+                if (dev == sysblk.sysgdev && dev->connected)
+                {
+                    sclp_sysg_attention();
+                }
+              #endif /*defined(_FEATURE_INTEGRATED_3270_CONSOLE)*/
 
                 continue; /* (note: dev->lock already released) */
 
@@ -2275,7 +2333,7 @@ console_initialise()
 
         if (!sysblk.cnsltid)
         {
-            if ( create_thread (&sysblk.cnsltid, &sysblk.detattr,
+            if ( create_thread (&sysblk.cnsltid, DETACHED,
                                 console_connection_handler, NULL,
                                 "console_connection_handler")
                )
@@ -2319,10 +2377,6 @@ static int
 loc3270_init_handler ( DEVBLK *dev, int argc, char *argv[] )
 {
     int ac = 0;
-    /*
-    UNREFERENCED(argc);
-    UNREFERENCED(argv);
-    */
 
     /* Indicate that this is a console device */
     dev->console = 1;
@@ -2338,6 +2392,20 @@ loc3270_init_handler ( DEVBLK *dev, int argc, char *argv[] )
 
     if(!sscanf(dev->typname,"%hx",&(dev->devtype)))
         dev->devtype = 0x3270;
+
+  #if defined(_FEATURE_INTEGRATED_3270_CONSOLE)
+    /* Extra initialisation for the SYSG console */
+    if (strcasecmp(dev->typname,"SYSG") == 0)
+    {
+        dev->pmcw.flag5 &= ~PMCW5_V; // Not a regular device
+        if (sysblk.sysgdev != NULL)
+        {
+            logmsg(_("HHCTE017E Device %4.4X: Duplicate SYSG console definition\n"),
+                dev->devnum);
+            return -1;
+        }
+    }
+  #endif /*defined(_FEATURE_INTEGRATED_3270_CONSOLE)*/
 
     /* Initialize the device identifier bytes */
     dev->devid[0] = 0xFF;
@@ -2406,6 +2474,15 @@ loc3270_init_handler ( DEVBLK *dev, int argc, char *argv[] )
         }
     }
 
+  #if defined(_FEATURE_INTEGRATED_3270_CONSOLE)
+    /* Extra initialisation for the SYSG console */
+    if (strcasecmp(dev->typname,"SYSG") == 0)
+    {
+        /* Save the address of the SYSG console devblk */
+        sysblk.sysgdev = dev;
+    }
+  #endif /*defined(_FEATURE_INTEGRATED_3270_CONSOLE)*/
+
     return console_initialise();
 } /* end function loc3270_init_handler */
 
@@ -2417,7 +2494,7 @@ static void
 loc3270_query_device (DEVBLK *dev, char **class,
                 int buflen, char *buffer)
 {
-    *class = "DSP";
+    BEGIN_DEVICE_CLASS_QUERY( "DSP", dev, class, buflen, buffer );
 
     if (dev->connected)
     {
@@ -2477,6 +2554,15 @@ loc3270_query_device (DEVBLK *dev, char **class,
 static int
 loc3270_close_device ( DEVBLK *dev )
 {
+
+  #if defined(_FEATURE_INTEGRATED_3270_CONSOLE)
+    /* Clear the pointer to the SYSG console */
+    if (dev == sysblk.sysgdev)
+    {
+        sysblk.sysgdev = NULL;
+    }
+  #endif /*defined(_FEATURE_INTEGRATED_3270_CONSOLE)*/
+
     console_remove(dev);
 
     return 0;
@@ -2703,7 +2789,7 @@ static void
 constty_query_device (DEVBLK *dev, char **class,
                 int buflen, char *buffer)
 {
-    *class = "CON";
+    BEGIN_DEVICE_CLASS_QUERY( "CON", dev, class, buflen, buffer );
 
     if (dev->connected)
     {
@@ -3690,6 +3776,10 @@ HDL_DEVICE_SECTION
     HDL_DEVICE(3215, constty_device_hndinfo );
     HDL_DEVICE(3270, loc3270_device_hndinfo );
     HDL_DEVICE(3287, loc3270_device_hndinfo );
+
+  #if defined(_FEATURE_INTEGRATED_3270_CONSOLE)
+    HDL_DEVICE(SYSG, loc3270_device_hndinfo );
+  #endif /*defined(_FEATURE_INTEGRATED_3270_CONSOLE)*/
 }
 END_DEVICE_SECTION
 #endif

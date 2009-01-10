@@ -2,9 +2,39 @@
 # Makefile for Hercules S/370, ESA/390 and z/Architecture emulator
 # Process this file with 'automake' to produce Makefile.in
 #
-# $Id: Makefile.am,v 1.178 2007/06/02 13:46:41 rbowler Exp $
+# $Id: Makefile.am,v 1.186 2008/12/29 11:03:10 jj Exp $
 #
 # $Log: Makefile.am,v $
+# Revision 1.186  2008/12/29 11:03:10  jj
+# Move HMC disk I/O functions to scedasd.c
+#
+# Revision 1.185  2008/12/04 17:39:02  rbowler
+# Add ability to configure group name with --enable-setuid-hercifc=name
+#
+# Revision 1.184  2008/12/01 16:19:49  jj
+# Check for licensed operating systems without impairing architectural
+# compliance of IFL's
+#
+# Revision 1.183  2008/05/22 19:25:58  fish
+# Flex FakeTape support
+#
+# Revision 1.182  2008/03/25 11:41:31  fish
+# SCSI TAPE MODS part 1: groundwork: non-functional changes:
+# rename some functions, comments, general restructuring, etc.
+# New source modules awstape.c, omatape.c, hettape.c and
+# tapeccws.c added, but not yet used (all will be used in a future
+# commit though when tapedev.c code is eventually split)
+#
+# Revision 1.181  2008/03/02 22:50:35  rbowler
+# Restore tabs corrupted by previous modification
+#
+# Revision 1.180  2008/03/01 14:19:29  rbowler
+# Add new module general3.c for general-instructions-extension facility
+#
+# Revision 1.179  2008/02/19 11:49:18  ivan
+# - Move setting of CPU priority after spwaning timer thread
+# - Added support for Posix 1003.1e capabilities
+#
 # Revision 1.178  2007/06/02 13:46:41  rbowler
 # PFPO framework
 #
@@ -105,8 +135,15 @@ dyndev_SRC         = commadpt.c  \
                      sockdev.c   \
                      printer.c   \
                      tapedev.c   \
-                     scsitape.c  \
+                     tapeccws.c  \
+                     sllib.c     \
                      hetlib.c    \
+                     awstape.c   \
+                     faketape.c  \
+                     hettape.c   \
+                     omatape.c   \
+                     scsitape.c  \
+                     w32stape.c  \
                      ctc_lcs.c   \
                      ctc_ctci.c  \
                      ctcadpt.c   \
@@ -251,7 +288,7 @@ if OPTION_DYNAMIC_LOAD
   hdt3270_la_LDFLAGS = $(DYNMOD_LD_FLAGS)
   hdt3270_la_LIBADD  = $(DYNMOD_LD_ADD)
 
-  hdt3420_la_SOURCES = tapedev.c scsitape.c
+  hdt3420_la_SOURCES = tapedev.c tapeccws.c awstape.c faketape.c hettape.c omatape.c scsitape.c w32stape.c
   hdt3420_la_LDFLAGS = $(DYNMOD_LD_FLAGS)
   hdt3420_la_LIBADD  = $(DYNMOD_LD_ADD) libherct.la
 
@@ -355,6 +392,7 @@ endif
                        vstore.c     \
                        general1.c   \
                        general2.c   \
+                       general3.c   \
                        pfpo.c       \
                        plo.c        \
                        control.c    \
@@ -362,6 +400,8 @@ endif
                        io.c         \
                        decimal.c    \
                        service.c    \
+                       scedasd.c    \
+                       losc.c       \
                        chsc.c       \
                        opcode.c     \
                        diagnose.c   \
@@ -487,7 +527,7 @@ tools_ADDLIBS = $(HERCLIBS2) $(LDADD)
 
 if BUILD_HERCIFC
 hercifc_SOURCES       = hercifc.c
-hercifc_LDADD         = $(LDADD)
+hercifc_LDADD         = $(tools_ADDLIBS)
 hercifc_LDFLAGS       = $(tools_LD_FLAGS)
 endif
 
@@ -633,7 +673,6 @@ EXTRA_DIST = autoconf/config.rpath \
              build_pch.c           \
              conspawn.c            \
              getopt.c              \
-             w32stape.c            \
              herclogo.txt          \
              hercules.ico
 
@@ -744,6 +783,9 @@ tar: dist
 install-exec-local:
 if SETUID_HERCIFC
 	chown root $(DESTDIR)$(bindir)/hercifc
+if HERCIFC_GROUPSET
+	chgrp $(HERCIFC_GROUPNAME) $(DESTDIR)$(bindir)/hercifc
+endif
 	chmod 0750 $(DESTDIR)$(bindir)/hercifc
 	chmod +s   $(DESTDIR)$(bindir)/hercifc
 	rm                             hercifc

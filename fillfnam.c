@@ -1,6 +1,12 @@
-// $Id: fillfnam.c,v 1.10 2006/12/31 17:52:50 gsmith Exp $
+// $Id: fillfnam.c,v 1.12 2008/08/29 07:07:08 fish Exp $
 //
 // $Log: fillfnam.c,v $
+// Revision 1.12  2008/08/29 07:07:08  fish
+// remove unnecessary blank line following directory report
+//
+// Revision 1.11  2008/02/18 22:57:08  rbowler
+// Disable filename completion for Solaris 2.9 due to missing scandir function
+//
 // Revision 1.10  2006/12/31 17:52:50  gsmith
 // 31 Dec 2006 Fix typo in line 1 of fillfnam.c
 //
@@ -14,6 +20,17 @@
 #include "hstdinc.h"
 #include "hercules.h"
 #include "fillfnam.h"
+
+/* On Solaris 2.9 (SunOS 5.9) and earlier, there is no scandir
+   and alphasort function. In this case fillfnam does nothing
+   and the tab command is effectively a no-operation */
+#if !(defined(HAVE_SCANDIR) && defined(HAVE_ALPHASORT)) && !defined(_MSVC_)
+int tab_pressed(char *cmdlinefull, int *cmdoffset) {
+  UNREFERENCED(cmdlinefull);
+  UNREFERENCED(cmdoffset);  
+  return 0; 
+}
+#else 
 
 char *filterarray;
 
@@ -185,7 +202,6 @@ int tab_pressed(char *cmdlinefull, int *cmdoffset) {
       /* display all alternatives */
       for (i = 0; i< n; i++)
          logmsg("%s\n", namelist[i]->d_name);
-      logmsg("\n");
     }
     /* free everything */
     free(buff);
@@ -199,3 +215,4 @@ int tab_pressed(char *cmdlinefull, int *cmdoffset) {
   free(path);
   return(0);
 }
+#endif /*(HAVE_SCANDIR && HAVE_ALPHASORT) || _MSVC_*/

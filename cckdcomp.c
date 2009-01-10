@@ -2,13 +2,19 @@
 /*       Perform chkdsk for a Compressed CKD Direct Access Storage   */
 /*       Device file.                                                */
 
-// $Id: cckdcomp.c,v 1.30 2007/06/23 00:04:03 ivan Exp $
+// $Id: cckdcomp.c,v 1.32 2008/11/04 04:50:45 fish Exp $
 
 /*-------------------------------------------------------------------*/
 /* Remove all free space on a compressed ckd file                    */
 /*-------------------------------------------------------------------*/
 
 // $Log: cckdcomp.c,v $
+// Revision 1.32  2008/11/04 04:50:45  fish
+// Ensure consistent utility startup
+//
+// Revision 1.31  2007/12/01 23:31:57  fish
+// Fix cckdcdsk/cckdcomp/cckdutil no message o/p issue
+//
 // Revision 1.30  2007/06/23 00:04:03  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -36,15 +42,7 @@ CCKDDASD_DEVHDR cdevhdr;                /* Compressed CKD device hdr */
 DEVBLK          devblk;                 /* DEVBLK                    */
 DEVBLK         *dev=&devblk;            /* -> DEVBLK                 */
 
-#ifdef EXTERNALGUI
-    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
-    {
-        extgui = 1;
-        argc--;
-        setvbuf(stderr, NULL, _IONBF, 0);
-        setvbuf(stdout, NULL, _IONBF, 0);
-    }
-#endif /*EXTERNALGUI*/
+    INITIALIZE_UTILITY("cckdcomp");
 
     /* parse the arguments */
     for (argc--, argv++ ; argc > 0 ; argc--, argv++)
@@ -75,6 +73,7 @@ DEVBLK         *dev=&devblk;            /* -> DEVBLK                 */
     for (i = 0; i < argc; i++)
     {
         memset (dev, 0, sizeof(DEVBLK));
+        dev->batch = 1;
 
         /* open the file */
         hostpath(dev->filename, argv[i], sizeof(dev->filename));

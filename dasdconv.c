@@ -1,7 +1,7 @@
 /* DASDCONV.C   (c) Copyright Roger Bowler, 1999-2007                */
 /*              Hercules DASD Utilities: DASD image converter        */
 
-// $Id: dasdconv.c,v 1.16 2007/06/23 00:04:08 ivan Exp $
+// $Id: dasdconv.c,v 1.17 2008/11/04 04:50:45 fish Exp $
 
 /*-------------------------------------------------------------------*/
 /* This program converts a CKD disk image from HDR-30 format         */
@@ -28,6 +28,9 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: dasdconv.c,v $
+// Revision 1.17  2008/11/04 04:50:45  fish
+// Ensure consistent utility startup
+//
 // Revision 1.16  2007/06/23 00:04:08  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -848,16 +851,7 @@ char            ofname[256];            /* Output file name          */
 BYTE            volser[7];              /* Volume serial (ASCIIZ)    */
 int             lfs = 0;                /* 1 = Build large file      */
 
-    /* Check the number of arguments */
-#ifdef EXTERNALGUI
-    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
-    {
-        extgui = 1;
-        argc--;
-        setvbuf(stderr, NULL, _IONBF, 0);
-        setvbuf(stdout, NULL, _IONBF, 0);
-    }
-#endif /*EXTERNALGUI*/
+    INITIALIZE_UTILITY("dasdconv");
 
     /* Display the program identification message */
     display_version (stderr,

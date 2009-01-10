@@ -4,9 +4,12 @@
  * Vast swathes copied from dasdpdsu.c (c) Copyright Roger Bowler, 1999-2007
  * Changes and additions Copyright 2000-2007 by Malcolm Beattie
  *
- * $Id: dasdcat.c,v 1.32 2007/06/23 00:04:08 ivan Exp $
+ * $Id: dasdcat.c,v 1.33 2008/11/04 04:50:45 fish Exp $
  *
  * $Log: dasdcat.c,v $
+ * Revision 1.33  2008/11/04 04:50:45  fish
+ * Ensure consistent utility startup
+ *
  * Revision 1.32  2007/06/23 00:04:08  ivan
  * Update copyright notices to include current year (2007)
  *
@@ -303,15 +306,7 @@ int main(int argc, char **argv)
  CIFBLK *cif = 0;
  char *fn, *sfn;
 
-#ifdef EXTERNALGUI
- if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0) {
- argv[argc-1] = NULL;
- extgui = 1;
- argc--;
- setvbuf(stderr, NULL, _IONBF, 0);
- setvbuf(stdout, NULL, _IONBF, 0);
- }
-#endif /*EXTERNALGUI*/
+ INITIALIZE_UTILITY("dasdcat");
 
  /* Display program info message */
  display_version (stderr, "Hercules DASD cat program ", FALSE);

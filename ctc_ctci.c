@@ -8,9 +8,41 @@
 //
 // linux 2.4 modifications (c) Copyright Fritz Elfert, 2001-2007
 //
-// $Id: ctc_ctci.c,v 1.66 2007/06/23 00:04:05 ivan Exp $
+// $Id: ctc_ctci.c,v 1.77 2008/11/04 05:56:31 fish Exp $
 //
 // $Log: ctc_ctci.c,v $
+// Revision 1.77  2008/11/04 05:56:31  fish
+// Put ensure consistent create_thread ATTR usage change back in
+//
+// Revision 1.76  2008/11/03 15:31:57  rbowler
+// Back out consistent create_thread ATTR modification
+//
+// Revision 1.75  2008/10/18 09:32:21  fish
+// Ensure consistent create_thread ATTR usage
+//
+// Revision 1.74  2008/07/17 07:19:12  fish
+// Fix FCS (Frame Check Sequence) bug in LCS_Write function
+// and other minor bugs.
+//
+// Revision 1.72  2008/07/17 03:30:40  fish
+// CTC/LCS cosmetic-only changes -- part 1
+// (no actual functionality was changed!)
+//
+// Revision 1.71  2008/02/07 00:29:04  rbowler
+// Solaris build support by Jeff Savit
+//
+// Revision 1.70  2008/01/11 21:33:21  fish
+// new 'ctc' command to enable/disable debug option on demand
+//
+// Revision 1.69  2007/11/21 22:54:14  fish
+// Use new BEGIN_DEVICE_CLASS_QUERY macro
+//
+// Revision 1.68  2007/07/29 02:02:44  fish
+// Fix day-1 CTCI/LCS bug found by Vince Weaver [vince@deater.net]
+//
+// Revision 1.67  2007/07/29 00:24:43  fish
+// (comment change only)
+//
 // Revision 1.66  2007/06/23 00:04:05  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -19,6 +51,10 @@
 //
 
 #include "hstdinc.h"
+
+/* jbs 10/27/2007 added _SOLARIS_   silly typo fixed 01/18/08 when looked at this again */
+#if !defined(__SOLARIS__)
+
 #include "hercules.h"
 #include "ctcadpt.h"
 #include "tuntap.h"
@@ -201,7 +237,7 @@ int  CTCI_Init( DEVBLK* pDEVBLK, int argc, char *argv[] )
     pDevCTCBLK->pDEVBLK[1]->ctcxmode = 1;
 
     pDevCTCBLK->sMTU                = atoi( pDevCTCBLK->szMTU );
-    pDevCTCBLK->iMaxFrameBufferSize = pDevCTCBLK->sMTU + sizeof( IP4FRM );
+    pDevCTCBLK->iMaxFrameBufferSize = sizeof(pDevCTCBLK->bFrameBuffer);
 
     initialize_lock( &pDevCTCBLK->Lock );
     initialize_lock( &pDevCTCBLK->EventLock );
@@ -322,7 +358,7 @@ int  CTCI_Init( DEVBLK* pDEVBLK, int argc, char *argv[] )
 
     snprintf(thread_name,sizeof(thread_name),"CTCI %4.4X ReadThread",pDEVBLK->devnum);
     thread_name[sizeof(thread_name)-1]=0;
-    create_thread( &pDevCTCBLK->tid, &sysblk.joinattr, CTCI_ReadThread, pDevCTCBLK, thread_name );
+    create_thread( &pDevCTCBLK->tid, JOINABLE, CTCI_ReadThread, pDevCTCBLK, thread_name );
 
     pDevCTCBLK->pDEVBLK[0]->tid = pDevCTCBLK->tid;
     pDevCTCBLK->pDEVBLK[1]->tid = pDevCTCBLK->tid;
@@ -606,9 +642,11 @@ int  CTCI_Close( DEVBLK* pDEVBLK )
 void  CTCI_Query( DEVBLK* pDEVBLK, char** ppszClass,
                   int     iBufLen, char*  pBuffer )
 {
-    PCTCBLK     pCTCBLK  = (PCTCBLK)pDEVBLK->dev_data;
+    CTCBLK*  pCTCBLK;
 
-    *ppszClass = "CTCA";
+    BEGIN_DEVICE_CLASS_QUERY( "CTCA", pDEVBLK, ppszClass, iBufLen, pBuffer );
+
+    pCTCBLK  = (CTCBLK*) pDEVBLK->dev_data;
 
     if(!pCTCBLK)
     {
@@ -616,10 +654,11 @@ void  CTCI_Query( DEVBLK* pDEVBLK, char** ppszClass,
         return;
     }
 
-    snprintf( pBuffer, iBufLen, "CTCI %s/%s (%s)",
+    snprintf( pBuffer, iBufLen, "CTCI %s/%s (%s)%s",
               pCTCBLK->szGuestIPAddr,
               pCTCBLK->szDriveIPAddr,
-              pCTCBLK->szTUNDevName );
+              pCTCBLK->szTUNDevName,
+              pCTCBLK->fDebug ? " -d" : "" );
 }
 
 // -------------------------------------------------------------------
@@ -631,6 +670,9 @@ void  CTCI_Query( DEVBLK* pDEVBLK, char** ppszClass,
 // The residual byte count is set to indicate the amount of the buffer
 // which was not filled.
 //
+// For details regarding the actual buffer layout, please refer to
+// the comments preceding the CTCI_ReadThread function.
+
 // Input:
 //      pDEVBLK   A pointer to the CTC adapter device block
 //      sCount    The I/O buffer length from the read CCW
@@ -708,7 +750,9 @@ void  CTCI_Read( DEVBLK* pDEVBLK,   U16   sCount,
 
         STORE_HW( pFrame->hwOffset, 0x0000 );
 
-        iLength = pCTCBLK->iFrameOffset + sizeof( CTCIHDR ) + 2;
+        // (fix for day-1 bug offered by Vince Weaver [vince@deater.net])
+//      iLength = pCTCBLK->iFrameOffset + sizeof( CTCIHDR ) + 2;
+        iLength = pCTCBLK->iFrameOffset + sizeof( CTCIHDR );
 
         if( sCount < iLength )
         {
@@ -747,6 +791,10 @@ void  CTCI_Read( DEVBLK* pDEVBLK,   U16   sCount,
 // -------------------------------------------------------------------
 // CTCI_Write
 // -------------------------------------------------------------------
+//
+// For details regarding the actual buffer layout, please refer to
+// the comments preceding the CTCI_ReadThread function.
+//
 
 void  CTCI_Write( DEVBLK* pDEVBLK,   U16   sCount,
                   BYTE*   pIOBuf,    BYTE* pUnitStat,
@@ -924,15 +972,31 @@ void  CTCI_Write( DEVBLK* pDEVBLK,   U16   sCount,
 // is enqueued on the device frame buffer.
 //
 // The device frame buffer is a chain of blocks. The first 2 bytes of
-// a block specify the offset in the buffer of the next block. The
-// final block in indicated by an offset of 0x0000.
+// a block (CTCIHDR) specify the offset in the buffer of the next block.
+// The final block in indicated by a CTCIHDR offset value of 0x0000.
 //
-// Within each block, each IP frame is preceeded by a segment header.
-// This segment header has a 2 byte length field that specifies the
-// length of the segment (including the segment header), a 2 byte
-// frame type field (always 0x0800 - IPv4), and a 2 byte reserved area
-// followed by the actual frame data.
+// Within each block, each IP frame is preceeded by a segment header
+// (CTCISEG). This segment header has a 2 byte length field that
+// specifies the length of the segment (including the segment header),
+// a 2 byte frame type field (always 0x0800 = IPv4), and a 2 byte
+// reserved area (always 0000), followed by the actual frame data.
 //
+// The CTCI_ReadThread reads the IP frame, then CTCI_EnqueueIPFrame
+// function is called to add it to the frame buffer (which precedes
+// each one with a CTCISEG and adjusts the block header (CTCIHDR)
+// offset value as appropriate.
+//
+// Oddly, it is the CTCI_Read function (called by CCW processing in
+// response to a guest SIO request) that adds the CTCIHDR with the
+// 000 offset value marking the end of the buffer's chain of blocks,
+// and not the CTCI_EnqueueIPFrame nor the CTCI_ReadThread as would
+// be expected.
+//
+// Also note that the iFrameOffset field in the CTCI device's CTCBLK
+// control block is the offset from the end of the buffer's first
+// CTCIHDR to where the end-of-chain CTCIHDR is, and is identical to
+// all of the queued CTCISEG's hwLength fields added together.
+// 
 
 static void*  CTCI_ReadThread( PCTCBLK pCTCBLK )
 {
@@ -1003,8 +1067,9 @@ static void*  CTCI_ReadThread( PCTCBLK pCTCBLK )
 // CTCI_EnqueueIPFrame
 // --------------------------------------------------------------------
 //
-// Places the provided IP frame in the next available frame
-// slot in the adapter buffer.
+// Places the provided IP frame in the next available frame slot in
+// the adapter buffer. For details regarding the actual buffer layout
+// please refer to the comments preceding the CTCI_ReadThread function.
 //
 // Returns:
 //
@@ -1020,7 +1085,7 @@ static int  CTCI_EnqueueIPFrame( DEVBLK* pDEVBLK,
     PCTCBLK  pCTCBLK = (PCTCBLK)pDEVBLK->dev_data;
 
     // Will frame NEVER fit into buffer??
-    if( iSize > MAX_CTCI_FRAME_SIZE )
+    if( iSize > MAX_CTCI_FRAME_SIZE( pCTCBLK ) )
     {
         errno = EMSGSIZE;   // Message too long
         return -1;          // (-1==failure)
@@ -1029,11 +1094,12 @@ static int  CTCI_EnqueueIPFrame( DEVBLK* pDEVBLK,
     obtain_lock( &pCTCBLK->Lock );
 
     // Ensure we dont overflow the buffer
-    if( ( pCTCBLK->iFrameOffset +       // Current Offset
-          sizeof( CTCIHDR )     +       // Block Header
-          sizeof( CTCISEG )     +       // Segment Header
-          iSize +                       // Current packet
-          2 ) > CTC_FRAME_BUFFER_SIZE ) // Block terminator
+    if( ( pCTCBLK->iFrameOffset +         // Current buffer Offset
+          sizeof( CTCIHDR ) +             // Size of Block Header
+          sizeof( CTCISEG ) +             // Size of Segment Header
+          iSize +                         // Size of Ethernet packet
+          sizeof(pFrame->hwOffset) )      // Size of Block terminator
+        > pCTCBLK->iMaxFrameBufferSize )  // Size of Frame buffer
     {
         release_lock( &pCTCBLK->Lock );
         errno = ENOBUFS;    // No buffer space available
@@ -1052,17 +1118,17 @@ static int  CTCI_EnqueueIPFrame( DEVBLK* pDEVBLK,
     memset( pSegment, 0, iSize + sizeof( CTCISEG ) );
 
     // Increment offset
-    pCTCBLK->iFrameOffset += iSize + sizeof( CTCISEG );
+    pCTCBLK->iFrameOffset += sizeof( CTCISEG ) + iSize;
 
     // Update next frame offset
     STORE_HW( pFrame->hwOffset,
               pCTCBLK->iFrameOffset + sizeof( CTCIHDR ) );
 
     // Store segment length
-    STORE_HW( pSegment->hwLength, iSize + sizeof( CTCISEG ) );
+    STORE_HW( pSegment->hwLength, sizeof( CTCISEG ) + iSize );
 
     // Store Frame type
-    STORE_HW( pSegment->hwType, FRAME_TYPE_IP );
+    STORE_HW( pSegment->hwType, ETH_TYPE_IP );
 
     // Copy data
     memcpy( pSegment->bData, pData, iSize );
@@ -1524,3 +1590,4 @@ static int  ParseArgs( DEVBLK* pDEVBLK, PCTCBLK pCTCBLK,
 
     return 0;
 }
+#endif /* !defined(__SOLARIS__)   jbs */

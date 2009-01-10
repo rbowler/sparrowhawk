@@ -1,7 +1,7 @@
 /* TAPECOPY.C   (c) Copyright Roger Bowler, 1999-2007                */
 /*              Convert SCSI tape into AWSTAPE format                */
 
-// $Id: tapecopy.c,v 1.42 2007/06/23 00:04:17 ivan Exp $
+// $Id: tapecopy.c,v 1.44 2008/11/04 04:50:46 fish Exp $
 
 /*              Read from AWSTAPE and write to SCSI tape mods        */
 /*              Copyright 2005-2007 James R. Maynard III             */
@@ -14,6 +14,14 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: tapecopy.c,v $
+// Revision 1.44  2008/11/04 04:50:46  fish
+// Ensure consistent utility startup
+//
+// Revision 1.43  2008/06/22 05:54:30  fish
+// Fix print-formatting issue (mostly in tape modules)
+// that can sometimes, in certain circumstances,
+// cause herc to crash.  (%8.8lx --> I32_FMTX, etc)
+//
 // Revision 1.42  2007/06/23 00:04:17  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -143,21 +151,21 @@ void delayed_exit (int exit_code)
 /*-------------------------------------------------------------------*/
 static void print_status (char *devname, long stat)
 {
-    printf (_("HHCTC015I %s status: %8.8lX"), devname, stat);
+    char statmsg[128]; statmsg[0]=0;
 
-    if (GMT_EOF    ( stat )) printf (" EOF"    );
-    if (GMT_BOT    ( stat )) printf (" BOT"    );
-    if (GMT_EOT    ( stat )) printf (" EOT"    );
-    if (GMT_SM     ( stat )) printf (" SETMARK");
-    if (GMT_EOD    ( stat )) printf (" EOD"    );
-    if (GMT_WR_PROT( stat )) printf (" WRPROT" );
-    if (GMT_ONLINE ( stat )) printf (" ONLINE" );
-    if (GMT_D_6250 ( stat )) printf (" 6250"   );
-    if (GMT_D_1600 ( stat )) printf (" 1600"   );
-    if (GMT_D_800  ( stat )) printf (" 800"    );
-    if (GMT_DR_OPEN( stat )) printf (" NOTAPE" );
+    if (GMT_EOF    ( stat )) strlcat( statmsg, " EOF",     sizeof(statmsg) );
+    if (GMT_BOT    ( stat )) strlcat( statmsg, " BOT",     sizeof(statmsg) );
+    if (GMT_EOT    ( stat )) strlcat( statmsg, " EOT",     sizeof(statmsg) );
+    if (GMT_SM     ( stat )) strlcat( statmsg, " SETMARK", sizeof(statmsg) );
+    if (GMT_EOD    ( stat )) strlcat( statmsg, " EOD",     sizeof(statmsg) );
+    if (GMT_WR_PROT( stat )) strlcat( statmsg, " WRPROT",  sizeof(statmsg) );
+    if (GMT_ONLINE ( stat )) strlcat( statmsg, " ONLINE",  sizeof(statmsg) );
+    if (GMT_D_6250 ( stat )) strlcat( statmsg, " 6250",    sizeof(statmsg) );
+    if (GMT_D_1600 ( stat )) strlcat( statmsg, " 1600",    sizeof(statmsg) );
+    if (GMT_D_800  ( stat )) strlcat( statmsg, " 800",     sizeof(statmsg) );
+    if (GMT_DR_OPEN( stat )) strlcat( statmsg, " NOTAPE",  sizeof(statmsg) );
 
-    printf ("\n");
+    printf (_("HHCTC015I %s status: "I32_FMTX"%s\n"), devname, stat, statmsg);
 
 } /* end function print_status */
 
@@ -508,23 +516,7 @@ struct mtpos    mtpos;                  /* Area for MTIOCPOS ioctl   */
 int             is3590 = 0;             /* 1 == 3590, 0 == 3480/3490 */
 #endif /*defined(EXTERNALGUI)*/
 
-#if defined(ENABLE_NLS)
-    setlocale(LC_ALL, "");
-    bindtextdomain(PACKAGE, HERC_LOCALEDIR);
-    textdomain(PACKAGE);
-#endif
-
-    set_codepage(NULL);
-
-#ifdef EXTERNALGUI
-    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
-    {
-        extgui = 1;
-        argc--;
-        setvbuf(stderr, NULL, _IONBF, 0);
-        setvbuf(stdout, NULL, _IONBF, 0);
-    }
-#endif /*EXTERNALGUI*/
+    INITIALIZE_UTILITY("tapecopy");
 
    /* Display the program identification message */
     display_version (stderr, "Hercules tape copy program ", FALSE);
@@ -644,7 +636,7 @@ int             is3590 = 0;             /* 1 == 3590, 0 == 3480/3490 */
         printf (_("HHCTC003I %s device type: %s\n"),
             (devnamein ? devnamein : devnameout), tapeinfo[i].t_name);
     else
-        printf (_("HHCTC003I %s device type: 0x%lX\n"),
+        printf (_("HHCTC003I %s device type: 0x%"I32_FMT"X\n"),
             (devnamein ? devnamein : devnameout), mtget.mt_type);
 
     density = (mtget.mt_dsreg & MT_ST_DENSITY_MASK)
@@ -657,7 +649,7 @@ int             is3590 = 0;             /* 1 == 3590, 0 == 3480/3490 */
         printf (_("HHCTC004I %s tape density: %s\n"),
                 (devnamein ? devnamein : devnameout), densinfo[i].t_name);
     else
-        printf (_("HHCTC004I %s tape density code: 0x%lX\n"),
+        printf (_("HHCTC004I %s tape density code: 0x%"I32_FMT"X\n"),
             (devnamein ? devnamein : devnameout), density);
 
     if (mtget.mt_gstat != 0)

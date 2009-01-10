@@ -1,7 +1,7 @@
 /* DIAGNOSE.C   (c) Copyright Roger Bowler, 2000-2007                */
 /*              ESA/390 Diagnose Functions                           */
 
-// $Id: diagnose.c,v 1.47 2007/06/23 00:04:08 ivan Exp $
+// $Id: diagnose.c,v 1.54 2008/12/29 00:00:54 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements miscellaneous diagnose functions           */
@@ -15,6 +15,30 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: diagnose.c,v $
+// Revision 1.54  2008/12/29 00:00:54  ivan
+// Change semantics for DIAG8CMD configuration statement
+// Disable command redisplay at the console when NOECHO is set
+// Commands typed with a '-' as the first character are not redisplayed
+//
+// Revision 1.53  2008/11/04 05:58:01  fish
+// Put ensure consistent create_thread ATTR usage change back in,
+// and put original diag 0x308 re-IPL fix back in too.
+//
+// Revision 1.52  2008/11/03 15:38:03  rbowler
+// Fix Error starting thread in diagnose 0x308: Invalid argument
+//
+// Revision 1.51  2008/11/03 15:31:53  rbowler
+// Back out consistent create_thread ATTR modification
+//
+// Revision 1.50  2008/10/18 09:31:04  fish
+// Fix diag 0x308 re-IPL
+//
+// Revision 1.49  2008/08/04 22:06:00  rbowler
+// DIAG308 function codes for Program-directed re-IPL
+//
+// Revision 1.48  2007/12/10 23:12:02  gsmith
+// Tweaks to OPTION_MIPS_COUNTING processing
+//
 // Revision 1.47  2007/06/23 00:04:08  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -57,6 +81,15 @@
 /*-------------------------------------------------------------------*/
 /* Internal macro definitions                                        */
 /*-------------------------------------------------------------------*/
+
+/* Diagnose 308 function subcodes */
+#define DIAG308_IPL_CLEAR       3       /* IPL clear                 */
+#define DIAG308_IPL_NORMAL      4       /* IPL normal/dump           */
+#define DIAG308_SET_PARAM       5       /* Set IPL parameters        */
+#define DIAG308_STORE_PARAM     6       /* Store IPL parameters      */
+
+/* Diagnose 308 return codes */
+#define DIAG308_RC_OK           1
 
 #endif /*!defined(_DIAGNOSE_H)*/
 
@@ -105,22 +138,21 @@ static char *prefix[] = {
 }
 #endif /*defined(OPTION_DYNAMIC_LOAD)*/
 
-#if defined(FEATURE_DIAG308_REIPL) && !defined(STOP_CPUS_AND_IPL)
+#if defined(FEATURE_PROGRAM_DIRECTED_REIPL) && !defined(STOP_CPUS_AND_IPL)
 #define STOP_CPUS_AND_IPL
 /*---------------------------------------------------------------------------*/
 /* Within diagnose 0x308 (re-ipl) a thread is started with the next code.    */
 /*---------------------------------------------------------------------------*/
-void *stop_cpus_and_ipl(int *whatever)
+void *stop_cpus_and_ipl(int *ipltype)
 {
   int i;
   char iplcmd[256];
   int cpustates;
   int mask;
 
-  UNREFERENCED(whatever);
   panel_command("stopall");
-  logmsg("Diagnose 0x308 called: System is re-ipled\n");
-  sprintf(iplcmd, "ipl %03X", sysblk.ipldev);
+  logmsg("HHCDN001I Diagnose 0x308 called: System is re-ipled\n");
+  sprintf(iplcmd, "%s %03X", ipltype, sysblk.ipldev);
   do
   {
     OBTAIN_INTLOCK(NULL);
@@ -130,7 +162,7 @@ void *stop_cpus_and_ipl(int *whatever)
     {
       if(mask & 1)
       {
-        logmsg("Checking cpu %d\n", i);
+        logmsg("HHCDN002I Checking cpu %d\n", i);
         if(IS_CPU_ONLINE(i) && sysblk.regs[i]->cpustate != CPUSTATE_STOPPED)
           cpustates = sysblk.regs[i]->cpustate;
       }
@@ -139,15 +171,15 @@ void *stop_cpus_and_ipl(int *whatever)
     RELEASE_INTLOCK(NULL);
     if(cpustates != CPUSTATE_STOPPED)
     {
-      logmsg("Waiting 1 second for cpu's to stop...\n");
-      sleep(1);
+      logmsg("HHCDN003I Waiting 1 second for cpu's to stop...\n");
+      SLEEP(1);
     }
   }
   while(cpustates != CPUSTATE_STOPPED);
-  panel_command(iplcmd);  
+  panel_command(iplcmd);
   return NULL;
 }
-#endif /*defined(FEATURE_DIAG308_REIPL)*/
+#endif /*defined(FEATURE_PROGRAM_DIRECTED_REIPL) && !defined(STOP_CPUS_AND_IPL)*/
 
 /*-------------------------------------------------------------------*/
 /* Diagnose instruction                                              */
@@ -185,7 +217,7 @@ U32   code;
         /* If diag8cmd is not enabled then we are not allowed
          * to manipulate the real machine i.e. hercules itself
          */
-        if(!sysblk.diag8cmd)
+        if(!(sysblk.diag8cmd & 0x01))
             ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
 
         /* The poweroff diagnose is only valid on the 9221 */
@@ -280,7 +312,7 @@ U32   code;
         /* If diag8cmd is not enabled then we are not allowed
          * to manipulate the real machine i.e. hercules itself
          */
-        if(!sysblk.diag8cmd)
+        if(!(sysblk.diag8cmd & 0x01))
             ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
 
         /* Process CP command and set condition code */
@@ -432,7 +464,7 @@ U32   code;
         /* If diag8cmd is not enabled then we are not allowed
          * to manipulate the real machine i.e. hercules itself
          */
-        if(!sysblk.diag8cmd)
+        if(!(sysblk.diag8cmd & 0x01))
             ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
 
         sysblk.inststep = 0;
@@ -446,7 +478,7 @@ U32   code;
         /* If diag8cmd is not enabled then we are not allowed
          * to manipulate the real machine i.e. hercules itself
          */
-        if(!sysblk.diag8cmd)
+        if(!(sysblk.diag8cmd & 0x01))
             ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
 
         sysblk.inststep = 1;
@@ -457,7 +489,7 @@ U32   code;
     /*---------------------------------------------------------------*/
     /* Diagnose F08: Hercules get instruction counter                */
     /*---------------------------------------------------------------*/
-        regs->GR_L(r1) = (U32)regs->instcount;
+        regs->GR_L(r1) = (U32)INSTCOUNT(regs);
         break;
 
     case 0xF0C:
@@ -467,7 +499,7 @@ U32   code;
         /* If diag8cmd is not enabled then we are not allowed
          * to manipulate the real machine i.e. hercules itself
          */
-        if(!sysblk.diag8cmd)
+        if(!(sysblk.diag8cmd & 0x01))
             ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
 
         /* Load 4K block address from R2 register */
@@ -496,7 +528,7 @@ U32   code;
         /* If diag8cmd is not enabled then we are not allowed
          * to manipulate the real machine i.e. hercules itself
          */
-        if(!sysblk.diag8cmd)
+        if(!(sysblk.diag8cmd & 0x01))
             ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
 
         regs->cpustate = CPUSTATE_STOPPING;
@@ -560,22 +592,40 @@ U32   code;
 
 #endif /*FEATURE_HERCULES_DIAGCALLS*/
 
-#ifdef FEATURE_DIAG308_REIPL
-    /*---------------------------------------------------------------*/
-    /* Diagnose 308: re-IPL with previous parameters                 */
-    /*---------------------------------------------------------------*/
-    case 0x308:
-        {
-          ATTR attr;
-          TID tid;
 
-          if(create_thread(&tid, &attr, stop_cpus_and_ipl, NULL, "Stop cpus and ipl"))
-            logmsg("Error starting thread in diagnose 0x308: %s\n", strerror(errno));
-          regs->cpustate = CPUSTATE_STOPPING;
-          ON_IC_INTERRUPT(regs);
-        }
+    case 0x308:
+    /*---------------------------------------------------------------*/
+    /* Diagnose 308: IPL functions                                   */
+    /*---------------------------------------------------------------*/
+        switch(r2) {
+#ifdef FEATURE_PROGRAM_DIRECTED_REIPL
+TID   tid;                              /* Thread identifier         */
+char *ipltype;                          /* "ipl" or "iplc"           */
+        case DIAG308_IPL_CLEAR:
+            ipltype = "iplc";
+            goto diag308_cthread;
+        case DIAG308_IPL_NORMAL:
+            ipltype = "ipl";
+        diag308_cthread:
+            if(create_thread(&tid, DETACHED, stop_cpus_and_ipl, ipltype, "Stop cpus and ipl"))
+                logmsg("HHCDN004E Error starting thread in diagnose 0x308: %s\n",
+                        strerror(errno));
+            regs->cpustate = CPUSTATE_STOPPING;
+            ON_IC_INTERRUPT(regs);
+            break;
+        case DIAG308_SET_PARAM:
+            /* INCOMPLETE */
+            regs->GR(1) = DIAG308_RC_OK;
+            break;
+        case DIAG308_STORE_PARAM:
+            /* INCOMPLETE */
+            regs->GR(1) = DIAG308_RC_OK;
+            break;
+#endif /*FEATURE_PROGRAM_DIRECTED_REIPL*/
+        default:
+            ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
+        } /* end switch(r2) */
         break;
-#endif /* FEATURE_DIAG308_REIPL */
 
     default:
     /*---------------------------------------------------------------*/
@@ -605,7 +655,7 @@ U32   code;
             /* If diag8cmd is not enabled then we are not allowed
              * to manipulate the real machine i.e. hercules itself
              */
-        if(!sysblk.diag8cmd)
+        if(!(sysblk.diag8cmd & 0x01))
             ARCH_DEP(program_interrupt)(regs, PGM_SPECIFICATION_EXCEPTION);
 
             regs->cpustate = CPUSTATE_STOPPING;

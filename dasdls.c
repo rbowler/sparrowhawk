@@ -4,9 +4,12 @@
  * Copyright 2000-2007 by Malcolm Beattie
  * Based on code copyright by Roger Bowler, 1999-2007
  *
- * $Id: dasdls.c,v 1.26 2007/06/23 00:04:08 ivan Exp $
+ * $Id: dasdls.c,v 1.27 2008/11/04 04:50:46 fish Exp $
  *
  * $Log: dasdls.c,v $
+ * Revision 1.27  2008/11/04 04:50:46  fish
+ * Ensure consistent utility startup
+ *
  * Revision 1.26  2007/06/23 00:04:08  ivan
  * Update copyright notices to include current year (2007)
  *
@@ -126,15 +129,7 @@ int main(int argc, char **argv)
     int rc = 0;
     char *fn, *sfn;
 
-#ifdef EXTERNALGUI
-    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
-    {
-        extgui = 1;
-        argv[--argc] = 0;
-        setvbuf(stderr, NULL, _IONBF, 0);
-        setvbuf(stdout, NULL, _IONBF, 0);
-    }
-#endif /*EXTERNALGUI*/
+    INITIALIZE_UTILITY("dasdls");
 
     /* Display program info message */
     display_version (stderr, "Hercules DASD list program ", FALSE);

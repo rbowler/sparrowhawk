@@ -5,9 +5,13 @@
 /* files which are not dependent on the mainframe architectural      */
 /* features selected and thus are eligible for precompilation        */
 
-// $Id: hstdinc.h,v 1.15 2007/06/23 00:04:11 ivan Exp $
+// $Id: hstdinc.h,v 1.16 2008/02/19 11:49:19 ivan Exp $
 //
 // $Log: hstdinc.h,v $
+// Revision 1.16  2008/02/19 11:49:19  ivan
+// - Move setting of CPU priority after spwaning timer thread
+// - Added support for Posix 1003.1e capabilities
+//
 // Revision 1.15  2007/06/23 00:04:11  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -231,6 +235,12 @@
 #endif
 #ifdef HAVE_ZLIB_H
   #include <zlib.h>
+#endif
+#ifdef HAVE_SYS_CAPABILITY_H
+  #include <sys/capability.h>
+#endif
+#ifdef HAVE_SYS_PRCTL_H
+  #include <sys/prctl.h>
 #endif
 
 // Some Hercules specific files, NOT guest arch dependent

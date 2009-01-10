@@ -2,7 +2,7 @@
 // SCSITAPE.C   --   Hercules SCSI tape handling module
 //
 // (c) Copyright "Fish" (David B. Trout), 2005-2007. Released under
-// the Q Public License (http://www.conmicro.cx/hercules/herclic.html)
+// the Q Public License (http://www.hercules-390.org/herclic.html)
 // as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 //
@@ -12,9 +12,54 @@
 //
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: scsitape.c,v 1.21 2007/06/23 00:04:15 ivan Exp $
+// $Id: scsitape.c,v 1.33 2008/11/04 05:56:31 fish Exp $
 //
 // $Log: scsitape.c,v $
+// Revision 1.33  2008/11/04 05:56:31  fish
+// Put ensure consistent create_thread ATTR usage change back in
+//
+// Revision 1.32  2008/11/03 15:31:53  rbowler
+// Back out consistent create_thread ATTR modification
+//
+// Revision 1.31  2008/10/18 09:32:21  fish
+// Ensure consistent create_thread ATTR usage
+//
+// Revision 1.30  2008/05/22 21:34:22  fish
+// Attempt to fix my *nix SCSI tape BSR over tapemark bug identified by Bob Schneider [bschneider@pingdata.net]
+//
+// Revision 1.29  2008/03/31 06:36:49  fish
+// (untab)
+//
+// Revision 1.28  2008/03/30 02:51:33  fish
+// Fix SCSI tape EOV (end of volume) processing
+//
+// Revision 1.27  2008/03/29 08:36:46  fish
+// More complete/extensive 3490/3590 tape support
+//
+// Revision 1.26  2008/03/28 02:09:42  fish
+// Add --blkid-24 option support, poserror flag renamed to fenced,
+// added 'generic', 'readblkid' and 'locateblk' tape media handler
+// call vectors.
+//
+// Revision 1.25  2008/03/27 07:14:16  fish
+// SCSI MODS: groundwork: part 3: final shuffling around.
+// Moved functions from one module to another and resequenced
+// functions within each. NO CODE WAS ACTUALLY CHANGED.
+// Next commit will begin the actual changes.
+//
+// Revision 1.24  2008/03/25 11:41:31  fish
+// SCSI TAPE MODS part 1: groundwork: non-functional changes:
+// rename some functions, comments, general restructuring, etc.
+// New source modules awstape.c, omatape.c, hettape.c and
+// tapeccws.c added, but not yet used (all will be used in a future
+// commit though when tapedev.c code is eventually split)
+//
+// Revision 1.23  2007/11/30 14:54:33  jmaynard
+// Changed conmicro.cx to hercules-390.org or conmicro.com, as needed.
+//
+// Revision 1.22  2007/07/24 22:36:33  fish
+// Fix tape Synchronize CCW (x'43') to do actual commit
+//
 // Revision 1.21  2007/06/23 00:04:15  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -23,11 +68,14 @@
 //
 
 #include "hstdinc.h"
-
 #include "hercules.h"
 #include "scsitape.h"
 
 #if defined(OPTION_SCSI_TAPE)
+
+/*-------------------------------------------------------------------*/
+/*                     (Debugging stuff)                             */
+/*-------------------------------------------------------------------*/
 
 //#define  ENABLE_TRACING_STMTS     // (Fish: DEBUGGING)
 
@@ -35,6 +83,7 @@
   #if !defined(DEBUG)
     #warning DEBUG required for ENABLE_TRACING_STMTS
   #endif
+  // (TRACE, ASSERT, and VERIFY macros are #defined in hmacros.h)
 #else
   #undef  TRACE
   #define TRACE       1 ? ((void)0) : logmsg
@@ -44,65 +93,8 @@
   #define VERIFY(a)   ((void)(a))
 #endif
 
-void create_automount_thread( DEVBLK* dev );  // (fwd ref)
-
 // (the following is just a [slightly] shorter name for our own internal use)
 #define SLOW_UPDATE_STATUS_TIMEOUT  MAX_NORMAL_SCSI_DRIVE_QUERY_RESPONSE_TIMEOUT_USECS
-
-/*-------------------------------------------------------------------*/
-/* Tell driver (if needed) what a BOT position looks like...         */
-/*-------------------------------------------------------------------*/
-static
-void define_BOT_pos( DEVBLK *dev )
-{
-#ifdef _MSVC_
-
-    // PROGRAMMING NOTE: Need to tell 'w32stape.c' here the
-    // information it needs to detect physical BOT (load-point).
-
-    // This is not normally needed as most drivers determine
-    // it for themselves based on the type (manufacturer/model)
-    // of tape drive being used, but since I haven't added the
-    // code to 'w32stape.c' to do that yet (involves talking
-    // directly to the SCSI device itself) we thus, for now,
-    // need to pass that information directly to 'w32stape.c'
-    // ourselves...
-
-    U32 msk  = 0xFF3FFFFF;      // (3480/3490 default)
-    U32 bot  = 0x01000000;      // (3480/3490 default)
-
-    if ( dev->stape_blkid_32 )
-    {
-        msk  = 0xFFFFFFFF;      // (3590 default)
-        bot  = 0x00000000;      // (3590 default)
-    }
-
-    VERIFY( 0 == w32_define_BOT( dev->fd, msk, bot ) );
-
-#else
-    UNREFERENCED(dev);
-#endif // _MSVC_
-}
-
-/*-------------------------------------------------------------------*/
-/* shutdown_worker_threads...                                        */
-/*-------------------------------------------------------------------*/
-static void shutdown_worker_threads(DEVBLK *dev)
-{
-    while ( dev->stape_getstat_tid || dev->stape_mountmon_tid )
-    {
-        dev->stape_threads_exit = 1;    // (always each loop)
-        broadcast_condition( &dev->stape_exit_cond );
-        broadcast_condition( &dev->stape_getstat_cond );
-        timed_wait_condition_relative_usecs
-        (
-            &dev->stape_exit_cond,      // ptr to condition to wait on
-            &dev->stape_getstat_lock,   // ptr to controlling lock (must be held!)
-            25000,                      // max #of microseconds to wait
-            NULL                        // ptr to relative tod value (may be NULL)
-        );
-    }
-}
 
 /*-------------------------------------------------------------------*/
 /*                 Open a SCSI tape device                           */
@@ -178,7 +170,7 @@ int rc;
 
     /* Obtain the initial tape device/media status information */
     /* and start the mount-monitoring thread if option enabled */
-    update_status_scsitape( dev, 0 );
+    int_scsi_status_update( dev, 0 );
 
     /* Asynchronous open now in progress? */
     obtain_lock( &dev->stape_getstat_lock );
@@ -235,7 +227,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
     /* Since a tape was just mounted, reset the blockid back to zero */
 
     dev->blockid = 0;
-    dev->poserror = 0;
+    dev->fenced = 0;
 
     /* Set the tape device to process variable length blocks */
 
@@ -259,6 +251,24 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
         return -1; /* (fatal error) */
     }
 
+#if defined( HAVE_DECL_MTEWARN ) && HAVE_DECL_MTEWARN
+
+    // Try to request EOM/EOT (end-of-media/tape) early-warning
+
+    // Note: if it fails, oh well. There's no need to scare the
+    // user with a warning message. We'll either get the warning
+    // or we won't. Either way there's nothing we can do about it.
+    // We did the best we could.
+
+    opblk.mt_op = MTEWARN;
+    opblk.mt_count = dev->eotmargin;
+
+    ioctl_tape (dev->fd, MTIOCTOP, (char*)&opblk);
+
+    // (ignore any error; it either worked or it didn't)
+
+#endif // defined( HAVE_DECL_MTEWARN ) && HAVE_DECL_MTEWARN
+
     return 0;  /* (success) */
 
 } /* end function finish_scsitape_open */
@@ -268,6 +278,8 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
 /*-------------------------------------------------------------------*/
 void close_scsitape(DEVBLK *dev)
 {
+    int rc = 0;
+
     obtain_lock( &dev->stape_getstat_lock );
 
     dev->stape_threads_exit = 1;        // (state our intention)
@@ -282,7 +294,7 @@ void close_scsitape(DEVBLK *dev)
             opblk.mt_op    = MTREW;
             opblk.mt_count = 1;
 
-            if (ioctl_tape ( dev->fd, MTIOCTOP, (char*)&opblk) != 0)
+            if ((rc = ioctl_tape ( dev->fd, MTIOCTOP, (char*)&opblk)) != 0)
             {
                 logmsg (_("HHCTA073W Error rewinding %u:%4.4X=%s; errno=%d: %s\n"),
                         SSID_TO_LCSS(dev->ssid), dev->devnum,
@@ -300,7 +312,6 @@ void close_scsitape(DEVBLK *dev)
         dev->fd        = -1;
         dev->blockid   = -1;
         dev->curfilen  =  0;
-        dev->poserror  =  1;
         dev->nxtblkpos =  0;
         dev->prvblkpos = -1;
     }
@@ -315,6 +326,8 @@ void close_scsitape(DEVBLK *dev)
     dev->stape_getstat_sstat = GMT_DR_OPEN(-1);
     dev->stape_getstat_busy  = 0;
     dev->stape_threads_exit  = 0;
+
+    dev->fenced =  rc >= 0 ? 0 : 1;
 
     release_lock( &dev->stape_getstat_lock );
 
@@ -369,7 +382,7 @@ int  rc;
 /* If error, return value is -1 and unitstat is set to CE+DE+UC      */
 /*-------------------------------------------------------------------*/
 int write_scsitape (DEVBLK *dev, BYTE *buf, U16 len,
-                        BYTE *unitstat,BYTE code)
+                    BYTE *unitstat, BYTE code)
 {
 int  rc;
 int  save_errno;
@@ -378,13 +391,44 @@ int  save_errno;
 
     rc = write_tape (dev->fd, buf, len);
 
+#if defined( _MSVC_ )
+    if (errno == ENOSPC)
+        dev->eotwarning = 1;
+#endif
+
     if (rc >= len)
     {
         dev->blockid++;
         return 0;
     }
 
-    /* Handle write error condition */
+    /*         LINUX EOM BEHAVIOUR WHEN WRITING
+
+      When the end of medium early warning is encountered,
+      the current write is finished and the number of bytes
+      is returned. The next write returns -1 and errno is
+      set to ENOSPC. To enable writing a trailer, the next
+      write is allowed to proceed and, if successful, the
+      number of bytes is returned. After this, -1 and the
+      number of bytes are alternately returned until the
+      physical end of medium (or some other error) occurs.
+    */
+
+    if (errno == ENOSPC)
+    {
+        int_scsi_status_update( dev, 0 );
+
+        rc = write_tape (dev->fd, buf, len);
+
+        if (rc >= len)
+        {
+            dev->eotwarning = 1;
+            dev->blockid++;
+            return 0;
+        }
+    }
+
+    /* Handle write error condition... */
 
     save_errno = errno;
     {
@@ -392,31 +436,23 @@ int  save_errno;
                 SSID_TO_LCSS(dev->ssid), dev->devnum,
                 dev->filename, errno, strerror(errno));
 
-        update_status_scsitape( dev, 0 );
+        int_scsi_status_update( dev, 0 );
     }
     errno = save_errno;
 
     if ( STS_NOT_MOUNTED( dev ) )
-    {
         build_senseX(TAPE_BSENSE_TAPEUNLOADED,dev,unitstat,code);
-    }
     else
     {
-        switch(errno)
+        if (errno == EIO)
         {
-        case EIO:
             if(STS_EOT(dev))
                 build_senseX(TAPE_BSENSE_ENDOFTAPE,dev,unitstat,code);
             else
                 build_senseX(TAPE_BSENSE_WRITEFAIL,dev,unitstat,code);
-            break;
-        case ENOSPC:
-            build_senseX(TAPE_BSENSE_ENDOFTAPE,dev,unitstat,code);
-            break;
-        default:
-            build_senseX(TAPE_BSENSE_ITFERROR,dev,unitstat,code);
-            break;
         }
+        else
+            build_senseX(TAPE_BSENSE_ITFERROR,dev,unitstat,code);
     }
 
     return -1;
@@ -431,27 +467,44 @@ int  save_errno;
 /*-------------------------------------------------------------------*/
 int write_scsimark (DEVBLK *dev, BYTE *unitstat,BYTE code)
 {
-int  rc;
-int  save_errno;
-struct mtop opblk;
+int  rc, save_errno;
 
     /* Write tape mark to SCSI tape */
 
-    opblk.mt_op    = MTWEOF;
-    opblk.mt_count = 1;
+    rc = int_write_scsimark( dev );
 
-    rc = ioctl_tape (dev->fd, MTIOCTOP, (char*)&opblk);
+#if defined( _MSVC_ )
+    if (errno == ENOSPC)
+        dev->eotwarning = 1;
+#endif
 
     if (rc >= 0)
-    {
-        /* Increment current file number since tapemark was written */
-        dev->curfilen++;
-        /* (tapemarks count as block identifiers too!) */
-        dev->blockid++;
         return 0;
+
+    /*         LINUX EOM BEHAVIOUR WHEN WRITING
+
+      When the end of medium early warning is encountered,
+      the current write is finished and the number of bytes
+      is returned. The next write returns -1 and errno is
+      set to ENOSPC. To enable writing a trailer, the next
+      write is allowed to proceed and, if successful, the
+      number of bytes is returned. After this, -1 and the
+      number of bytes are alternately returned until the
+      physical end of medium (or some other error) occurs.
+    */
+
+    if (errno == ENOSPC)
+    {
+        int_scsi_status_update( dev, 0 );
+
+        if (int_write_scsimark( dev ) >= 0)
+        {
+            dev->eotwarning = 1;
+            return 0;
+        }
     }
 
-    /* Handle write error condition */
+    /* Handle write error condition... */
 
     save_errno = errno;
     {
@@ -459,7 +512,7 @@ struct mtop opblk;
                 SSID_TO_LCSS(dev->ssid), dev->devnum,
                 dev->filename, errno, strerror(errno));
 
-        update_status_scsitape( dev, 0 );
+        int_scsi_status_update( dev, 0 );
     }
     errno = save_errno;
 
@@ -491,6 +544,142 @@ struct mtop opblk;
 } /* end function write_scsimark */
 
 /*-------------------------------------------------------------------*/
+/* (internal 'write_scsimark' helper function)                       */
+/*-------------------------------------------------------------------*/
+int int_write_scsimark (DEVBLK *dev)        // (internal function)
+{
+int  rc;
+struct mtop opblk;
+
+    opblk.mt_op    = MTWEOF;
+    opblk.mt_count = 1;
+
+    rc = ioctl_tape (dev->fd, MTIOCTOP, (char*)&opblk);
+
+    if (rc >= 0)
+    {
+        /* Increment current file number since tapemark was written */
+/*      dev->curfilen++; /* (CCW processor handles this automatically
+                             so there's no need for us to do it here) */
+
+        /* (tapemarks count as block identifiers too!) */
+        dev->blockid++;
+    }
+
+    return rc;
+}
+
+/*-------------------------------------------------------------------*/
+/* Synchronize a SCSI tape device   (i.e. commit its data to tape)   */
+/*                                                                   */
+/* If successful, return value is zero.                              */
+/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
+/*-------------------------------------------------------------------*/
+int sync_scsitape (DEVBLK *dev, BYTE *unitstat,BYTE code)
+{
+int  rc;
+int  save_errno;
+struct mtop opblk;
+
+    /*
+        GA32-0566-02 ("IBM Tape Device Drivers - Programming
+        Reference"):
+
+        STIOCQRYPOS
+        
+        "[...] A write filemark of count 0 is always issued to
+         the drive, which flushes all data from the buffers to
+         the tape media. After the write filemark completes, the
+         query is issued."
+
+        Write Tapemark
+
+        "[...] The WriteTapemark entry point may also be called
+         with the dwTapemarkCount parameter set to 0 and the
+         bImmediate parameter set to FALSE. This has the effect
+         of committing any uncommitted data written by previous
+         WriteFile calls ... to the media."
+    */
+
+    opblk.mt_op    = MTWEOF;
+    opblk.mt_count = 0;             // (zero to force a commit)
+
+    if ((rc = ioctl_tape (dev->fd, MTIOCTOP, (char*)&opblk)) >= 0)
+    {
+#if defined( _MSVC_ )
+        if (errno == ENOSPC)
+            dev->eotwarning = 1;
+#endif
+        return 0;       // (success)
+    }
+
+    /*         LINUX EOM BEHAVIOUR WHEN WRITING
+
+      When the end of medium early warning is encountered,
+      the current write is finished and the number of bytes
+      is returned. The next write returns -1 and errno is
+      set to ENOSPC. To enable writing a trailer, the next
+      write is allowed to proceed and, if successful, the
+      number of bytes is returned. After this, -1 and the
+      number of bytes are alternately returned until the
+      physical end of medium (or some other error) occurs.
+    */
+
+    if (errno == ENOSPC)
+    {
+        int_scsi_status_update( dev, 0 );
+
+        opblk.mt_op    = MTWEOF;
+        opblk.mt_count = 0;         // (zero to force a commit)
+
+        if ((rc = ioctl_tape (dev->fd, MTIOCTOP, (char*)&opblk)) >= 0)
+        {
+            dev->eotwarning = 1;
+            return 0;
+        }
+    }
+
+    /* Handle write error condition... */
+
+    save_errno = errno;
+    {
+        logmsg (_("HHCTA089E Synchronize error on "
+            "%u:%4.4X=%s; errno=%d: %s\n"),
+            SSID_TO_LCSS(dev->ssid), dev->devnum,
+            dev->filename, errno, strerror(errno));
+
+        int_scsi_status_update( dev, 0 );
+    }
+    errno = save_errno;
+
+    if ( STS_NOT_MOUNTED( dev ) )
+    {
+        build_senseX(TAPE_BSENSE_TAPEUNLOADED,dev,unitstat,code);
+    }
+    else
+    {
+        switch(errno)
+        {
+        case EIO:
+            if(STS_EOT(dev))
+                build_senseX(TAPE_BSENSE_ENDOFTAPE,dev,unitstat,code);
+            else
+                build_senseX(TAPE_BSENSE_WRITEFAIL,dev,unitstat,code);
+            break;
+        case ENOSPC:
+            build_senseX(TAPE_BSENSE_ENDOFTAPE,dev,unitstat,code);
+            break;
+        default:
+            build_senseX(TAPE_BSENSE_ITFERROR,dev,unitstat,code);
+            break;
+        }
+    }
+
+    return -1;
+
+} /* end function sync_scsitape */
+
+/*-------------------------------------------------------------------*/
 /* Forward space over next block of SCSI tape device                 */
 /*                                                                   */
 /* If successful, return value is +1.                                */
@@ -518,19 +707,19 @@ struct mtop opblk;
         return +1;
     }
 
-    /* Since the MT driver does not set EOF status
-       when forward spacing over a tapemark, the best
-       we can do is to assume that an I/O error means
-       that a tapemark was detected... (in which case
-       we incremnent the file number and return 0).
-    */
+    /* Check for spacing over a tapemark... */
+
     save_errno = errno;
     {
-        update_status_scsitape( dev, 0 );
+        int_scsi_status_update( dev, 0 );
     }
     errno = save_errno;
 
-    if ( EIO == errno && STS_EOF(dev) )
+    // PROGRAMMING NOTE: please see the "Programming Note" in the
+    // 'bsb_scsitape' function regarding usage of the 'EOF' status
+    // to detect spacing over tapemarks.
+
+    if ( EIO == errno && STS_EOF(dev) ) // (fwd-spaced over tapemark?)
     {
         dev->curfilen++;
         dev->blockid++;
@@ -588,6 +777,7 @@ int bsb_scsitape (DEVBLK *dev, BYTE *unitstat,BYTE code)
 int  rc;
 int  save_errno;
 struct mtop opblk;
+struct mtget starting_mtget;
 
     /* PROGRAMMING NOTE: There is currently no way to distinguish
     ** between a "normal" backspace-block error and a "backspaced-
@@ -596,7 +786,7 @@ struct mtop opblk;
     ** 'EIO'. (Interrogating the status AFTER the fact (to see if
     ** we're positioned at loadpoint) doesn't tell us whether we
     ** were already positioned at loadpoint *before* the error was
-    ** was encountered or whether we're only positioned ar load-
+    ** was encountered or whether we're only positioned at load-
     ** point because we *did* in fact backspace over the very first
     ** block on the tape (and are thus now, after the fact, sitting
     ** at loadpoint because we *did* backspace over a block but it
@@ -611,18 +801,21 @@ struct mtop opblk;
     ** an error afterwards.
     */
 
-    /* Obtain tape status before backward space... (no choice!) */
-    update_status_scsitape( dev, 0 );
+    /* Obtain tape status before backward space... */
+    int_scsi_status_update( dev, 0 );
+
+    /* (save the current status before the i/o in case of error) */
+    memcpy( &starting_mtget, &dev->mtget, sizeof( struct mtget ) );
 
     /* Unit check if already at start of tape */
     if ( STS_BOT( dev ) )
     {
+        dev->eotwarning = 0;
         build_senseX(TAPE_BSENSE_LOADPTERR,dev,unitstat,code);
         return -1;
     }
 
     /* Attempt the backspace i/o...*/
-
     opblk.mt_op    = MTBSR;
     opblk.mt_count = 1;
 
@@ -635,28 +828,84 @@ struct mtop opblk;
         return +1;
     }
 
-    /* Since the MT driver does not set EOF status
-       when backspacing over a tapemark, the best
-       we can do is to assume that an I/O error means
-       that a tapemark was detected... (in which case
-       we decrement the file number and return 0).
-    */
+    /* Retrieve new status after the [supposed] i/o error... */
     save_errno = errno;
     {
-        update_status_scsitape( dev, 0 );
+        int_scsi_status_update( dev, 0 );
     }
     errno = save_errno;
 
-    if ( EIO == errno && STS_EOF(dev) )
+    /* Check for backspacing over tapemark... */
+
+    /* PROGRAMMING NOTE: on Windows, our scsi tape driver (w32stape.c)
+    ** sets 'EOF' status whenever a tapemark is spaced over in EITHER
+    ** direction (forward OR backward), whereas *nix operating systems
+    ** do not. They set 'EOF' status only when FORWARD spacing over a
+    ** tapemark but not when BACKSPACING over one.
+    **
+    ** (Apparently the EOF status was actually meant to mean that the
+    ** tape is "PHYSICALLY POSITIONED PAST [physical] eof" (i.e. past
+    ** an "eof marker" (i.e. a tapemark)) and nothing more. That is to
+    ** say, it is apparently NOT meant to mean a tapemark was passed
+    ** over, but rather only that you're "POSITIONED PAST" a tapemark.)
+    **
+    ** Therefore since 'EOF' status will thus *NEVER* be set whenever
+    ** a tapemark is spaced over in the *BACKWARD* direction [on non-
+    ** Windows operating systems], we need some other means of distin-
+    ** guishing between true backspace-block i/o errors and ordinary
+    ** spacing over a tapemark (which is NOT an i/o error but which
+    ** *is* an "out of the ordinary" (unit exception) type of event).
+    **
+    ** Extensive research on this issue has revealed the *ONLY* semi-
+    ** reliable means of distinguishing between them is by checking
+    ** the "file#" and "block#" fields of the status structure after
+    ** the supposed i/o error. If the file# is one less than it was
+    ** before and the block# is -1, then a tapemark was simply spaced
+    ** over. If the file# and block# is anything else however, then
+    ** the originally reported error was a bona-fide i/o error (i.e.
+    ** the original backspace-block (MTBSR) actually *failed*).
+    **
+    ** I say "semi-reliable" because comments seem to indicate that
+    ** the "file#" and "block#" fields of the mtget status structure
+    ** "are not always used". The best that I can tell however, is
+    ** most *nix operating systems *do* seem to maintain them. Thus,
+    ** for now, we're going to rely on their accuracy since without
+    ** them there's really no way whatsoever to distingish between
+    ** a normal backspacing over a tapemark unit exception condition
+    ** and a bona-fide i/o error (other than doing our own SCSI i/o
+    ** of course (which we don't support (yet))). -- Fish, May 2008
+    */
+    if ( EIO == errno )
     {
-        dev->curfilen--;
-        dev->blockid--;
-        /* Return 0 to indicate tapemark was spaced over */
-        return 0;
+#if defined( _MSVC_ )
+
+        /* Windows always sets 'EOF' status whenever a tapemark is
+           spaced over in EITHER direction (forward OR backward) */
+
+        if ( STS_EOF(dev) )     /* (passed over tapemark?) */
+
+#else // !defined( _MSVC_ )
+
+        /* Unix-type systems unfortunately do NOT set 'EOF' whenever
+           backspacing over a tapemark (see PROGRAMMING NOTE above),
+           so we need to check the status struct's file# and block#
+           fields instead... */
+
+        /* (passed over tapemark?) */
+        if (1
+            && dev->mtget.mt_fileno == (starting_mtget.mt_fileno - 1)
+            && dev->mtget.mt_blkno == -1
+        )
+#endif // defined( _MSVC_ )
+        {
+            dev->curfilen--;
+            dev->blockid--;
+            /* Return 0 to indicate tapemark was spaced over */
+            return 0;
+        }
     }
 
-    /* Bona fide backspace block error ... */
-
+    /* Bona fide backspace block i/o error ... */
     save_errno = errno;
     {
         logmsg (_("HHCTA036E Backspace block error on %u:%4.4X=%s; errno=%d: %s\n"),
@@ -670,7 +919,10 @@ struct mtop opblk;
     else
     {
         if ( EIO == errno && STS_BOT(dev) )
+        {
+            dev->eotwarning = 0;
             build_senseX(TAPE_BSENSE_LOADPTERR,dev,unitstat,code);
+        }
         else
             build_senseX(TAPE_BSENSE_LOCATEERR,dev,unitstat,code);
     }
@@ -704,7 +956,6 @@ struct mtop opblk;
        no clue as to what the proper current blockid should be.
     */
     dev->blockid = -1;      // (actual position now unknown!)
-    dev->poserror = 1;      // (actual position now unknown!)
 
     if ( rc >= 0 )
     {
@@ -713,6 +964,8 @@ struct mtop opblk;
     }
 
     /* Handle error condition */
+
+    dev->fenced = 1;        // (actual position now unknown!)
 
     save_errno = errno;
     {
@@ -785,11 +1038,12 @@ struct mtop opblk;
     */
 
     /* Obtain tape status before backward space... (no choice!) */
-    update_status_scsitape( dev, 0 );
+    int_scsi_status_update( dev, 0 );
 
     /* Unit check if already at start of tape */
     if ( STS_BOT( dev ) )
     {
+        dev->eotwarning = 0;
         build_senseX(TAPE_BSENSE_LOADPTERR,dev,unitstat,code);
         return -1;
     }
@@ -806,7 +1060,6 @@ struct mtop opblk;
        no clue as to what the proper current blockid should be.
     */
     dev->blockid = -1;      // (actual position now unknown!)
-    dev->poserror = 1;      // (actual position now unknown!)
 
     if ( rc >= 0 )
     {
@@ -815,6 +1068,8 @@ struct mtop opblk;
     }
 
     /* Handle error condition */
+
+    dev->fenced = 1;        // (actual position now unknown!)
 
     save_errno = errno;
     {
@@ -829,7 +1084,10 @@ struct mtop opblk;
     else
     {
         if ( EIO == errno && STS_BOT(dev) )
+        {
+            dev->eotwarning = 0;
             build_senseX(TAPE_BSENSE_LOADPTERR,dev,unitstat,code);
+        }
         else
             build_senseX(TAPE_BSENSE_LOCATEERR,dev,unitstat,code);
     }
@@ -858,11 +1116,11 @@ struct mtop opblk;
         dev->sstat |= GMT_BOT( -1 );  // (forced)
         dev->blockid = 0;
         dev->curfilen = 0;
-        dev->poserror = 0;
+        dev->fenced = 0;
         return 0;
     }
 
-    dev->poserror = 1;      // (because the rewind failed)
+    dev->fenced = 1;        // (because the rewind failed)
     dev->blockid  = -1;     // (because the rewind failed)
     dev->curfilen = -1;     // (because the rewind failed)
 
@@ -882,7 +1140,7 @@ struct mtop opblk;
 /*-------------------------------------------------------------------*/
 /* Rewind Unload a SCSI tape device (and CLOSE it too!)              */
 /*-------------------------------------------------------------------*/
-void rewind_unload_scsitape(DEVBLK *dev, BYTE *unitstat, BYTE code )
+void int_scsi_rewind_unload(DEVBLK *dev, BYTE *unitstat, BYTE code )
 {
 int rc;
 struct mtop opblk;
@@ -895,6 +1153,8 @@ struct mtop opblk;
 
     if ( rc >= 0 )
     {
+        dev->fenced = 0;
+
         if ( dev->ccwtrace || dev->ccwstep )
             logmsg (_("HHCTA077I Tape %u:%4.4X unloaded\n"),
                 SSID_TO_LCSS(dev->ssid), dev->devnum);
@@ -908,7 +1168,7 @@ struct mtop opblk;
         return;
     }
 
-    dev->poserror = 1;  // (because the rewind-unload failed)
+    dev->fenced = 1;    // (because the rewind-unload failed)
     dev->curfilen = -1; // (because the rewind-unload failed)
     dev->blockid  = -1; // (because the rewind-unload failed)
 
@@ -921,7 +1181,7 @@ struct mtop opblk;
     else
         build_senseX(TAPE_BSENSE_REWINDFAILED,dev,unitstat,code);
 
-} /* end function rewind_unload_scsitape */
+} /* end function int_scsi_rewind_unload */
 
 /*-------------------------------------------------------------------*/
 /* Erase Gap                                                         */
@@ -929,6 +1189,7 @@ struct mtop opblk;
 int erg_scsitape( DEVBLK *dev, BYTE *unitstat, BYTE code )
 {
 #if defined( OPTION_SCSI_ERASE_GAP )
+int rc;
 
     if (!dev->stape_no_erg)
     {
@@ -937,19 +1198,60 @@ int erg_scsitape( DEVBLK *dev, BYTE *unitstat, BYTE code )
         opblk.mt_op    = MTERASE;
         opblk.mt_count = 0;         // (zero means "short" erase-gap)
     
-        if ( ioctl_tape( dev->fd, MTIOCTOP, (char*)&opblk ) < 0 )
+        rc = ioctl_tape( dev->fd, MTIOCTOP, (char*)&opblk );
+
+#if defined( _MSVC_ )
+        if (errno == ENOSPC)
+            dev->eotwarning = 1;
+#endif
+
+        if ( rc < 0 )
         {
-            logmsg (_("HHCTA999E Erase Gap error on %u:%4.4X=%s; errno=%d: %s\n"),
-                    SSID_TO_LCSS(dev->ssid), dev->devnum,
-                    dev->filename, errno, strerror(errno));
-            build_senseX(TAPE_BSENSE_WRITEFAIL,dev,unitstat,code);
-            return -1;
+            /*         LINUX EOM BEHAVIOUR WHEN WRITING
+
+              When the end of medium early warning is encountered,
+              the current write is finished and the number of bytes
+              is returned. The next write returns -1 and errno is
+              set to ENOSPC. To enable writing a trailer, the next
+              write is allowed to proceed and, if successful, the
+              number of bytes is returned. After this, -1 and the
+              number of bytes are alternately returned until the
+              physical end of medium (or some other error) occurs.
+            */
+
+            if (errno == ENOSPC)
+            {
+                int_scsi_status_update( dev, 0 );
+
+                opblk.mt_op    = MTERASE;
+                opblk.mt_count = 0;         // (zero means "short" erase-gap)
+            
+                if ( (rc = ioctl_tape( dev->fd, MTIOCTOP, (char*)&opblk )) >= 0 )
+                    dev->eotwarning = 1;
+            }
+
+            if ( rc < 0)
+            {
+                logmsg (_("HHCTA999E Erase Gap error on %u:%4.4X=%s; errno=%d: %s\n"),
+                        SSID_TO_LCSS(dev->ssid), dev->devnum,
+                        dev->filename, errno, strerror(errno));
+                build_senseX(TAPE_BSENSE_WRITEFAIL,dev,unitstat,code);
+                return -1;
+            }
         }
     }
-#endif // defined( OPTION_SCSI_ERASE_GAP )
 
-    build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
+    return 0;       // (success)
+
+#else // !defined( OPTION_SCSI_ERASE_GAP )
+
+    UNREFERENCED ( dev );
+    UNREFERENCED ( code );
+    UNREFERENCED ( unitstat );
+
     return 0;       // (treat as nop)
+
+#endif // defined( OPTION_SCSI_ERASE_GAP )
 
 } /* end function erg_scsitape */
 
@@ -973,69 +1275,362 @@ int dse_scsitape( DEVBLK *dev, BYTE *unitstat, BYTE code )
         build_senseX(TAPE_BSENSE_WRITEFAIL,dev,unitstat,code);
         return -1;
     }
-#endif // defined( OPTION_SCSI_ERASE_TAPE )
 
-    build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
+    return 0;       // (success)
+
+#else // !defined( OPTION_SCSI_ERASE_TAPE )
+
+    UNREFERENCED ( dev );
+    UNREFERENCED ( code );
+    UNREFERENCED ( unitstat );
+
     return 0;       // (treat as nop)
+
+#endif // defined( OPTION_SCSI_ERASE_TAPE )
 
 } /* end function dse_scsitape */
 
 /*-------------------------------------------------------------------*/
-/* Determine if the tape is Ready   (tape drive door status)         */
-/* Returns:  true/false:  1 = ready,   0 = NOT ready                 */
+/*                   readblkid_scsitape                              */
 /*-------------------------------------------------------------------*/
-int is_tape_mounted_scsitape( DEVBLK *dev, BYTE *unitstat, BYTE code )
+/* Output values are returned in BIG-ENDIAN guest format...          */
+/*-------------------------------------------------------------------*/
+int readblkid_scsitape ( DEVBLK* dev, BYTE* logical, BYTE* physical )
 {
-    UNREFERENCED(unitstat);
-    UNREFERENCED(code);
+    // ZZ FIXME: The two blockid fields that READ BLOCK ID
+    // are returning are the "Channel block ID" and "Device
+    // block ID" fields, which correspond directly to the
+    // SCSI "First block location" and "Last block location"
+    // fields (as returned by a READ POSITION scsi command),
+    // so we really SHOULD be doing our own direct scsi i/o
+    // for ourselves so we can retrieve BOTH of those values
+    // directly from the real/actual physical device itself,
+    // but until we can add code to Herc to do that, we must
+    // return the same value for each since ioctl(MTIOCPOS)
+    // only returns us one value (the logical position) and
+    // not both that we really prefer...
 
-    /* Update tape mounted status */
-    update_status_scsitape( dev, 1 );
+    // (And for the record, we want the "Channel block ID"
+    // value, also known as the SCSI "First block location"
+    // value, also known as the >>LOGICAL<< value and *NOT*
+    // the absolute/physical device-relative value)
 
-    return ( !STS_NOT_MOUNTED( dev ) );
-} /* end function driveready_scsitape */
+    struct  mtpos  mtpos;
+    BYTE    blockid[4];
+
+    if (ioctl_tape( dev->fd, MTIOCPOS, (char*) &mtpos ) < 0 )
+    {
+        /* Informative ERROR message if tracing */
+
+        int save_errno = errno;
+        {
+            if ( dev->ccwtrace || dev->ccwstep )
+                logmsg(_("HHCTA082W ioctl_tape(MTIOCPOS=MTTELL) failed on %4.4X = %s: %s\n")
+                    ,dev->devnum
+                    ,dev->filename
+                    ,strerror(errno)
+                    );
+        }
+        errno = save_errno;
+
+        return  -1;     // (errno should already be set)
+    }
+
+    // Convert MTIOCPOS value to guest BIG-ENDIAN format...
+
+    mtpos.mt_blkno = CSWAP32( mtpos.mt_blkno );     // (guest <- host)
+
+    // Handle emulated vs. physical tape-device block-id format issue...
+
+    blockid_actual_to_emulated( dev, (BYTE*)&mtpos.mt_blkno, blockid );
+
+    // Until we can add code to Herc to do direct SCSI i/o (so that
+    // we can retrieve BOTH values directly from the device itself),
+    // we have no choice but to return the same value for each since
+    // the ioctl(MTIOCPOS) call only returns the logical value and
+    // not also the physical value that we wish it would...
+
+    if (logical)  memcpy( logical,  &blockid[0], 4 );
+    if (physical) memcpy( physical, &blockid[0], 4 );
+
+    return 0;       // (success)
+
+} /* end function readblkid_scsitape */
 
 /*-------------------------------------------------------------------*/
-/* Force a manual status refresh/update      (DANGEROUS!)            */
+/*                    locateblk_scsitape                             */
 /*-------------------------------------------------------------------*/
-int force_status_update( DEVBLK *dev )
+/* Input value is passed in little-endian host format...             */
+/*-------------------------------------------------------------------*/
+int locateblk_scsitape ( DEVBLK* dev, U32 blockid, BYTE *unitstat, BYTE code )
 {
-    //                  * *  WARNING!  * *
+    int rc;
+    struct mtop  mtop;
 
-    // PROGRAMMING NOTE: do NOT call this function indiscriminately,
-    // as doing so COULD cause improper functioning of the guest o/s!
+    UNREFERENCED( unitstat );                   // (not used)
+    UNREFERENCED(   code   );                   // (not used)
 
-    // How? Simple: if there's already a tape job running on the guest
-    // using the tape drive and we just so happen to request a status
-    // update at the precise moment a guest i/o encounters a tapemark,
-    // it's possible for US to receive the "tapemark" status and thus
-    // cause the guest to end up NOT SEEING the tapemark! Therefore,
-    // you should ONLY call this function whenever the current status
-    // indicates there's no tape mounted. If the current status says
-    // there *is* a tape mounted, you must NOT call this function!
+    // Convert the passed host-format blockid value into the proper
+    // 32-bit vs. 22-bit guest-format the physical device expects ...
 
-    // If the current status says there's a tape mounted and the user
-    // knows this to be untrue (e.g. they manually unloaded it maybe)
-    // then to kick off the auto-scsi-mount thread they must manually
-    // issue the 'devinit' command themselves. We CANNOT presume that
-    // a "mounted" status is bogus. We can ONLY safely presume that a
-    // "UNmounted" status may possibly be bogus. Thus we only ask for
-    // a status refresh if the current status is "not mounted" but we
-    // purposely do NOT force a refresh if the status is "mounted"!!
+    blockid = CSWAP32( blockid );               // (guest <- host)
 
-    if ( STS_NOT_MOUNTED( dev ) )           // (if no tape mounted)
-        update_status_scsitape( dev, 0 );   // (then probably safe)
+    blockid_emulated_to_actual( dev, (BYTE*)&blockid, (BYTE*)&mtop.mt_count );
 
-    return 0;
-} /* end function force_status_update */
+    mtop.mt_count = CSWAP32( mtop.mt_count );   // (host <- guest)
+    mtop.mt_op    = MTSEEK;
+
+    // Ask the actual hardware to do an actual physical locate...
+
+    if ((rc = ioctl_tape( dev->fd, MTIOCTOP, (char*)&mtop )) < 0)
+    {
+        int save_errno = errno;
+        {
+            if ( dev->ccwtrace || dev->ccwstep )
+                logmsg(_("HHCTA083W ioctl_tape(MTIOCTOP=MTSEEK) failed on %4.4X = %s: %s\n")
+                    ,dev->devnum
+                    ,dev->filename
+                    ,strerror(errno)
+                    );
+        }
+        errno = save_errno;
+    }
+
+    return rc;
+}
+
+/*********************************************************************/
+/**                                                                 **/
+/**                BLOCK-ID ADJUSTMENT FUNCTIONS                    **/
+/**                                                                 **/
+/*********************************************************************/
+/*
+    The following conversion functions compensate for the fact that
+    the emulated device type might actually be completely different
+    from the actual real [SCSI] device being used for the emulation.
+
+    That is to say, the actual SCSI device being used may actually
+    be a 3590 type device but is defined in Hercules as a 3480 (or
+    vice-versa). Thus while the device actually behaves as a 3590,
+    we need to emulate 3480 functionality instead (and vice-versa).
+
+    For 3480/3490 devices, the block ID has the following format:
+
+     __________ ________________________________________________
+    | Bit      | Description                                    |
+    |__________|________________________________________________|
+    | 0        | Direction Bit                                  |
+    |          |                                                |
+    |          | 0      Wrap 1                                  |
+    |          | 1      Wrap 2                                  |
+    |__________|________________________________________________|
+    | 1-7      | Segment Number                                 |
+    |__________|________________________________________________|
+    | 8-9      | Format Mode                                    |
+    |          |                                                |
+    |          | 00     3480 format                             |
+    |          | 01     3480-2 XF format                        |
+    |          | 10     3480 XF format                          |
+    |          | 11     Reserved                                |
+    |          |                                                |
+    |          | Note:  The 3480 format does not support IDRC.  |
+    |__________|________________________________________________|
+    | 10-31    | Logical Block Number                           |
+    |__________|________________________________________________|
+
+    For 3480's and 3490's, first block recorded on the tape has
+    a block ID value of X'01000000', whereas for 3590 devices the
+    block ID is a full 32 bits and the first block on the tape is
+    block ID x'00000000'.
+
+    For the 32-bit to 22-bit (and vice versa) conversion, we're
+    relying on (hoping really!) that an actual 32-bit block-id value
+    will never actually exceed 30 bits (1-bit wrap + 7-bit segment#
+    + 22-bit block-id) since we perform the conversion by simply
+    splitting the low-order 30 bits of a 32-bit block-id into a sep-
+    arate 8-bit (wrap and segment#) and 22-bit (block-id) fields,
+    and then shifting them into their appropriate position (and of
+    course combining/appending them for the opposite conversion).
+
+    As such, this of course implies that we are thus treating the
+    wrap bit and 7-bit segment number values of a 3480/3490 "22-bit
+    format" blockid as simply the high-order 8 bits of an actual
+    30-bit physical blockid (which may or may not work properly on
+    actual SCSI hardware depending on how[*] it handles inaccurate
+    blockid values).
+
+
+    -----------------
+
+ [*]  Most(?) [SCSI] devices treat the blockid value used in a
+    Locate CCW as simply an "approximate location" of where the
+    block in question actually resides on the physical tape, and
+    will, after positioning itself to the *approximate* physical
+    location of where the block is *believed* to reside, proceed
+    to then perform the final positioning at low-speed based on
+    its reading of its actual internally-recorded blockid values.
+
+    Thus, even when the supplied Locate block-id value is wrong,
+    the Locate should still succeed, albeit less efficiently since
+    it may be starting at a physical position quite distant from
+    where the actual block is actually physically located on the
+    actual media.
+*/
 
 /*-------------------------------------------------------------------*/
+/*                  blockid_emulated_to_actual                       */
+/*-------------------------------------------------------------------*/
+/* Locate CCW helper: convert guest-supplied 3480 or 3590 blockid    */
+/*                    to the actual SCSI hardware blockid format     */
+/* Both I/P AND O/P are presumed to be in BIG-ENDIAN guest format    */
+/*-------------------------------------------------------------------*/
+void blockid_emulated_to_actual
+(
+    DEVBLK  *dev,           // ptr to Hercules device
+    BYTE    *emu_blkid,     // ptr to i/p 4-byte block-id in guest storage
+    BYTE    *act_blkid      // ptr to o/p 4-byte block-id for actual SCSI i/o
+)
+{
+    if ( TAPEDEVT_SCSITAPE != dev->tapedevt )
+    {
+        memcpy( act_blkid, emu_blkid, 4 );
+        return;
+    }
+
+#if defined(OPTION_SCSI_TAPE)
+    if (0x3590 == dev->devtype)
+    {
+        // 3590 being emulated; guest block-id is full 32-bits...
+
+        if (dev->stape_blkid_32)
+        {
+            // SCSI using full 32-bit block-ids too. Just copy as-is...
+
+            memcpy( act_blkid, emu_blkid, 4 );
+        }
+        else
+        {
+            // SCSI using 22-bit block-ids. Use low-order 30 bits
+            // of 32-bit guest-supplied blockid and convert it
+            // into a "22-bit format" blockid value for SCSI...
+
+            blockid_32_to_22 ( emu_blkid, act_blkid );
+        }
+    }
+    else // non-3590 being emulated; guest block-id is 22-bits...
+    {
+        if (dev->stape_blkid_32)
+        {
+            // SCSI using full 32-bit block-ids. Extract the wrap,
+            // segment# and 22-bit blockid bits from the "22-bit
+            // format" guest-supplied blockid value and combine
+            // (append) them into a contiguous low-order 30 bits
+            // of a 32-bit blockid value for SCSI to use...
+
+            blockid_22_to_32 ( emu_blkid, act_blkid );
+        }
+        else
+        {
+            // SCSI using 22-bit block-ids too. Just copy as-is...
+
+            memcpy( act_blkid, emu_blkid, 4 );
+        }
+    }
+#endif /* defined(OPTION_SCSI_TAPE) */
+
+} /* end function blockid_emulated_to_actual */
+
+/*-------------------------------------------------------------------*/
+/*                  blockid_actual_to_emulated                       */
+/*-------------------------------------------------------------------*/
+/* Read Block Id CCW helper:  convert an actual SCSI block-id        */
+/*                            to guest emulated 3480/3590 format     */
+/* Both i/p and o/p are presumed to be in big-endian guest format    */
+/*-------------------------------------------------------------------*/
+void blockid_actual_to_emulated
+(
+    DEVBLK  *dev,           // ptr to Hercules device (for 'devtype')
+    BYTE    *act_blkid,     // ptr to i/p 4-byte block-id from actual SCSI i/o
+    BYTE    *emu_blkid      // ptr to o/p 4-byte block-id in guest storage
+)
+{
+    if ( TAPEDEVT_SCSITAPE != dev->tapedevt )
+    {
+        memcpy( emu_blkid, act_blkid, 4 );
+        return;
+    }
+
+#if defined(OPTION_SCSI_TAPE)
+    if (dev->stape_blkid_32)
+    {
+        // SCSI using full 32-bit block-ids...
+        if (0x3590 == dev->devtype)
+        {
+            // Emulated device is a 3590 too. Just copy as-is...
+            memcpy( emu_blkid, act_blkid, 4 );
+        }
+        else
+        {
+            // Emulated device using 22-bit format. Convert...
+            blockid_32_to_22 ( act_blkid, emu_blkid );
+        }
+    }
+    else
+    {
+        // SCSI using 22-bit format block-ids...
+        if (0x3590 == dev->devtype)
+        {
+            // Emulated device using full 32-bit format. Convert...
+            blockid_22_to_32 ( act_blkid, emu_blkid );
+        }
+        else
+        {
+            // Emulated device using 22-bit format too. Just copy as-is...
+            memcpy( emu_blkid, act_blkid, 4 );
+        }
+    }
+#endif /* defined(OPTION_SCSI_TAPE) */
+
+} /* end function blockid_actual_to_emulated */
+
+/*-------------------------------------------------------------------*/
+/*                     blockid_32_to_22                              */
+/*-------------------------------------------------------------------*/
+/* Convert a 3590 32-bit blockid into 3480 "22-bit format" blockid   */
+/* Both i/p and o/p are presumed to be in big-endian guest format    */
+/*-------------------------------------------------------------------*/
+void blockid_32_to_22 ( BYTE *in_32blkid, BYTE *out_22blkid )
+{
+    out_22blkid[0] = ((in_32blkid[0] << 2) & 0xFC) | ((in_32blkid[1] >> 6) & 0x03);
+    out_22blkid[1] = in_32blkid[1] & 0x3F;
+    out_22blkid[2] = in_32blkid[2];
+    out_22blkid[3] = in_32blkid[3];
+}
+
+/*-------------------------------------------------------------------*/
+/*                     blockid_22_to_32                              */
+/*-------------------------------------------------------------------*/
+/* Convert a 3480 "22-bit format" blockid into a 3590 32-bit blockid */
+/* Both i/p and o/p are presumed to be in big-endian guest format    */
+/*-------------------------------------------------------------------*/
+void blockid_22_to_32 ( BYTE *in_22blkid, BYTE *out_32blkid )
+{
+    out_32blkid[0] = (in_22blkid[0] >> 2) & 0x3F;
+    out_32blkid[1] = ((in_22blkid[0] << 6) & 0xC0) | (in_22blkid[1] & 0x3F);
+    out_32blkid[2] = in_22blkid[2];
+    out_32blkid[3] = in_22blkid[3];
+}
+
+/*********************************************************************/
+/**                                                                 **/
+/**           INTERNAL STATUS & AUTOMOUNT FUNCTIONS                 **/
+/**                                                                 **/
+/*********************************************************************/
+
 /* Forward references...                                             */
-/*-------------------------------------------------------------------*/
-extern void  update_status_scsitape   ( DEVBLK* dev, int mountstat_only );
+extern void  int_scsi_status_update   ( DEVBLK* dev, int mountstat_only );
 static void  scsi_get_status_fast     ( DEVBLK* dev );
 static void* get_stape_status_thread  ( void*   db  );
-extern void  kill_stape_status_thread ( DEVBLK* dev );
 
 /*-------------------------------------------------------------------*/
 /* get_stape_status_thread                                           */
@@ -1049,7 +1644,6 @@ void* get_stape_status_thread( void *db )
 
     struct timeval beg_tod;
     struct timeval end_tod;
-    struct timeval diff_tod;
 
     // PROGRAMMING NOTE: it is EXTREMELY IMPORTANT that the status-
     // retrieval thread (i.e. ourselves) be set to a priority that
@@ -1168,9 +1762,16 @@ void* get_stape_status_thread( void *db )
             break;
 
         if ( 0 == rc )
-            dev->stape_getstat_sstat = mtget.mt_gstat;
+        {
+            memcpy( &dev->stape_getstat_mtget, &mtget, sizeof( struct mtget ) );
+        }
         else
-            dev->stape_getstat_sstat = GMT_DR_OPEN(-1);     // (presumed and forced)
+        {
+            memset( &dev->stape_getstat_mtget, 0, sizeof( struct mtget ) );
+            dev->stape_getstat_mtget.mt_blkno  = -1;      // (forced)
+            dev->stape_getstat_mtget.mt_fileno = -1;      // (forced)
+            dev->stape_getstat_sstat = GMT_DR_OPEN(-1);   // (presumed and forced)
+        }
 
         // Notify requestors new updated status is available
         // and go back to sleep to wait for the next request...
@@ -1190,9 +1791,6 @@ void* get_stape_status_thread( void *db )
         broadcast_condition( &dev->stape_getstat_cond );    // (new status available)
 
         {
-            VERIFY(0 == timeval_subtract( &beg_tod, &end_tod, &diff_tod ) );
-            PTT("stat query", (diff_tod.tv_sec * 1000) + ((diff_tod.tv_usec + 500) / 1000), 0, 0);
-
             dev->stape_getstat_query_tod.tv_sec  = end_tod.tv_sec;
             dev->stape_getstat_query_tod.tv_usec = end_tod.tv_usec;
         }
@@ -1237,7 +1835,7 @@ void scsi_get_status_fast( DEVBLK* dev )
             create_thread
             (
                 &dev->stape_getstat_tid,
-                &sysblk.joinattr,
+                JOINABLE,
                 get_stape_status_thread,
                 dev,
                 "get_stape_status_thread"
@@ -1267,11 +1865,14 @@ void scsi_get_status_fast( DEVBLK* dev )
         // Timeout (status retrieval took too long).
         // We therefore presume no tape is mounted.
 
+        memset( &dev->mtget, 0, sizeof( struct mtget ) );
+        dev->mtget.mt_blkno  = -1;      // (forced)
+        dev->mtget.mt_fileno = -1;      // (forced)
         dev->sstat = GMT_DR_OPEN(-1);   // (presumed and forced)
     }
     else // Request finished in time...
     {
-        dev->sstat = dev->stape_getstat_sstat;
+        memcpy( &dev->mtget, &dev->stape_getstat_mtget, sizeof( struct mtget ) );
     }
 
     release_lock( &dev->stape_getstat_lock );
@@ -1279,9 +1880,66 @@ void scsi_get_status_fast( DEVBLK* dev )
 } /* end function scsi_get_status_fast */
 
 /*-------------------------------------------------------------------*/
+/* Check if a SCSI tape is positioned past the EOT reflector or not  */
+/*-------------------------------------------------------------------*/
+int passedeot_scsitape( DEVBLK *dev )
+{
+    return dev->eotwarning;     // (1==past EOT reflector; 0==not)
+}
+
+/*-------------------------------------------------------------------*/
+/* Determine if the tape is Ready   (tape drive door status)         */
+/* Returns:  true/false:  1 = ready,   0 = NOT ready                 */
+/*-------------------------------------------------------------------*/
+int is_tape_mounted_scsitape( DEVBLK *dev, BYTE *unitstat, BYTE code )
+{
+    UNREFERENCED(unitstat);
+    UNREFERENCED(code);
+
+    /* Update tape mounted status */
+    int_scsi_status_update( dev, 1 );   // (safe/fast internal call)
+
+    return ( !STS_NOT_MOUNTED( dev ) );
+} /* end function driveready_scsitape */
+
+/*-------------------------------------------------------------------*/
+/* Force a manual status refresh/update      (DANGEROUS!)            */
+/*-------------------------------------------------------------------*/
+int update_status_scsitape( DEVBLK *dev )   // (external tmh call)
+{
+    //                  * *  WARNING!  * *
+
+    // PROGRAMMING NOTE: do NOT call this function indiscriminately,
+    // as doing so COULD cause improper functioning of the guest o/s!
+
+    // How? Simple: if there's already a tape job running on the guest
+    // using the tape drive and we just so happen to request a status
+    // update at the precise moment a guest i/o encounters a tapemark,
+    // it's possible for US to receive the "tapemark" status and thus
+    // cause the guest to end up NOT SEEING the tapemark! Therefore,
+    // you should ONLY call this function whenever the current status
+    // indicates there's no tape mounted. If the current status says
+    // there *is* a tape mounted, you must NOT call this function!
+
+    // If the current status says there's a tape mounted and the user
+    // knows this to be untrue (e.g. they manually unloaded it maybe)
+    // then to kick off the auto-scsi-mount thread they must manually
+    // issue the 'devinit' command themselves. We CANNOT presume that
+    // a "mounted" status is bogus. We can ONLY safely presume that a
+    // "UNmounted" status may possibly be bogus. Thus we only ask for
+    // a status refresh if the current status is "not mounted" but we
+    // purposely do NOT force a refresh if the status is "mounted"!!
+
+    if ( STS_NOT_MOUNTED( dev ) )           // (if no tape mounted)
+        int_scsi_status_update( dev, 0 );   // (then probably safe)
+
+    return 0;
+} /* end function update_status_scsitape */
+
+/*-------------------------------------------------------------------*/
 /* Update SCSI tape status (and display it if CCW tracing is active) */
 /*-------------------------------------------------------------------*/
-void update_status_scsitape( DEVBLK* dev, int mountstat_only )
+void int_scsi_status_update( DEVBLK* dev, int mountstat_only ) // (internal call)
 {
     create_automount_thread( dev );     // (only if needed of course)
 
@@ -1350,15 +2008,18 @@ void update_status_scsitape( DEVBLK* dev, int mountstat_only )
         if ( STS_EOD     (dev) ) strlcat ( buf, " END-OF-DATA"  , sizeof(buf) );
         if ( STS_WR_PROT (dev) ) strlcat ( buf, " WRITE-PROTECT", sizeof(buf) );
 
+        if ( STS_BOT(dev) )
+            dev->eotwarning = 0;
+
         logmsg ( _("HHCTA023I %s\n"), buf );
     }
 
-} /* end function update_status_scsitape */
+} /* end function int_scsi_status_update */
 
 /*-------------------------------------------------------------------*/
 /*                  ASYNCHRONOUS TAPE OPEN                           */
 /* SCSI tape tape-mount monitoring thread (monitors for tape mounts) */
-/* Auto-started by 'update_status_scsitape' when it notices there is */
+/* Auto-started by 'int_scsi_status_update' when it notices there is */
 /* no tape mounted on whatever device it's checking the status of,   */
 /* or by the ReqAutoMount function for unsatisfied mount requests.   */
 /*-------------------------------------------------------------------*/
@@ -1385,7 +2046,7 @@ void create_automount_thread( DEVBLK* dev )
             create_thread
             (
                 &dev->stape_mountmon_tid,
-                &sysblk.detattr,
+                DETACHED,
                 scsi_tapemountmon_thread,
                 dev,
                 "scsi_tapemountmon_thread"
@@ -1397,6 +2058,8 @@ void create_automount_thread( DEVBLK* dev )
     release_lock( &dev->stape_getstat_lock );
 }
 
+/*-------------------------------------------------------------------*/
+/*                  ASYNCHRONOUS TAPE OPEN                           */
 /*-------------------------------------------------------------------*/
 /* AUTO_SCSI_MOUNT thread...                                         */
 /*-------------------------------------------------------------------*/
@@ -1456,7 +2119,7 @@ void *scsi_tapemountmon_thread( void *db )
 
         // Retrieve the current status...
 
-        update_status_scsitape( dev, 0 );
+        int_scsi_status_update( dev, 0 );
 
         obtain_lock( &dev->stape_getstat_lock );
 
@@ -1571,5 +2234,59 @@ void *scsi_tapemountmon_thread( void *db )
     return NULL;
 
 } /* end function scsi_tapemountmon_thread */
+
+/*-------------------------------------------------------------------*/
+/* shutdown_worker_threads...                                        */
+/*-------------------------------------------------------------------*/
+void shutdown_worker_threads( DEVBLK *dev )
+{
+    while ( dev->stape_getstat_tid || dev->stape_mountmon_tid )
+    {
+        dev->stape_threads_exit = 1;    // (always each loop)
+        broadcast_condition( &dev->stape_exit_cond );
+        broadcast_condition( &dev->stape_getstat_cond );
+        timed_wait_condition_relative_usecs
+        (
+            &dev->stape_exit_cond,      // ptr to condition to wait on
+            &dev->stape_getstat_lock,   // ptr to controlling lock (must be held!)
+            25000,                      // max #of microseconds to wait
+            NULL                        // ptr to relative tod value (may be NULL)
+        );
+    }
+}
+
+/*-------------------------------------------------------------------*/
+/* Tell driver (if needed) what a BOT position looks like...         */
+/*-------------------------------------------------------------------*/
+void define_BOT_pos( DEVBLK *dev )
+{
+#ifdef _MSVC_
+
+    // PROGRAMMING NOTE: Need to tell 'w32stape.c' here the
+    // information it needs to detect physical BOT (load-point).
+
+    // This is not normally needed as most drivers determine
+    // it for themselves based on the type (manufacturer/model)
+    // of tape drive being used, but since I haven't added the
+    // code to 'w32stape.c' to do that yet (involves talking
+    // directly to the SCSI device itself) we thus, for now,
+    // need to pass that information directly to 'w32stape.c'
+    // ourselves...
+
+    U32 msk  = 0xFF3FFFFF;      // (3480/3490 default)
+    U32 bot  = 0x01000000;      // (3480/3490 default)
+
+    if ( dev->stape_blkid_32 )
+    {
+        msk  = 0xFFFFFFFF;      // (3590 default)
+        bot  = 0x00000000;      // (3590 default)
+    }
+
+    VERIFY( 0 == w32_define_BOT( dev->fd, msk, bot ) );
+
+#else
+    UNREFERENCED(dev);
+#endif // _MSVC_
+}
 
 #endif // defined(OPTION_SCSI_TAPE)

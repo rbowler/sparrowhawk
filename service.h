@@ -1,9 +1,42 @@
-/* SERVICE.H    (c) Copyright Jan Jaeger, 1999-2007                  */
+/* SERVICE.H    (c) Copyright Jan Jaeger, 1999-2009                  */
 /*              Service Processor Architectured fields               */
 
-// $Id: service.h,v 1.12 2007/06/23 00:04:15 ivan Exp $
+// $Id: service.h,v 1.22 2009/01/02 19:21:52 jj Exp $
 //
 // $Log: service.h,v $
+// Revision 1.22  2009/01/02 19:21:52  jj
+// DVD-RAM IPL
+// RAMSAVE
+// SYSG Integrated 3270 console fixes
+//
+// Revision 1.21  2008/12/28 15:30:09  jj
+// SYSG and SYSA mods
+//
+// Revision 1.20  2008/12/24 22:35:53  rbowler
+// Framework for integrated 3270 and ASCII console features
+//
+// Revision 1.19  2008/12/24 15:42:14  jj
+// Add debug entry point for sclp event masks
+//
+// Revision 1.18  2008/12/22 11:13:46  jj
+// Do not issue syscons active message on non-syscons type SCLP send/recv
+//
+// Revision 1.17  2008/12/20 23:38:51  ivan
+// Fill SCP_INFO SCCB config byte 11 with PER3 and List Directed IPL capability flags
+//
+// Revision 1.16  2008/12/18 00:25:38  ivan
+// Set SCCB Processor Type for IFL to 3, not 4
+//
+// Revision 1.15  2008/12/05 10:54:58  jj
+// Correct system console message highlight
+//
+// Revision 1.14  2008/11/24 14:52:21  jj
+// Add PTYP=IFL
+// Change SCPINFO processing to check on ptyp for IFL specifics
+//
+// Revision 1.13  2008/10/12 21:43:27  rbowler
+// SCCB SCPINFO updates from GA22-7584-10
+//
 // Revision 1.12  2007/06/23 00:04:15  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -134,7 +167,7 @@ typedef struct _SCCB_SCP_INFO {
         BYTE    resv6[4];               /* Reserved                  */
         BYTE    cfg[6];                 /* Config characteristics    */
         FWORD   rcci;                   /* Capacity                  */
-        BYTE    resv7;                  /* Reserved                  */
+        BYTE    cfg11;                  /* Config char. byte 11      */
         BYTE    numcrl;                 /* Max #of copy and reassign
                                            list elements allowed     */
         FWORD   etrtol;                 /* ETR sync check tolerance  */
@@ -204,13 +237,21 @@ typedef struct _SCCB_SCP_INFO {
 #define SCCB_CFG4_LOAD_REVERSED_FACILITY                0x20
 #define SCCB_CFG4_EXTENDED_TRANSLATION_FACILITY2        0x10
 #define SCCB_CFG4_STORE_SYSTEM_INFORMATION              0x08
+#define SCCB_CFG4_LPAR_CLUSTERING                       0x02
+#define SCCB_CFG4_IFA_FACILITY                          0x01
+#define SCCB_CFG5_SENSE_RUNNING_STATUS                  0x08
 #define SCCB_CFG5_ESAME                                 0x01
+#define SCCB_CFGB_PER_3                                 0x04
+#define SCCB_CFGB_LOAD_WITH_DUMP                        0x02
+#define SCCB_CFGB_LIST_DIRECTED_IPL                     0x01
 
 /* CPU information array entry */
 typedef struct _SCCB_CPU_INFO {
         BYTE    cpa;                    /* CPU address               */
         BYTE    tod;                    /* TOD clock number          */
-        BYTE    cpf[14];                /* RCPU facility map         */
+        BYTE    cpf[12];                /* RCPU facility map         */
+        BYTE    ptyp;                   /* Processor type            */
+        BYTE    ksid;                   /* Crypto unit identifier    */
     } SCCB_CPU_INFO;
 
 /* Bit definitions for CPU installed features */
@@ -237,7 +278,16 @@ typedef struct _SCCB_CPU_INFO {
 #define SCCB_CPF3_PER2_INSTALLED                        0x01
 #define SCCB_CPF4_OMISION_GR_ALTERATION_370             0x80
 #define SCCB_CPF5_GUEST_WAIT_STATE_ASSIST               0x40
-#define SCCB_CPF13_CRYPTO_UNIT_ID                       0x01
+
+/* Definitions for processor type code */
+#define SCCB_PTYP_CP                                    0
+#define SCCB_PTYP_ICF                                   1
+#define SCCB_PTYP_IFA                                   2
+#define SCCB_PTYP_IFL                                   3
+#define SCCB_PTYP_SUP                                   5
+
+/* Definitions for crypto unit identifier */
+#define SCCB_KSID_CRYPTO_UNIT_ID                        0x01
 
 /* HSA information array entry */
 typedef struct _SCCB_HSA_INFO {
@@ -287,20 +337,16 @@ typedef struct _SCCB_EVENT_MASK {
 //      FWORD   cp_recv_mask;           /* These mask fields have    */
 //      FWORD   cp_send_mask;           /* the length defined by     */
 //      FWORD   sclp_recv_mask;         /* the length halfword       */
-#define SCCB_EVENT_SUPP_RECV_MASK ( \
-        (0x80000000 >> (SCCB_EVD_TYPE_MSG-1)) | \
-        (0x80000000 >> (SCCB_EVD_TYPE_PRIOR-1)) | \
-/*      (0x80000000 >> (SCCB_EVD_TYPE_VT220-1)) | */ \
-        (0x80000000 >> (SCCB_EVD_TYPE_CPIDENT-1)) )
 //      FWORD   sclp_send_mask;
-#define SCCB_EVENT_SUPP_SEND_MASK ( \
-        (0x80000000 >> (SCCB_EVD_TYPE_OPCMD-1)) | \
-        (0x80000000 >> (SCCB_EVD_TYPE_STATECH-1)) | \
-        (0x80000000 >> (SCCB_EVD_TYPE_PRIOR-1)) | \
-        (0x80000000 >> (SCCB_EVD_TYPE_SIGQ-1)) | \
-/*      (0x80000000 >> (SCCB_EVD_TYPE_VT220-1)) | */ \
-        (0x80000000 >> (SCCB_EVD_TYPE_CPCMD-1)) )
     } SCCB_EVENT_MASK;
+
+#define SCCB_EVENT_CONS_RECV_MASK ( \
+        (0x80000000 >> (SCCB_EVD_TYPE_MSG-1))   | \
+        (0x80000000 >> (SCCB_EVD_TYPE_PRIOR-1)) ) 
+#define SCCB_EVENT_CONS_SEND_MASK ( \
+        (0x80000000 >> (SCCB_EVD_TYPE_OPCMD-1)) | \
+        (0x80000000 >> (SCCB_EVD_TYPE_PRIOR-1)) | \
+        (0x80000000 >> (SCCB_EVD_TYPE_CPCMD-1)) )
 
 /* Read/Write Event Data Header */
 typedef struct _SCCB_EVD_HDR {
@@ -309,16 +355,21 @@ typedef struct _SCCB_EVD_HDR {
         BYTE    type;
 #define SCCB_EVD_TYPE_OPCMD     0x01    /* Operator command          */
 #define SCCB_EVD_TYPE_MSG       0x02    /* Message from Control Pgm  */
+// #if defined(FEATURE_SCEDIO )
+#define SCCB_EVD_TYPE_SCEDIO    0x07    /* SCE DASD I/O              */
+// #endif /*defined(FEATURE_SCEDIO )*/
 #define SCCB_EVD_TYPE_STATECH   0x08    /* State Change              */
 #define SCCB_EVD_TYPE_PRIOR     0x09    /* Priority message/command  */
 #define SCCB_EVD_TYPE_CPIDENT   0x0B    /* CntlProgIdent             */
 #define SCCB_EVD_TYPE_VT220     0x1A    /* VT220 Msg                 */
+#define SCCB_EVD_TYPE_SYSG      0x1B    /* 3270 Msg (SYSG console)   */
 #define SCCB_EVD_TYPE_SIGQ      0x1D    /* SigQuiesce                */
 #define SCCB_EVD_TYPE_CPCMD     0x20    /* CntlProgOpCmd             */
         BYTE    flag;
 #define SCCB_EVD_FLAG_PROC      0x80    /* Event successful          */
         HWORD   resv;                   /* Reserved for future use   */
     } SCCB_EVD_HDR;
+
 
 /* Read/Write Event Data Buffer */
 typedef struct _SCCB_EVD_BK {
@@ -355,7 +406,7 @@ typedef struct _SCCB_OBJ_HDR {
 
 /* Message Control Data Block Message Text Object */
 typedef struct _SCCB_MTO_BK {
-        HWORD   ltflag;                 /* Line type flag            */
+        BYTE    ltflag[2];              /* Line type flag            */
 #define SCCB_MTO_LTFLG0_CNTL    0x80    /* Control text line         */
 #define SCCB_MTO_LTFLG0_LABEL   0x40    /* Label text line           */
 #define SCCB_MTO_LTFLG0_DATA    0x20    /* Data text line            */
@@ -366,7 +417,7 @@ typedef struct _SCCB_MTO_BK {
 #define SCCB_MTO_LTFLG0_MIX     0x02    /* Mixed SBCS/DBCS text      */
 #define SCCB_MTO_LTFLG1_OVER    0x01    /* Foreground presentation
                                            field override            */
-        FWORD   presattr;               /* Presentation Attribute
+        BYTE    presattr[4];            /* Presentation Attribute
                                            Byte 0 - control
                                            Byte 1 - color
                                            Byte 2 - highlighting
@@ -383,11 +434,11 @@ typedef struct _SCCB_MGO_BK {
         BYTE    resv1;
         BYTE    date[7];                /* C'YYYYDDD'                */
         BYTE    resv2;
-        FWORD   mflag;                  /* Message Flags             */
+        BYTE    mflag[2];               /* Message Flags             */
 #define SCCB_MGO_MFLAG0_DOM     0x80    /* Delete Operator Message   */
 #define SCCB_MGO_MFLAG0_ALARM   0x40    /* Sound the SCLP alarm      */
 #define SCCB_MGO_MFLAG0_HOLD    0x20    /* Hold message until DOM    */
-        FWORD   presattr;               /* Presentation Attribute
+        BYTE    presattr[4];            /* Presentation Attribute
                                            Byte 0 - control
                                            Byte 1 - color
                                            Byte 2 - highlighting
@@ -395,7 +446,7 @@ typedef struct _SCCB_MGO_BK {
 #define SCCB_MGO_PRATTR0_ALARM  0x80    /* Sound alarm (console)     */
 #define SCCB_MGO_PRATTR3_HIGH   0xE8    /* Highlighted               */
 #define SCCB_MGO_PRATTR3_NORM   0xE4    /* Normal                    */
-        FWORD   bckattr;                /* Background presentation
+        BYTE    bckattr[4];             /* Background presentation
                                            attributes - covers all
                                            message-test foreground
                                            presentation attribute
@@ -457,5 +508,33 @@ typedef struct _SCCB_XST_MAP {
     } SCCB_XST_MAP;
 // #endif /*FEATURE_EXPANDED_STORAGE*/
 
+ 
+// #if defined(FEATURE_SCEDIO )
+/* SCE DASD I/O Request */
+typedef struct _SCCB_SCEDIO_BK {
+        BYTE    flag0;
+        BYTE    flag1;
+        BYTE    flag2;
+        BYTE    flag3;
+#define SCCB_SCEDIO_FLG3_COMPLETE  0x80
+
+        BYTE    type;
+#define SCCB_SCEDIO_TYPE_INIT      0x00  
+#define SCCB_SCEDIO_TYPE_READ      0x01   
+#define SCCB_SCEDIO_TYPE_CREATE    0x02 
+#define SCCB_SCEDIO_TYPE_APPEND    0x03 
+        BYTE    flag5;
+        BYTE    flag6;
+        BYTE    flag7;
+
+        DBLWRD  seek;
+        DBLWRD  ncomp;
+        DBLWRD  length;
+        DBLWRD  resv2;
+        DBLWRD  resv3;
+        DBLWRD  sto;
+        BYTE    filename[256];
+    } SCCB_SCEDIO_BK;
+// #endif /*defined(FEATURE_SCEDIO )*/
 
 #endif /*!defined(_SERVICE_H)*/

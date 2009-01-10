@@ -1,12 +1,23 @@
-/* HERCULES.H   (c) Copyright Roger Bowler, 1999-2007                */
+/* HERCULES.H   (c) Copyright Roger Bowler, 1999-2009                */
 /*              Hercules Header Files                                */
 
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 
-// $Id: hercules.h,v 1.300 2007/06/23 00:04:10 ivan Exp $
+// $Id: hercules.h,v 1.303 2009/01/02 19:21:51 jj Exp $
 //
 // $Log: hercules.h,v $
+// Revision 1.303  2009/01/02 19:21:51  jj
+// DVD-RAM IPL
+// RAMSAVE
+// SYSG Integrated 3270 console fixes
+//
+// Revision 1.302  2008/05/22 21:34:22  fish
+// Attempt to fix my *nix SCSI tape BSR over tapemark bug identified by Bob Schneider [bschneider@pingdata.net]
+//
+// Revision 1.301  2007/12/11 15:01:06  rbowler
+// Fix undefined gettimeofday in clock.h rev 1.27 (MSVC)
+//
 // Revision 1.300  2007/06/23 00:04:10  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -105,13 +116,17 @@
   #include "memrchr.h"
 #endif
 
+#if defined(HAVE_ASSERT_H)
+ #include <assert.h>
+#endif
+
 #include "hostinfo.h"
 #include "version.h"
 
 #include "esa390.h"       // (ESA/390 structure definitions)
-#include "clock.h"        // (TOD definitions)
 #include "hscutl.h"       // (utility functions)
 #include "w32util.h"      // (win32 porting functions)
+#include "clock.h"        // (TOD definitions)
 
 #include "codepage.h"
 #include "logger.h"       // (logmsg, etc)
@@ -126,7 +141,12 @@
 #include "sockdev.h"
 #include "w32ctca.h"
 
+#include "service.h"
+
 #include "hsocket.h"
+#ifdef _MSVC_
+  #include "w32mtio.h"    // 'mtio.h' needed by hstructs.h
+#endif // _MSVC_
 #include "hstructs.h"     // (Hercules-wide structures)
 #include "hexterns.h"     // (Hercules-wide extern function prototypes)
 

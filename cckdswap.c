@@ -1,13 +1,16 @@
 /* CCKDSWAP.C   (c) Copyright Roger Bowler, 1999-2007                */
 /*       Swap the `endianess' of a compressed CKD file.              */
 
-// $Id: cckdswap.c,v 1.21 2007/06/23 00:04:03 ivan Exp $
+// $Id: cckdswap.c,v 1.22 2008/11/04 04:50:45 fish Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module changes the `endianess' of a compressed CKD file.     */
 /*-------------------------------------------------------------------*/
 
 // $Log: cckdswap.c,v $
+// Revision 1.22  2008/11/04 04:50:45  fish
+// Ensure consistent utility startup
+//
 // Revision 1.21  2007/06/23 00:04:03  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -37,21 +40,7 @@ int             bigend;                 /* 1=big-endian file         */
 DEVBLK          devblk;                 /* DEVBLK                    */
 DEVBLK         *dev=&devblk;            /* -> DEVBLK                 */
 
-#if defined(ENABLE_NLS)
-    setlocale(LC_ALL, "");
-    bindtextdomain(PACKAGE, HERC_LOCALEDIR);
-    textdomain(PACKAGE);
-#endif
-
-#ifdef EXTERNALGUI
-    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
-    {
-        extgui = 1;
-        argc--;
-        setvbuf(stderr, NULL, _IONBF, 0);
-        setvbuf(stdout, NULL, _IONBF, 0);
-    }
-#endif /*EXTERNALGUI*/
+    INITIALIZE_UTILITY("cckdswap");
 
     /* parse the arguments */
     for (argc--, argv++ ; argc > 0 ; argc--, argv++)

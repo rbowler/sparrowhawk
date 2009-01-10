@@ -1,9 +1,23 @@
-/* HDLMAIN.C    (c) Copyright Jan Jaeger, 2003-2007                  */
+/* HDLMAIN.C    (c) Copyright Jan Jaeger, 2003-2009                  */
 /*              Hercules Dynamic Loader                              */
 
-// $Id: hdlmain.c,v 1.48 2007/06/23 00:04:10 ivan Exp $
+// $Id: hdlmain.c,v 1.52 2009/01/02 19:21:51 jj Exp $
 //
 // $Log: hdlmain.c,v $
+// Revision 1.52  2009/01/02 19:21:51  jj
+// DVD-RAM IPL
+// RAMSAVE
+// SYSG Integrated 3270 console fixes
+//
+// Revision 1.51  2008/12/24 15:42:13  jj
+// Add debug entry point for sclp event masks
+//
+// Revision 1.50  2008/12/22 13:10:21  jj
+// Add sclp debug entry points
+//
+// Revision 1.49  2008/02/12 08:42:15  fish
+// dyngui tweaks: new def devlist fmt, new debug_cd_cmd hook
+//
 // Revision 1.48  2007/06/23 00:04:10  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -78,12 +92,14 @@ HDL_REGISTER_SECTION;
     HDL_REGISTER( system_command,             UNRESOLVED      );
     HDL_REGISTER( daemon_task,                UNRESOLVED      );
     HDL_REGISTER( debug_cpu_state,            UNRESOLVED      );
+    HDL_REGISTER( debug_cd_cmd,               UNRESOLVED      );
     HDL_REGISTER( debug_device_state,         UNRESOLVED      );
     HDL_REGISTER( debug_program_interrupt,    UNRESOLVED      );
     HDL_REGISTER( debug_diagnose,             UNRESOLVED      );
     HDL_REGISTER( debug_iucv,                 UNRESOLVED      );
     HDL_REGISTER( debug_sclp_unknown_command, UNRESOLVED      );
     HDL_REGISTER( debug_sclp_unknown_event,   UNRESOLVED      );
+    HDL_REGISTER( debug_sclp_unknown_event_mask,   UNRESOLVED );
     HDL_REGISTER( debug_sclp_event_data,      UNRESOLVED      );
     HDL_REGISTER( debug_chsc_unknown_request, UNRESOLVED      );
     HDL_REGISTER( debug_watchdog_signal,      UNRESOLVED      );
@@ -121,11 +137,13 @@ HDL_RESOLVER_SECTION;
     HDL_RESOLVE( system_command             );
     HDL_RESOLVE( daemon_task                );
     HDL_RESOLVE( debug_cpu_state            );
+    HDL_RESOLVE( debug_cd_cmd               );
     HDL_RESOLVE( debug_device_state         );
     HDL_RESOLVE( debug_program_interrupt    );
     HDL_RESOLVE( debug_diagnose             );
     HDL_RESOLVE( debug_sclp_unknown_command );
     HDL_RESOLVE( debug_sclp_unknown_event   );
+    HDL_RESOLVE( debug_sclp_unknown_event_mask );
     HDL_RESOLVE( debug_sclp_event_data      );
     HDL_RESOLVE( debug_chsc_unknown_request );
 #if defined(OPTION_W32_CTCI)

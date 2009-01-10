@@ -6,9 +6,12 @@
 
 //        This header file #included by 'hercules.h'
 
-// $Id: feature.h,v 1.77 2007/06/23 00:04:09 ivan Exp $
+// $Id: feature.h,v 1.78 2007/11/21 22:55:49 fish Exp $
 //
 // $Log: feature.h,v $
+// Revision 1.78  2007/11/21 22:55:49  fish
+// (untab)
+//
 // Revision 1.77  2007/06/23 00:04:09  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -509,13 +512,13 @@ z900_ ## _name
 #if defined(FEATURE_INTERVAL_TIMER)
  #define ITIMER_UPDATE(_addr, _len, _regs)       \
     do {                                         \
-	if( ITIMER_ACCESS((_addr), (_len)) )     \
+    if( ITIMER_ACCESS((_addr), (_len)) )     \
             ARCH_DEP(fetch_int_timer) ((_regs)); \
     } while(0) 
  #define ITIMER_SYNC(_addr, _len, _regs)         \
     do {                                         \
         if( ITIMER_ACCESS((_addr), (_len)) )     \
-	    ARCH_DEP(store_int_timer) ((_regs)); \
+        ARCH_DEP(store_int_timer) ((_regs)); \
     } while (0)
 #else
  #define ITIMER_UPDATE(_addr, _len, _regs)

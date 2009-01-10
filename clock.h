@@ -1,9 +1,18 @@
 /* CLOCK.H      (c) Copyright Jan Jaeger, 2000-2007                  */
 /*              TOD Clock functions                                  */
 
-// $Id: clock.h,v 1.25 2007/06/23 00:04:04 ivan Exp $
+// $Id: clock.h,v 1.28 2007/12/11 15:03:10 rbowler Exp $
 //
 // $Log: clock.h,v $
+// Revision 1.28  2007/12/11 15:03:10  rbowler
+// Fix untab columns
+//
+// Revision 1.27  2007/12/10 23:12:02  gsmith
+// Tweaks to OPTION_MIPS_COUNTING processing
+//
+// Revision 1.26  2007/11/21 22:55:49  fish
+// (untab)
+//
 // Revision 1.25  2007/06/23 00:04:04  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -49,6 +58,13 @@ void set_tod_clock(U64);                /* Set TOD clock             */
 int chk_int_timer(REGS *);              /* Check int_timer pending   */
 int clock_hsuspend(void *file);         /* Hercules suspend          */
 int clock_hresume(void *file);          /* Hercules resume           */
+
+static __inline__ U64 host_tod(void)
+{
+    struct timeval tv;
+    gettimeofday (&tv, NULL);
+    return (U64)tv.tv_sec*1000000 + tv.tv_usec;
+}
 
 #endif
 
@@ -110,13 +126,13 @@ _CLOCK_EXTERN U64 hw_tod;               /* Hardware clock            */
 #if defined(FEATURE_INTERVAL_TIMER)
  #define ITIMER_UPDATE(_addr, _len, _regs)       \
     do {                                         \
-	if( ITIMER_ACCESS((_addr), (_len)) )     \
+        if( ITIMER_ACCESS((_addr), (_len)) )     \
             ARCH_DEP(fetch_int_timer) ((_regs)); \
     } while(0) 
  #define ITIMER_SYNC(_addr, _len, _regs)         \
     do {                                         \
         if( ITIMER_ACCESS((_addr), (_len)) )     \
-	    ARCH_DEP(store_int_timer) ((_regs)); \
+            ARCH_DEP(store_int_timer) ((_regs)); \
     } while (0)
 #else
  #define ITIMER_UPDATE(_addr, _len, _regs)

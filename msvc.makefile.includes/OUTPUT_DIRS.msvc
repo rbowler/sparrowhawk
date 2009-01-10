@@ -3,11 +3,17 @@
 # --------------------------------------------------------------------------
 # (c) Copyright Roger Bowler, 2005-2007
 # --------------------------------------------------------------------------
+# $Id: OUTPUT_DIRS.msvc,v 1.2 2008/10/11 23:46:01 fish Exp $
 #
 #  Define the build output directories...
 #
 #
 #                           CHANGE HISTORY
+# $Log: OUTPUT_DIRS.msvc,v $
+# Revision 1.2  2008/10/11 23:46:01  fish
+# Add CVS "Id" and "Log"
+#
+#
 # DD/MM/YY Description
 #
 # 26/12/06 Fish: created by extraction from existing makefile-dllmod.msvc

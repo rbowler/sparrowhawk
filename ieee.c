@@ -13,7 +13,7 @@
  * For details, see html/herclic.html
  */
 
-// $Id: ieee.c,v 1.78 2007/06/23 00:04:13 ivan Exp $
+// $Id: ieee.c,v 1.84 2008/04/18 12:13:59 rbowler Exp $
 
 /*
  * This module implements the ESA/390 Binary (IEEE) Floating Point
@@ -40,8 +40,8 @@
  * floating point instructions.
  *
  * Rounding:
- * The native IEEE implementation can be set to apply the rounding
- * as specified in the FPC.  This is not yet implemented.
+ * The native IEEE implementation is set to apply the rounding
+ * as specified in the FPC register or the instruction mask.
  * The Rounding and Range Function is not explicitly implemented.
  * Most of its functionality should be covered by the native floating
  * point implementation.  However, there are some cases where use of
@@ -61,6 +61,24 @@
  */
 
 // $Log: ieee.c,v $
+// Revision 1.84  2008/04/18 12:13:59  rbowler
+// Fix incorrect results from THDER,THDR instructions
+//
+// Revision 1.83  2008/04/16 19:57:55  rbowler
+// Fix condition code in LCEBR,LCDBR,LCXBR instructions
+//
+// Revision 1.82  2008/04/16 14:09:42  rbowler
+// Correct ieee to use BFP rounding mode not DFP rounding mode
+//
+// Revision 1.81  2008/04/15 21:30:03  rbowler
+// BFP rounding mode support
+//
+// Revision 1.80  2008/02/12 18:23:39  jj
+// TBEDR , TBDR using R1 as source, should be R2.
+//
+// Revision 1.79  2008/02/07 00:29:04  rbowler
+// Solaris build support by Jeff Savit
+//
 // Revision 1.78  2007/06/23 00:04:13  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -137,6 +155,11 @@ do { \
 #include "inline.h"
 #if defined(WIN32) && !defined(HAVE_FENV_H)
   #include "ieee-w32.h"
+#endif
+
+/* jbs 01/16/2008 */
+#if defined(__SOLARIS__)
+  #include "ieee-sol.h"
 #endif
 
 /* Definitions of BFP rounding methods */
@@ -304,6 +327,44 @@ static inline int ieee_exception(int raised, REGS * regs)
 }
 
 #if !defined(_IEEE_C)
+/*
+ * Set rounding mode according to BFP rounding mode mask
+ */
+void set_rounding_mode(U32 fpcreg, int mask)
+{
+    int brm, ferm;
+
+    /* If mask is zero, obtain rounding mode from FPC register */
+    if (mask == RM_DEFAULT_ROUNDING)
+        brm = ((fpcreg & FPC_BRM) >> FPC_BRM_SHIFT) + 4;
+    else
+        brm = mask;
+
+    /* Convert BFP rounding mode to nearest equivalent FE rounding mode */
+    switch (brm) {
+    case RM_ROUND_TO_NEAREST: /* Round to nearest ties to even */
+        ferm = FE_TONEAREST;
+        break;
+    case RM_ROUND_TOWARD_ZERO: /* Round toward zero */
+        ferm = FE_TOWARDZERO;
+        break;
+    case RM_ROUND_TOWARD_POS_INF: /* Round toward +infinity */
+        ferm = FE_UPWARD;
+        break;
+    case RM_ROUND_TOWARD_NEG_INF: /* Round toward -infinity */
+        ferm = FE_DOWNWARD;
+        break;
+    default:
+        ferm = FE_TONEAREST;
+        break;
+    } /* end switch(brm) */
+
+    /* Switch rounding mode if necessary */
+    if (fegetround() != ferm)
+        fesetround(ferm);
+
+} /* end function set_rounding_mode */
+
 /*
  * Classify emulated fp values
  */
@@ -898,7 +959,7 @@ static void lengthen_short_to_ext(struct sbfp *op2, struct ebfp *op1, REGS *regs
  */
 static int cnvt_bfp_to_hfp (struct lbfp *op, int class, U32 *fpr)
 {
-    short exp;
+    int exp;
     U64 fract;
     U32 r0, r1;
     int cc;
@@ -926,14 +987,17 @@ static int cnvt_bfp_to_hfp (struct lbfp *op, int class, U32 *fpr)
         cc = op->sign ? 1 : 2;
         break;
     case FP_NORMAL:
+        //logmsg("ieee: exp=%d (X\'%3.3x\')\tfract=%16.16"I64_FMT"x\n",
+        //        op->exp, op->exp, op->fract);
         /* Insert an implied 1. in front of the 52 bit binary
            fraction and lengthen the result to 56 bits */
-        fract = (U64)(op->fract | 0x8000000000000ULL) << 4;
+        fract = (U64)(op->fract | 0x10000000000000ULL) << 3;
 
         /* The binary exponent is equal to the biased exponent - 1023
-           and we subtract another 1 to account for the implied 1. */
-        exp = op->exp - 1024;
+           adjusted by 1 to move the point before the 56 bit fraction */
+        exp = op->exp - 1023 + 1;
 
+        //logmsg("ieee: adjusted exp=%d\tfract=%16.16"I64_FMT"x\n", exp, fract);
         /* Shift the fraction right one bit at a time until
            the binary exponent becomes a multiple of 4 */
         while (exp & 3)
@@ -941,6 +1005,7 @@ static int cnvt_bfp_to_hfp (struct lbfp *op, int class, U32 *fpr)
             exp++;
             fract >>= 1;
         }
+        //logmsg("ieee:  shifted exp=%d\tfract=%16.16"I64_FMT"x\n", exp, fract);
 
         /* Convert the binary exponent into a hexadecimal exponent
            by dropping the last two bits (which are now zero) */
@@ -1137,7 +1202,7 @@ DEF_INST(convert_bfp_short_to_float_long_reg)
     /* Lengthen sbfp operand to lbfp */
     lbfp_op2.sign = op2.sign;
     lbfp_op2.exp = op2.exp - 127 + 1023;
-    lbfp_op2.fract = op2.fract << (52 - 23);
+    lbfp_op2.fract = (U64)op2.fract << (52 - 23);
 
     /* Convert lbfp to hfp register and set condition code */
     regs->psw.cc =
@@ -1161,7 +1226,7 @@ DEF_INST(convert_float_long_to_bfp_long_reg)
     BFPRM_CHECK(m3,regs);
 
     regs->psw.cc =
-        cnvt_hfp_to_bfp (regs->fpr + FPR2I(r1), m3,
+        cnvt_hfp_to_bfp (regs->fpr + FPR2I(r2), m3,
             /*fractbits*/52, /*emax*/1023, /*ebias*/1023,
             &(op1.sign), &(op1.exp), &(op1.fract));
 
@@ -1184,7 +1249,7 @@ DEF_INST(convert_float_long_to_bfp_short_reg)
     BFPRM_CHECK(m3,regs);
 
     regs->psw.cc =
-        cnvt_hfp_to_bfp (regs->fpr + FPR2I(r1), m3,
+        cnvt_hfp_to_bfp (regs->fpr + FPR2I(r2), m3,
             /*fractbits*/23, /*emax*/127, /*ebias*/127,
             &(op1.sign), &(op1.exp), &fract);
     op1.fract = (U32)fract;
@@ -2539,6 +2604,7 @@ static int integer_ebfp(struct ebfp *op, int mode, REGS *regs)
     default:
         FECLEAREXCEPT(FE_ALL_EXCEPT);
         ebfpston(op);
+        set_rounding_mode(regs->fpc, mode);
         op->v = rint(op->v);
         if (regs->fpc & FPC_MASK_IMX) {
             ieee_exception(FE_INEXACT, regs);
@@ -2584,6 +2650,7 @@ static int integer_lbfp(struct lbfp *op, int mode, REGS *regs)
     default:
         FECLEAREXCEPT(FE_ALL_EXCEPT);
         lbfpston(op);
+        set_rounding_mode(regs->fpc, mode);
         op->v = rint(op->v);
         if (regs->fpc & FPC_MASK_IMX) {
             ieee_exception(FE_INEXACT, regs);
@@ -2629,6 +2696,7 @@ static int integer_sbfp(struct sbfp *op, int mode, REGS *regs)
     default:
         FECLEAREXCEPT(FE_ALL_EXCEPT);
         sbfpston(op);
+        set_rounding_mode(regs->fpc, mode);
         op->v = rint(op->v);
         if (regs->fpc & FPC_MASK_IMX) {
             ieee_exception(FE_INEXACT, regs);
@@ -3451,7 +3519,7 @@ DEF_INST(load_complement_bfp_ext_reg)
         regs->psw.cc = 3;
         break;
     default:
-        regs->psw.cc = 2;
+        regs->psw.cc = op.sign ? 1 : 2;
         break;
     }
 
@@ -3482,7 +3550,7 @@ DEF_INST(load_complement_bfp_long_reg)
         regs->psw.cc = 3;
         break;
     default:
-        regs->psw.cc = 2;
+        regs->psw.cc = op.sign ? 1 : 2;
         break;
     }
 
@@ -3513,7 +3581,7 @@ DEF_INST(load_complement_bfp_short_reg)
         regs->psw.cc = 3;
         break;
     default:
-        regs->psw.cc = 2;
+        regs->psw.cc = op.sign ? 1 : 2;
         break;
     }
 

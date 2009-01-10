@@ -19,9 +19,21 @@
 // The exit status is zero if successful, non-zero if error.
 //
 
-// $Id: hercifc.c,v 1.28 2007/06/23 00:04:10 ivan Exp $
+// $Id: hercifc.c,v 1.31 2008/06/22 05:54:30 fish Exp $
 //
 // $Log: hercifc.c,v $
+// Revision 1.31  2008/06/22 05:54:30  fish
+// Fix print-formatting issue (mostly in tape modules)
+// that can sometimes, in certain circumstances,
+// cause herc to crash.  (%8.8lx --> I32_FMTX, etc)
+//
+// Revision 1.30  2008/02/19 11:49:19  ivan
+// - Move setting of CPU priority after spwaning timer thread
+// - Added support for Posix 1003.1e capabilities
+//
+// Revision 1.29  2007/08/28 20:14:23  gsmith
+// Fix many TUNSETIFF-EINVAL error messages
+//
 // Revision 1.28  2007/06/23 00:04:10  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -56,6 +68,8 @@ int main( int argc, char **argv )
     char        szMsgBuffer[255];
 
     UNREFERENCED( argc );
+
+    DROP_PRIVILEGES(CAP_NET_ADMIN);
 
     pszProgName = strdup( argv[0] );
 
@@ -207,7 +221,7 @@ int main( int argc, char **argv )
 
         default:
             snprintf( szMsgBuffer,sizeof(szMsgBuffer),
-                     _("HHCIF004W %s: Unknown request: %8.8lX.\n"),
+                     _("HHCIF004W %s: Unknown request: "I32_FMTX".\n"),
                      pszProgName, ctlreq.iCtlOp );
             write( STDERR_FILENO, szMsgBuffer, strlen( szMsgBuffer ) );
             continue;
@@ -232,6 +246,10 @@ int main( int argc, char **argv )
         #if defined(SIOCDIFADDR) && defined(EINVAL)
                  /* Suppress spurious error message */
              && !(ctlreq.iCtlOp == SIOCDIFADDR   && errno == EINVAL)
+        #endif
+        #if defined(TUNSETIFF) && defined(EINVAL)
+                 /* Suppress spurious error message */
+             && !(ctlreq.iCtlOp == TUNSETIFF   && errno == EINVAL)
         #endif
                )
             {

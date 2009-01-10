@@ -1,7 +1,7 @@
 /* CARDPCH.C    (c) Copyright Roger Bowler, 1999-2007                */
 /*              ESA/390 Card Punch Device Handler                    */
 
-// $Id: cardpch.c,v 1.31 2007/06/23 00:04:03 ivan Exp $
+// $Id: cardpch.c,v 1.32 2007/11/21 22:54:13 fish Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
@@ -9,6 +9,9 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: cardpch.c,v $
+// Revision 1.32  2007/11/21 22:54:13  fish
+// Use new BEGIN_DEVICE_CLASS_QUERY macro
+//
 // Revision 1.31  2007/06/23 00:04:03  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -133,7 +136,8 @@ static void cardpch_query_device (DEVBLK *dev, char **class,
                 int buflen, char *buffer)
 {
 
-    *class = "PCH";
+    BEGIN_DEVICE_CLASS_QUERY( "PCH", dev, class, buflen, buffer );
+
     snprintf (buffer, buflen, "%s%s%s",
                 dev->filename,
                 (dev->ascii ? " ascii" : " ebcdic"),

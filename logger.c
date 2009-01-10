@@ -1,7 +1,7 @@
 /* LOGGER.C     (c) Copyright Jan Jaeger, 2003-2007                  */
 /*              System logger functions                              */
 
-// $Id: logger.c,v 1.49 2007/06/23 00:04:14 ivan Exp $
+// $Id: logger.c,v 1.54 2008/11/29 21:28:01 rbowler Exp $
 
 /* If standard output or standard error is redirected then the log   */
 /* is written to the redirection.                                    */
@@ -14,6 +14,21 @@
 /* for isatty()                                                      */
 
 // $Log: logger.c,v $
+// Revision 1.54  2008/11/29 21:28:01  rbowler
+// Fix warnings C4267 because win64 declares send length as int not size_t
+//
+// Revision 1.53  2008/11/04 05:56:31  fish
+// Put ensure consistent create_thread ATTR usage change back in
+//
+// Revision 1.52  2008/11/03 15:31:54  rbowler
+// Back out consistent create_thread ATTR modification
+//
+// Revision 1.51  2008/10/18 09:32:21  fish
+// Ensure consistent create_thread ATTR usage
+//
+// Revision 1.50  2008/08/23 11:58:52  fish
+// Remove "<pnl...>" color string from most logfile hardcopy o/p
+//
 // Revision 1.49  2007/06/23 00:04:14  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -34,7 +49,6 @@
 
 #include "hercules.h"
 #include "opcode.h"             /* Required for SETMODE macro        */
-static ATTR  logger_attr;
 static COND  logger_cond;
 static LOCK  logger_lock;
 static TID   logger_tid;
@@ -176,7 +190,7 @@ static void logger_term(void *arg)
     if(logger_active)
     {
         char* term_msg = _("HHCLG014I logger thread terminating\n");
-        int   term_msg_len = strlen( term_msg );
+        size_t term_msg_len = strlen(term_msg);
 
         obtain_lock(&logger_lock);
 
@@ -312,17 +326,42 @@ int bytes_read;
             }
         }
 
+        /* Write log data to hardcopy file */
         if (logger_hrdcpy)
-#ifndef OPTION_TIMESTAMP_LOGFILE
-            logger_logfile_write( logger_buffer + logger_currmsg, bytes_read );
-#else
+#if !defined( OPTION_TIMESTAMP_LOGFILE )
         {
+            char* pLeft2 = logger_buffer + logger_currmsg;
+            int   nLeft2 = bytes_read;
+#if defined( OPTION_MSGCLR )
+            /* Remove "<pnl,..." color string if it exists */
+            if (1
+                && nLeft2 > 5
+                && strncasecmp( pLeft2, "<pnl", 4 ) == 0
+                && (pLeft2 = memchr( pLeft2+4, '>', nLeft2-4 )) != NULL
+            )
+            {
+                pLeft2++;
+                nLeft2 -= (pLeft2 - (logger_buffer + logger_currmsg));
+            }
+            else
+            {
+                pLeft2 = logger_buffer + logger_currmsg;
+                nLeft2 = bytes_read;
+            }
+#endif // defined( OPTION_MSGCLR )
+
+            logger_logfile_write( pLeft2, nLeft2 );
+        }
+#else // defined( OPTION_TIMESTAMP_LOGFILE )
+        {
+            /* Need to prefix each line with a timestamp. */
+
             static int needstamp = 1;
             char*  pLeft  = logger_buffer + logger_currmsg;
             int    nLeft  = bytes_read;
             char*  pRight = NULL;
             int    nRight = 0;
-            char*  pNL    = NULL;
+            char*  pNL    = NULL;   /* (pointer to NEWLINE character) */
 
             if (needstamp)
             {
@@ -336,7 +375,34 @@ int bytes_read;
                 nRight  = nLeft - (pRight - pLeft);
                 nLeft  -= nRight;
 
+#if defined( OPTION_MSGCLR )
+                /* Remove "<pnl...>" color string if it exists */
+                {
+                    char* pLeft2 = pLeft;
+                    int   nLeft2 = nLeft;
+
+                    if (1
+                        && nLeft > 5
+                        && strncasecmp( pLeft, "<pnl", 4 ) == 0
+                        && (pLeft2 = memchr( pLeft+4, '>', nLeft-4 )) != NULL
+                    )
+                    {
+                        pLeft2++;
+                        nLeft2 -= (pLeft2 - pLeft);
+                    }
+                    else
+                    {
+                        pLeft2 = pLeft;
+                        nLeft2 = nLeft;
+                    }
+
+                    logger_logfile_write( pLeft2, nLeft2 );
+                }
+#else // !defined( OPTION_MSGCLR )
+
                 logger_logfile_write( pLeft, nLeft );
+
+#endif // defined( OPTION_MSGCLR )
 
                 pLeft = pRight;
                 nLeft = nRight;
@@ -353,8 +419,9 @@ int bytes_read;
             if (nLeft)
                 logger_logfile_write( pLeft, nLeft );
         }
-#endif
+#endif // !defined( OPTION_TIMESTAMP_LOGFILE )
 
+        /* Increment buffer index to next available position */
         logger_currmsg += bytes_read;
         if(logger_currmsg >= logger_bufsize)
         {
@@ -362,10 +429,9 @@ int bytes_read;
             logger_wrapped = 1;
         }
 
+        /* Notify all interested parties new log data is available */
         obtain_lock(&logger_lock);
-
         broadcast_condition(&logger_cond);
-
         release_lock(&logger_lock);
     }
 
@@ -376,7 +442,7 @@ int bytes_read;
     if (logger_hrdcpy)
     {
         char* term_msg = _("HHCLG014I logger thread terminating\n");
-        int   term_msg_len = strlen( term_msg );
+        size_t term_msg_len = strlen(term_msg);
 #ifdef OPTION_TIMESTAMP_LOGFILE
         if (!sysblk.logoptnotime) logger_logfile_timestamp();
 #endif
@@ -397,7 +463,6 @@ int bytes_read;
 
 DLL_EXPORT void logger_init(void)
 {
-    initialize_join_attr(&logger_attr);     // (JOINable)
     initialize_condition (&logger_cond);
     initialize_lock (&logger_lock);
 
@@ -487,7 +552,7 @@ DLL_EXPORT void logger_init(void)
 
     setvbuf (logger_syslog[LOG_WRITE], NULL, _IONBF, 0);
 
-    if (create_thread (&logger_tid, &logger_attr,
+    if (create_thread (&logger_tid, JOINABLE,
                        logger_thread, NULL, "logger_thread")
        )
     {

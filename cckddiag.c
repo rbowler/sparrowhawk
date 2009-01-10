@@ -3,13 +3,21 @@
 /* 2003-02-07 James M. Morrison initial implementation               */
 /* portions borrowed from cckdcdsk & other CCKD code                 */
 
-// $Id: cckddiag.c,v 1.26 2007/06/23 00:04:03 ivan Exp $
+// $Id: cckddiag.c,v 1.28 2008/11/04 04:50:45 fish Exp $
 
 /*-------------------------------------------------------------------*/
 /* Diagnostic tool to display various CCKD data                      */
 /*-------------------------------------------------------------------*/
 
 // $Log: cckddiag.c,v $
+// Revision 1.28  2008/11/04 04:50:45  fish
+// Ensure consistent utility startup
+//
+// Revision 1.27  2008/06/22 05:54:30  fish
+// Fix print-formatting issue (mostly in tape modules)
+// that can sometimes, in certain circumstances,
+// cause herc to crash.  (%8.8lx --> I32_FMTX, etc)
+//
 // Revision 1.26  2007/06/23 00:04:03  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -141,15 +149,9 @@ int readpos(
         exit (1);
     }
     if (debug) 
-#if SIZEOF_SIZE_T == 8
         fprintf(stdout, 
-                "READPOS reading buf addr %p length %ld (0x%8.8lX)\n",
+                "READPOS reading buf addr "PTR_FMTx" length %"SIZE_T_FMT"d (0x"SIZE_T_FMTX")\n",
                 buf, len, len);
-#else
-        fprintf(stdout, 
-                "READPOS reading buf addr %p length %d (0x%8.8X)\n",
-                buf, len, len);
-#endif
     if (read(fd, buf, len) < (ssize_t)len) {
         fprintf(stdout, _("cckddiag: read error: %s\n"),
                         strerror(errno));
@@ -423,21 +425,7 @@ off_t           trkhdroff=0;            /* offset to assoc. trk hdr  */
 int             imglen=0;               /* track length              */
 char            pathname[MAX_PATH];     /* file path in host format  */
 
-#if defined(ENABLE_NLS)
-    setlocale(LC_ALL, "");
-    bindtextdomain(PACKAGE, HERC_LOCALEDIR);
-    textdomain(PACKAGE);
-#endif
-
-#ifdef EXTERNALGUI
-    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
-    {
-        extgui = 1;
-        argc--;
-        setvbuf(stderr, NULL, _IONBF, 0);
-        setvbuf(stdout, NULL, _IONBF, 0);
-    }
-#endif /*EXTERNALGUI*/
+    INITIALIZE_UTILITY("cckddiag");
 
     /* parse the arguments */
     argc--; 
@@ -516,13 +504,8 @@ char            pathname[MAX_PATH];     /* file path in host format  */
     /*---------------------------------------------------------------*/
     readpos(fd, &devhdr, 0, sizeof(devhdr));
     if (cmd_devhdr) {
-#if SIZEOF_SIZE_T == 8
-        fprintf(stdout, "\nDEVHDR - %ld (decimal) bytes:\n", 
+        fprintf(stdout, "\nDEVHDR - %"SIZE_T_FMT"d (decimal) bytes:\n", 
                 sizeof(devhdr));
-#else
-        fprintf(stdout, "\nDEVHDR - %d (decimal) bytes:\n", 
-                sizeof(devhdr));
-#endif
         data_dump(&devhdr, sizeof(devhdr));
     }
 
@@ -588,13 +571,8 @@ char            pathname[MAX_PATH];     /* file path in host format  */
     /*---------------------------------------------------------------*/
     readpos(fd, &cdevhdr, CKDDASD_DEVHDR_SIZE, sizeof(cdevhdr));
     if (cmd_cdevhdr) {
-#if SIZEOF_SIZE_T == 8
-        fprintf(stdout, "\nCDEVHDR - %ld (decimal) bytes:\n",
+        fprintf(stdout, "\nCDEVHDR - %"SIZE_T_FMT"d (decimal) bytes:\n",
                 sizeof(cdevhdr));
-#else
-        fprintf(stdout, "\nCDEVHDR - %d (decimal) bytes:\n",
-                sizeof(cdevhdr));
-#endif
         data_dump(&cdevhdr, sizeof(cdevhdr));
     }
 
@@ -616,13 +594,8 @@ char            pathname[MAX_PATH];     /* file path in host format  */
     readpos(fd, l1, CCKD_L1TAB_POS, n * CCKD_L1ENT_SIZE);
     /* L1TAB itself is not adjusted for endian-ness                  */
     if (cmd_l1tab) {
-#if SIZEOF_SIZE_T == 8
-        fprintf(stdout, "\nL1TAB - %ld (0x%8.8lX) bytes:\n",
+        fprintf(stdout, "\nL1TAB - %"SIZE_T_FMT"d (0x"SIZE_T_FMTX") bytes:\n",
                 (n * CCKD_L1ENT_SIZE), (n * CCKD_L1ENT_SIZE));
-#else
-        fprintf(stdout, "\nL1TAB - %d (0x%8.8X) bytes:\n",
-                (n * CCKD_L1ENT_SIZE), (n * CCKD_L1ENT_SIZE));
-#endif
         data_dump(l1, n * CCKD_L1ENT_SIZE);
     }
 
@@ -682,24 +655,13 @@ char            pathname[MAX_PATH];     /* file path in host format  */
         readpos(fd, l2, l2taboff, 
                 cdevhdr.numl2tab * sizeof(CCKD_L2ENT));
         if (cmd_l2tab) {
-#if SIZEOF_SIZE_T == 8
             fprintf(stdout, 
-                   "\nL2TAB - %ld (decimal) bytes\n", 
+                   "\nL2TAB - %"SIZE_T_FMT"d (decimal) bytes\n", 
                    (cdevhdr.numl2tab * sizeof(CCKD_L2ENT)));
-#else
-            fprintf(stdout, 
-                   "\nL2TAB - %d (decimal) bytes\n", 
-                   (cdevhdr.numl2tab * sizeof(CCKD_L2ENT)));
-#endif
             data_dump(l2, (cdevhdr.numl2tab * sizeof(CCKD_L2ENT)) );
         }
-#if SIZEOF_SIZE_T == 8
-        fprintf(stdout, "\nL2 index %d = L2TAB entry %ld bytes\n",
+        fprintf(stdout, "\nL2 index %d = L2TAB entry %"SIZE_T_FMT"d bytes\n",
                l2ndx, sizeof(CCKD_L2ENT) );
-#else
-        fprintf(stdout, "\nL2 index %d = L2TAB entry %d bytes\n",
-               l2ndx, sizeof(CCKD_L2ENT) );
-#endif
         data_dump(&l2[l2ndx], sizeof(CCKD_L2ENT) );
         trkhdroff = l2[l2ndx].pos;
         imglen = l2[l2ndx].len;

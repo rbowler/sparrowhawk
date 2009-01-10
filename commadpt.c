@@ -6,9 +6,34 @@
 /* Prime Maintainer : Ivan Warren                                    */
 /*-------------------------------------------------------------------*/
 
-// $Id: commadpt.c,v 1.39 2006/12/08 09:43:18 jj Exp $
+// $Id: commadpt.c,v 1.47 2008/11/04 05:56:31 fish Exp $
 //
 // $Log: commadpt.c,v $
+// Revision 1.47  2008/11/04 05:56:31  fish
+// Put ensure consistent create_thread ATTR usage change back in
+//
+// Revision 1.46  2008/11/03 15:31:58  rbowler
+// Back out consistent create_thread ATTR modification
+//
+// Revision 1.45  2008/10/18 09:32:20  fish
+// Ensure consistent create_thread ATTR usage
+//
+// Revision 1.44  2008/03/04 01:10:29  ivan
+// Add LEGACYSENSEID config statement to allow X'E4' Sense ID on devices
+// that originally didn't support it. Defaults to off for compatibility reasons
+//
+// Revision 1.43  2008/02/15 22:51:39  rbowler
+// Move Solaris specific definition of INADDR_NONE to hostopts.h
+//
+// Revision 1.42  2008/02/07 00:29:04  rbowler
+// Solaris build support by Jeff Savit
+//
+// Revision 1.41  2007/12/14 17:48:52  rbowler
+// Enable SENSE ID CCW for 2703,3410,3420
+//
+// Revision 1.40  2007/11/21 22:54:14  fish
+// Use new BEGIN_DEVICE_CLASS_QUERY macro
+//
 // Revision 1.39  2006/12/08 09:43:18  jj
 // Add CVS message log
 //
@@ -1610,6 +1635,16 @@ static int commadpt_init_handler (DEVBLK *dev, int argc, char *argv[])
         dev->fd=100;    /* Ensures 'close' function called */
         dev->commadpt->devnum=dev->devnum;
 
+        /* Initialize the device identifier bytes */
+        dev->numdevid = sysblk.legacysenseid ? 7 : 0;
+        dev->devid[0] = 0xFF;
+        dev->devid[1] = dev->devtype >> 8;
+        dev->devid[2] = dev->devtype & 0xFF;
+        dev->devid[3] = 0x00;
+        dev->devid[4] = dev->devtype >> 8;
+        dev->devid[5] = dev->devtype & 0xFF;
+        dev->devid[6] = 0x00;
+
         /* Initialize the CA lock */
         initialize_lock(&dev->commadpt->lock);
 
@@ -1645,7 +1680,7 @@ static int commadpt_init_handler (DEVBLK *dev, int argc, char *argv[])
         thread_name[sizeof(thread_name)-1]=0;
 
         dev->commadpt->curpending=COMMADPT_PEND_TINIT;
-        if(create_thread(&dev->commadpt->cthread,&sysblk.detattr,commadpt_thread,dev->commadpt,thread_name))
+        if(create_thread(&dev->commadpt->cthread,DETACHED,commadpt_thread,dev->commadpt,thread_name))
         {
             logmsg(D_("HHCCA022E create_thread: %s\n"),strerror(errno));
             release_lock(&dev->commadpt->lock);
@@ -1679,7 +1714,8 @@ static char *commadpt_lnctl_names[]={
 static void commadpt_query_device (DEVBLK *dev, char **class,
                 int buflen, char *buffer)
 {
-    *class = "LINE";
+    BEGIN_DEVICE_CLASS_QUERY( "LINE", dev, class, buflen, buffer );
+
     snprintf(buffer,buflen,"%s STA=%s CN=%s, EIB=%s OP=%s",
             commadpt_lnctl_names[dev->commadpt->lnctl],
             dev->commadpt->enabled?"ENA":"DISA",
@@ -1778,6 +1814,22 @@ BYTE    gotdle;                 /* Write routine DLE marker */
                 memcpy(iobuf,dev->sense,num);
                 *residual=count-num;
                 *unitstat=CSW_CE|CSW_DE;
+                break;
+
+        /*---------------------------------------------------------------*/
+        /* SENSE ID                                                      */
+        /*---------------------------------------------------------------*/
+        case 0xE4:
+                /* Calculate residual byte count */
+                num = (count < dev->numdevid) ? count : dev->numdevid;
+                *residual = count - num;
+                *more = count < dev->numdevid ? 1 : 0;
+
+                /* Copy device identifier bytes to channel I/O Buffer */
+                memcpy (iobuf, dev->devid, num);
+
+                /* Return unit status */
+                *unitstat = CSW_CE | CSW_DE;
                 break;
 
         /*---------------------------------------------------------------*/

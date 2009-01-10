@@ -2,12 +2,18 @@
 //         fishhang.h           verify/debug proper Hercules LOCK handling...
 ////////////////////////////////////////////////////////////////////////////////////
 // (c) Copyright "Fish" (David B. Trout), 2002-2007. Released under the Q Public License
-// (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
+// (http://www.hercules-390.org/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: fishhang.h,v 1.14 2007/06/23 00:04:09 ivan Exp $
+// $Id: fishhang.h,v 1.16 2008/11/29 21:22:09 rbowler Exp $
 //
 // $Log: fishhang.h,v $
+// Revision 1.16  2008/11/29 21:22:09  rbowler
+// Fix win64 warning C4267 conversion from size_t to unsigned int in fthreads.c
+//
+// Revision 1.15  2007/11/30 14:54:32  jmaynard
+// Changed conmicro.cx to hercules-390.org or conmicro.com, as needed.
+//
 // Revision 1.14  2007/06/23 00:04:09  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -115,7 +121,7 @@
     #define MyDeleteCriticalSection(pCS)                    (DeleteCriticalSection((CRITICAL_SECTION*)(pCS)))
 
   #ifdef _MSVC_
-    #define MyCreateThread(sec,stack,start,parm,flags,tid)  ((HANDLE) _beginthreadex((sec),(stack),(start),(parm),(flags),(tid)))
+    #define MyCreateThread(sec,stack,start,parm,flags,tid)  ((HANDLE) _beginthreadex((sec),(unsigned)(stack),(start),(parm),(flags),(tid)))
     #define MyExitThread(code)                              (_endthreadex((code)))
   #else // (Cygwin)
     #define MyCreateThread(sec,stack,start,parm,flags,tid)  (CreateThread((sec),(stack),(start),(parm),(flags),(tid)))

@@ -11,9 +11,44 @@
 /*                                                                           */
 /*---------------------------------------------------------------------------*/
 
-// $Id: hao.c,v 1.4 2007/06/23 00:04:10 ivan Exp $
+// $Id: hao.c,v 1.15 2008/11/30 09:12:41 bernard Exp $
 //
 // $Log: hao.c,v $
+// Revision 1.15  2008/11/30 09:12:41  bernard
+// End the licensed OS experiment
+//
+// Revision 1.14  2008/11/29 12:26:19  bernard
+// PGMPRDOS implementation within hoa. Not perfect! please provide command
+// hoa clear if you want to violate the PGMPRDOS warning.
+//
+// Revision 1.13  2008/11/04 05:56:31  fish
+// Put ensure consistent create_thread ATTR usage change back in
+//
+// Revision 1.12  2008/11/03 15:31:57  rbowler
+// Back out consistent create_thread ATTR modification
+//
+// Revision 1.11  2008/10/18 09:32:21  fish
+// Ensure consistent create_thread ATTR usage
+//
+// Revision 1.10  2008/08/23 11:55:23  fish
+// Increase max #of rules from 10 to 64
+//
+// Revision 1.9  2008/07/30 15:29:04  bernard
+// Strip herc prefix before checking the message.
+//
+// Revision 1.8  2008/07/30 06:25:27  fish
+// use 'if' statement instead of 'min' macro to fix Linux build error,
+// and remove redundant buffer initialization already done by hao_initialize.
+//
+// Revision 1.7  2008/07/29 05:55:41  fish
+// Fix buffer mgmt bug in hao_thread causing garbage
+//
+// Revision 1.6  2008/07/26 14:39:42  bernard
+// Foutje, bedankt!
+//
+// Revision 1.5  2008/07/26 14:30:17  bernard
+// Reject hao automatic commands. This causes deadlocks.
+//
 // Revision 1.4  2007/06/23 00:04:10  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -64,9 +99,10 @@
 #define HHCAO023E "HHCAO023E hao del command given without a valid index\n"
 #define HHCAO024E "HHCAO024E Rule at index %d not deleted, already empty\n"
 #define HHCAO025I "HHCAO025I Rule at index %d succesfully deleted\n"
+#define HHCA0026E "HHCA0026E Command not added, may cause dead locks\n"
 
 #define HAO_WKLEN    256    /* (maximum message length able to tolerate) */
-#define HAO_MAXRULE  10     /* (purely arbitrary and easily increasable) */
+#define HAO_MAXRULE  64     /* (purely arbitrary and easily increasable) */
 
 /*---------------------------------------------------------------------------*/
 /* local variables                                                           */
@@ -117,7 +153,7 @@ DLL_EXPORT void hao_initialize(void)
   memset(ao_msgbuf, 0, sizeof(ao_msgbuf));
 
   /* Start message monitoring thread */
-  if ( create_thread (&sysblk.haotid, &sysblk.joinattr,
+  if ( create_thread (&sysblk.haotid, JOINABLE,
     hao_thread, NULL, "hao_thread") )
   {
     logmsg(_("HHCIN004S Cannot create HAO thread: %s\n"),
@@ -344,6 +380,15 @@ static void hao_cmd(char *arg)
     return;
   }
 
+  /* check for hao command, prevent deadlock */
+  for(j = 0; !strncasecmp(&arg[j], "herc ", 4); j += 5);
+  if(!strcasecmp(&arg[j], "hao") || !strncasecmp(&arg[j], "hao ", 4))
+  {
+    release_lock(&ao_lock);
+    logmsg(HHCA0026E);
+    return;
+  }
+
   /* check for possible loop */
   for(j = 0; j < HAO_MAXRULE; j++)
   {
@@ -522,6 +567,7 @@ static void* hao_thread(void* dummy)
   int    msgamt  = 0;
   char*  msgend  = NULL;
   char   svchar  = 0;
+  int    bufamt  = 0;
 
   UNREFERENCED(dummy);
 
@@ -531,9 +577,6 @@ static void* hao_thread(void* dummy)
   while (!sysblk.panel_init && !sysblk.shutdown)
     usleep( 10 * 1000 );
 
-  /* initialize message buffer */
-  memset(ao_msgbuf, 0, sizeof(ao_msgbuf));
-
   /* Do until shutdown */
   while (!sysblk.shutdown && msgamt >= 0)
   {
@@ -541,7 +584,10 @@ static void* hao_thread(void* dummy)
     if ((msgamt = log_read(&msgbuf, &msgidx, LOG_BLOCK)) > 0 )
     {
       /* append to existing data */
-      strlcat( ao_msgbuf, msgbuf, sizeof(ao_msgbuf) );
+      if (msgamt > (int)((sizeof(ao_msgbuf) - 1) - bufamt) )
+          msgamt = (int)((sizeof(ao_msgbuf) - 1) - bufamt);
+      strncpy( &ao_msgbuf[bufamt], msgbuf, msgamt );
+      ao_msgbuf[bufamt += msgamt] = 0;
       msgbuf = ao_msgbuf;
 
       /* process only complete messages */
@@ -560,9 +606,7 @@ static void* hao_thread(void* dummy)
       }
 
       /* shift message buffer */
-      msgamt = (ao_msgbuf + sizeof(ao_msgbuf)) - msgbuf;
-      memmove( ao_msgbuf, msgbuf, msgamt );
-      ao_msgbuf[msgamt] = 0;
+      memmove( ao_msgbuf, msgbuf, bufamt -= (msgbuf - ao_msgbuf) );
     }
   }
 
@@ -585,6 +629,10 @@ DLL_EXPORT void hao_message(char *buf)
 
   /* copy and strip spaces */
   hao_cpstrp(work, buf);
+
+  /* strip the herc prefix */
+  while(!strncmp(work, "herc", 4))
+    hao_cpstrp(work, &work[4]);
 
   /* don't react on own messages */
   if(!strncmp(work, "HHCAO", 5))

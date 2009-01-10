@@ -2,9 +2,34 @@
 /*              (c) Copyright Jan Jaeger, 1999-2007                  */
 /*              Miscellaneous System Command Routines                */
 
-// $Id: hscmisc.c,v 1.60 2007/06/23 00:04:11 ivan Exp $
+// $Id: hscmisc.c,v 1.68 2008/11/04 05:56:31 fish Exp $
 //
 // $Log: hscmisc.c,v $
+// Revision 1.68  2008/11/04 05:56:31  fish
+// Put ensure consistent create_thread ATTR usage change back in
+//
+// Revision 1.67  2008/11/03 15:31:55  rbowler
+// Back out consistent create_thread ATTR modification
+//
+// Revision 1.66  2008/10/18 09:32:21  fish
+// Ensure consistent create_thread ATTR usage
+//
+// Revision 1.65  2008/05/11 22:30:37  rbowler
+// V command should display "dat off" instead of "primary" if addr is real
+//
+// Revision 1.64  2008/04/09 13:53:45  rbowler
+// Operand disassembly for RIL instructions
+//
+// Revision 1.63  2008/04/09 09:09:22  bernard
+// EXRL instruction
+//
+// Revision 1.62  2008/03/07 17:46:42  ptl00
+// Add pri, sec, home options to v command
+//
+// Revision 1.61  2008/02/19 11:49:19  ivan
+// - Move setting of CPU priority after spwaning timer thread
+// - Added support for Posix 1003.1e capabilities
+//
 // Revision 1.60  2007/06/23 00:04:11  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -239,7 +264,7 @@ TID tid;
         cancel_wait_sigq();
     else
         if(can_signal_quiesce() && !signal_quiesce(0,0))
-            create_thread(&tid, &sysblk.detattr, do_shutdown_wait,
+            create_thread(&tid, DETACHED, do_shutdown_wait,
                           NULL, "do_shutdown_wait");
         else
             do_shutdown_now();
@@ -1012,6 +1037,26 @@ char    buf[100];                       /* Message buffer            */
     maxadr = 0x7FFFFFFF;
   #endif /*!defined(FEATURE_ESAME)*/
 
+    while((opnd && *opnd != '\0') &&
+      (*opnd == ' ' || *opnd == '\t'))
+        opnd++;
+
+    switch(toupper(*opnd))
+    {
+        case 'P': /* primary */
+          arn = USE_PRIMARY_SPACE;
+          opnd++;
+          break;
+        case 'S': /* secondary */
+          arn = USE_SECONDARY_SPACE;
+          opnd++;
+          break;
+        case 'H': /* home */
+          arn = USE_HOME_SPACE;
+          opnd++;
+          break;
+    }
+
     /* Parse the range or alteration operand */
     len = parse_range (opnd, maxadr, &saddr, &eaddr, newval);
     if (len < 0) return;
@@ -1042,7 +1087,9 @@ char    buf[100];                       /* Message buffer            */
             xcode = ARCH_DEP(virt_to_abs) (&raddr, &stid, vaddr, arn,
                                             regs, ACCTYPE_LRA);
             n = sprintf (buf, "V:"F_VADR" ", vaddr);
-            if (stid == TEA_ST_PRIMARY)
+            if (REAL_MODE(&regs->psw))
+                n += sprintf (buf+n, "(dat off)");
+            else if (stid == TEA_ST_PRIMARY)
                 n += sprintf (buf+n, "(primary)");
             else if (stid == TEA_ST_SECNDRY)
                 n += sprintf (buf+n, "(secondary)");
@@ -1152,7 +1199,8 @@ REGS   *regs;                           /* Copied regs               */
         && opcode != 0x84 && opcode != 0x85
         && opcode != 0xA5 && opcode != 0xA7
         && opcode != 0xB3
-        && opcode != 0xC0 && opcode != 0xEC)
+        && opcode != 0xC0 && opcode != 0xC4 && opcode != 0xC6
+        && opcode != 0xEC)
     {
         /* Calculate the effective address of the first operand */
         b1 = inst[2] >> 4;
@@ -1178,7 +1226,8 @@ REGS   *regs;                           /* Copied regs               */
 
     /* Process the second storage operand */
     if (ilc > 4
-        && opcode != 0xC0 && opcode != 0xE3 && opcode != 0xEB
+        && opcode != 0xC0 && opcode != 0xC4 && opcode != 0xC6
+        && opcode != 0xE3 && opcode != 0xEB
         && opcode != 0xEC && opcode != 0xED)
     {
         /* Calculate the effective address of the second operand */
@@ -1220,6 +1269,21 @@ REGS   *regs;                           /* Copied regs               */
         addr2 = regs->GR(b2) & ADDRESS_MAXWRAP(regs);
     }
 
+    /* Calculate the operand address for RIL_A instructions */
+    if ((opcode == 0xC0 &&
+            ((inst[1] & 0x0F) == 0x00
+            || (inst[1] & 0x0F) == 0x04
+            || (inst[1] & 0x0F) == 0x05))
+        || opcode == 0xC4
+        || opcode == 0xC6)
+    {
+        S64 offset = 2LL*(S32)(fetch_fw(inst+2));
+        addr1 = (likely(!regs->execflag)) ? 
+                        PSW_IA(regs, offset) : \
+                        (regs->ET + offset) & ADDRESS_MAXWRAP(regs);
+        b1 = 0;
+    }
+
     /* Display storage at first storage operand location */
     if (b1 >= 0)
     {
@@ -1228,7 +1292,11 @@ REGS   *regs;                           /* Copied regs               */
                                                 ACCTYPE_READ);
         else
             n = ARCH_DEP(display_virt) (regs, addr1, buf, b1,
-                                (opcode == 0x44 ? ACCTYPE_INSTFETCH :
+                                (opcode == 0x44 
+#if defined(FEATURE_EXECUTE_EXTENSIONS_FACILITY)
+                                 || (opcode == 0xc6 && !(inst[1] & 0x0f))
+#endif /*defined(FEATURE_EXECUTE_EXTENSIONS_FACILITY)*/
+                                                ? ACCTYPE_INSTFETCH :
                                  opcode == 0xB1 ? ACCTYPE_LRA :
                                                   ACCTYPE_READ));
         if(sysblk.cpus>1)
@@ -1446,6 +1514,7 @@ int pid, status;
 
         /* Drop ROOT authority (saved uid) */
         SETMODE(TERM);
+        DROP_ALL_CAPS();
 
         argv[0] = "sh";
         argv[1] = "-c";

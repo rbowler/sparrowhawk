@@ -1,7 +1,7 @@
 /* ESAME.C      (c) Copyright Jan Jaeger, 2000-2007                  */
 /*              ESAME (z/Architecture) instructions                  */
 
-// $Id: esame.c,v 1.189 2007/06/23 00:04:09 ivan Exp $
+// $Id: esame.c,v 1.202 2008/05/06 22:15:42 rbowler Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements the instructions which exist in ESAME      */
@@ -20,6 +20,45 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: esame.c,v $
+// Revision 1.202  2008/05/06 22:15:42  rbowler
+// Fix warning: operation on `p1' may be undefined
+//
+// Revision 1.201  2008/04/11 14:28:29  bernard
+// Integrate regs->exrl into base Hercules code.
+//
+// Revision 1.200  2008/04/09 07:36:51  bernard
+// Allign to Rogers terminal ;-)
+//
+// Revision 1.199  2008/04/08 23:57:15  rbowler
+// Fix '#' : invalid character : possibly the result of a macro expansion
+//
+// Revision 1.198  2008/04/08 17:12:47  bernard
+// Added execute relative long instruction
+//
+// Revision 1.197  2008/03/16 00:04:37  rbowler
+// Replace ACC_ARMODE by USE_ARMODE for LPTEA
+//
+// Revision 1.196  2008/03/06 16:10:35  rbowler
+// Remove extraneous trailing blanks (cosmetic change only)
+//
+// Revision 1.195  2008/03/01 12:19:04  rbowler
+// Rename new features to include the word facility
+//
+// Revision 1.194  2008/02/28 22:05:10  ptl00
+// Fix RP for z/arch and mode switch trace
+//
+// Revision 1.193  2008/02/28 10:11:50  rbowler
+// STFL bit settings for new features in zPOP-06
+//
+// Revision 1.192  2008/02/15 21:17:55  ptl00
+// Add pic13 check to RP
+//
+// Revision 1.191  2007/11/17 21:57:52  rbowler
+// Correct comments on two #endif statements
+//
+// Revision 1.190  2007/11/15 21:34:01  rbowler
+// EPSW correction in accord with ESA/390 POP ninth edition
+//
 // Revision 1.189  2007/06/23 00:04:09  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -154,7 +193,7 @@ int     r1, unused;                     /* Values of R fields        */
 
     /* Program check if reserved bits are non-zero */
     FPC_CHECK(regs->GR_L(r1), regs);
-     
+
     /* Load FPC register from R1 register bits 32-63 */
     regs->fpc = regs->GR_L(r1);
 
@@ -249,14 +288,16 @@ U16     psw_offset;                     /* Offset to new PSW         */
 U16     ar_offset;                      /* Offset to new AR          */
 U16     gr_offset;                      /* Offset to new GR          */
 U32     ar;                             /* Copy of new AR            */
+U32     gr = 0;                         /* Copy of new GR            */
 #if defined(FEATURE_ESAME)
-U16     grd_offset;                     /* Offset of disjoint GR_H   */
+U16     grd_offset = 0;                 /* Offset of disjoint GR_H   */
 BYTE    psw[16];                        /* Copy of new PSW           */
-U64     gr;                             /* Copy of new GR            */
+U64     gr8 = 0;                        /* Copy of new GR - 8 bytes  */
+U32     grd = 0;                        /* Copy of new GR - disjoint */
 U64     ia;                             /* ia for trace              */
+BYTE    amode64;                        /* save for amod64           */
 #else /*!defined(FEATURE_ESAME)*/
 BYTE    psw[8];                         /* Copy of new PSW           */
-U32     gr;                             /* Copy of new GR            */
 U32     ia;                             /* ia for trace              */
 #endif /*!defined(FEATURE_ESAME)*/
 BYTE    amode;                          /* amode for trace           */
@@ -269,7 +310,8 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
     S(inst, regs, b2, effective_addr2);
 
     /* Determine the address of the parameter list */
-    pl_addr = !regs->execflag ? PSW_IA(regs, 0) : (regs->ET + 4);
+    pl_addr = !regs->execflag ? PSW_IA(regs, 0) :
+               regs->exrl ? (regs->ET + 6) : (regs->ET + 4);
 
     /* Fetch flags from the instruction address space */
     mn = MADDR (pl_addr, USE_INST_SPACE, regs, ACCTYPE_INSTFETCH, regs->psw.pkey);
@@ -324,9 +366,20 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
 
     /* Fetch the new gr from operand address + GPR offset */
 #if defined(FEATURE_ESAME)
-    if(flags & 0x0002)
-        gr = ARCH_DEP(vfetch8) ((effective_addr2 + gr_offset)
+    /* General Register Field 1 is eight bytes */
+    if((flags & 0x0003) == 0x0002)
+    {
+        gr8 = ARCH_DEP(vfetch8) ((effective_addr2 + gr_offset)
                                 & ADDRESS_MAXWRAP(regs), b2, regs);
+    }
+    /* General Register Field 1 and 2 are four bytes - disjoint */
+    else if((flags & 0x0003) == 0x0003)
+    {
+        gr = ARCH_DEP(vfetch4) ((effective_addr2 + gr_offset)
+                                & ADDRESS_MAXWRAP(regs), b2, regs);
+        grd = ARCH_DEP(vfetch4) ((effective_addr2 + grd_offset)
+                                & ADDRESS_MAXWRAP(regs), b2, regs);
+    }
     else
 #endif /*defined(FEATURE_ESAME)*/
         gr = ARCH_DEP(vfetch4) ((effective_addr2 + gr_offset)
@@ -334,18 +387,22 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
 
 #if defined(FEATURE_TRACING)
 #if defined(FEATURE_ESAME)
-    FETCH_DW(ia, psw + 8);
-    amode = psw[3] & 0x01;
+    /* fetch 8 or 4 byte IA depending on psw operand size */
+    if (flags & 0x0004)
+        FETCH_DW(ia, psw + 8);
+    else
+        FETCH_FW(ia, psw + 4);
+    amode64 = psw[3] & 0x01;
 #else /*!defined(FEATURE_ESAME)*/
     FETCH_FW(ia, psw + 4);
     ia &= 0x7FFFFFFF;
-    amode = psw[4] & 0x80;
 #endif /*!defined(FEATURE_ESAME)*/
+    amode = psw[4] & 0x80;
 
 #if defined(FEATURE_ESAME)
     /* Add a mode trace entry when switching in/out of 64 bit mode */
-    if((regs->CR(12) & CR12_MTRACE)  && regs->psw.amode64 != amode)
-        ARCH_DEP(trace_ms) (regs->CR(12) & CR12_BRTRACE, ia | regs->psw.amode64 ? amode << 31 : 0, regs);
+    if((regs->CR(12) & CR12_MTRACE) && (regs->psw.amode64 != amode64))
+        newcr12 = ARCH_DEP(trace_ms) (regs->CR(12) & CR12_BRTRACE ? 1 : 0, ia, regs);
     else
 #endif /*defined(FEATURE_ESAME)*/
     if (regs->CR(12) & CR12_BRTRACE)
@@ -358,10 +415,11 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
     save_psw = regs->psw;
 
 
-    /* Use bits 16-23, 32-63 of psw in operand, other bits from old psw */
+    /* Use bytes 0 and 1 of old psw and byte 2 from operand */
     psw[0] = save_psw.sysmask;
-    psw[1] = save_psw.pkey | 0x08 | save_psw.states;
-    psw[3] = 0;
+    psw[1] = save_psw.pkey | save_psw.states;
+    /* ignore bits 24-30 */
+    psw[3] = 0x01 & psw[3];
 
 
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
@@ -370,6 +428,12 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         regs->program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 #endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
 
+    /* Special operation exception when setting AR space mode
+       and ASF is off */
+    if(!REAL_MODE(&regs->psw)
+      && ((psw[2] & 0xC0) == 0x40)
+      && !ASF_ENABLED(regs) )
+        regs->program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* Privileged Operation exception when setting home
        space mode in problem state */
@@ -379,10 +443,10 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         regs->program_interrupt (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
 
 #if defined(FEATURE_ESAME)
+    /* Handle 16 byte psw operand */
     if(flags & 0x0004)
     {
-        /* Do not check esame bit (force to zero) */
-        psw[1] &= ~0x08;
+        psw[1] &= ~0x08; /* force bit 12 off */
         if( ARCH_DEP(load_psw) (regs, psw) )/* only check invalid IA not odd */
         {
             /* restore the psw */
@@ -391,13 +455,16 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
             regs->program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
         }
     }
+    /* Handle 8 byte psw operand */
     else
-#endif /*defined(FEATURE_ESAME)*/
     {
-#if defined(FEATURE_ESAME)
-        /* Do not check amode64 bit (force to zero) */
+        /* Save amode64, do not check amode64 bit (force to zero) */
+        /* This is so s390_load_psw will work.                    */
+        /* Checks for amode64 will be done a few lines later      */
+        amode64 = psw[3] & 01;
         psw[3] &= ~0x01;
 #endif /*defined(FEATURE_ESAME)*/
+        psw[1] |= 0x08; /* force bit 12 on */
         if( s390_load_psw(regs, psw) )
         {
             /* restore the psw */
@@ -407,8 +474,29 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         }
 #if defined(FEATURE_ESAME)
         regs->psw.states &= ~BIT(PSW_NOTESAME_BIT);
-#endif /*defined(FEATURE_ESAME)*/
+        /* clear high word of IA since operand was 8-byte psw */
+        regs->psw.IA_H = 0;
+        /* Check original amode64 and restore and do checks */
+        if (amode64)
+        {
+            /* if amode64 (31) on, then amode (32) must be on too */
+            if (!regs->psw.amode)
+            {
+                /* restore the psw */
+                regs->psw = save_psw;
+                /* And generate a program interrupt */
+                regs->program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+            }
+            regs->psw.amode64 = 1;
+            regs->psw.AMASK = AMASK64;
+        }
+        else
+        {
+            regs->psw.amode64 = 0;
+            regs->psw.AMASK_H = 0;
+        }
     }
+#endif /*defined(FEATURE_ESAME)*/
 
     /* Check for odd IA in psw */
     if(regs->psw.IA & 0x01)
@@ -424,15 +512,20 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
 
     /* Update general register b2 */
 #if defined(FEATURE_ESAME)
-    if(flags & 0x0002)
-        regs->GR_G(b2) = gr;
+    if((flags & 0x0003) == 0x0002)
+        regs->GR_G(b2) = gr8;
+    else if((flags & 0x0003) == 0x0003)
+    {
+        regs->GR_L(b2) = gr;
+        regs->GR_H(b2) = grd;
+    }
     else
 #endif /*defined(FEATURE_ESAME)*/
         regs->GR_L(b2) = gr;
 
 #ifdef FEATURE_TRACING
     /* Update trace table address if branch tracing is on */
-    if (regs->CR(12) & CR12_BRTRACE)
+    if (newcr12)
         regs->CR(12) = newcr12;
 #endif /*FEATURE_TRACING*/
 
@@ -1124,8 +1217,7 @@ int     acctype = ACCTYPE_LPTEA;        /* Storage access type       */
         n = USE_PRIMARY_SPACE;
         break;
     case 1: /* Use ALET in access register r2 */
-        n = r2;
-        acctype |= ACC_ARMODE;
+        n = USE_ARMODE | r2;
         break;
     case 2: /* Use ASCE in control register 7 */
         n = USE_SECONDARY_SPACE;
@@ -1606,7 +1698,15 @@ QWORD   currpsw;                        /* Work area for PSW         */
     /* If R2 specifies a register other than register zero,
        load PSW bits 32-63 into bits 32-63 of the R2 register */
     if(r2 != 0)
+    {
         FETCH_FW(regs->GR_L(r2), currpsw+4);
+
+#if !defined(FEATURE_ESAME)
+        /* The Ninth Edition of ESA/390 POP (SA22-7201-08) requires
+           the low 31 bits to be set to zeroes in ESA/390 mode */
+        regs->GR_L(r2) &= 0x80000000;
+#endif /*!defined(FEATURE_ESAME)*/
+    }
 
 } /* end DEF_INST(extract_psw) */
 #endif /*defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)*/
@@ -2088,7 +2188,7 @@ BYTE    rbyte[4];                       /* Register bytes from mask  */
         if (r3 & 0x8) rbyte[i++] = (regs->GR_H(r1) >> 24) & 0xFF;
         if (r3 & 0x4) rbyte[i++] = (regs->GR_H(r1) >> 16) & 0xFF;
         if (r3 & 0x2) rbyte[i++] = (regs->GR_H(r1) >>  8) & 0xFF;
-        if (r3 & 0x1) rbyte[i++] = (regs->GR_H(r1)      ) & 0xFF;  
+        if (r3 & 0x1) rbyte[i++] = (regs->GR_H(r1)      ) & 0xFF;
 
         if (i)
             ARCH_DEP(vstorec) (rbyte, i-1, effective_addr2, b2, regs);
@@ -2144,7 +2244,8 @@ U64     gr0, gr1;                       /* Result register workareas */
         if( OPEN_IC_PTIMER(regs) )
         {
             RELEASE_INTLOCK(regs);
-            UPD_PSW_IA(regs, PSW_IA(regs, !regs->execflag ? -6 : -4));
+            UPD_PSW_IA(regs, PSW_IA(regs, !regs->execflag ? -6 :
+                                                regs->exrl ? -6 : -4));
             RETURN_INTCHECK(regs);
         }
     }
@@ -2160,9 +2261,9 @@ U64     gr0, gr1;                       /* Result register workareas */
     /* The second operand is placed in general register 1 */
     gr1 = ARCH_DEP(vfetch8) (effective_addr2, b2, regs);
 
-    /* The eight bytes at the third operand location replace the contents 
+    /* The eight bytes at the third operand location replace the contents
        of general register R3. The operands are treated as unsigned 64-bit
-       integers. The contents of R3 is treated according to current 
+       integers. The contents of R3 is treated according to current
        addressing mode. In AR mode, access register R3 is used. */
     regs->GR_G(r3) = ARCH_DEP(wfetch8) (regs->GR_G(r3), r3, regs);
     regs->GR_G(0) = gr0;
@@ -2200,7 +2301,7 @@ static const unsigned int               /* Turn reg bytes off by mask*/
     case 15:
         /* Optimized case */
         regs->GR_H(r1) = ARCH_DEP(vfetch4) (effective_addr2, b2, regs);
-        regs->psw.cc = regs->GR_H(r1) ? regs->GR_H(r1) & 0x80000000 ? 
+        regs->psw.cc = regs->GR_H(r1) ? regs->GR_H(r1) & 0x80000000 ?
                        1 : 2 : 0;
         break;
 
@@ -3444,7 +3545,7 @@ U32     i, j;                           /* Integer work areas        */
 
 #if defined(FEATURE_ESAME)
 /*-------------------------------------------------------------------*/
-/* EB0A SRAG  - Shift Right single Long                        [RSY] */
+/* EB0A SRAG  - Shift Right Single Long                        [RSY] */
 /*-------------------------------------------------------------------*/
 DEF_INST(shift_right_single_long)
 {
@@ -3940,8 +4041,8 @@ U32    *p1, *p2;                        /* Mainstor pointers         */
     {
         /* Boundary not crossed */
         n >>= 2;
-        for (i = 0; i < n; i++)
-            regs->GR_H((r1 + i) & 0xF) = fetch_fw (p1++);
+        for (i = 0; i < n; i++, p1++)
+            regs->GR_H((r1 + i) & 0xF) = fetch_fw (p1);
     }
     else
     {
@@ -3954,11 +4055,11 @@ U32    *p1, *p2;                        /* Mainstor pointers         */
         {
             /* Addresses are word aligned */
             m >>= 2;
-            for (i = 0; i < m; i++)
-                regs->GR_H((r1 + i) & 0xF) = fetch_fw (p1++);
+            for (i = 0; i < m; i++, p1++)
+                regs->GR_H((r1 + i) & 0xF) = fetch_fw (p1);
             n >>= 2;
-            for ( ; i < n; i++)
-                regs->GR_H((r1 + i) & 0xF) = fetch_fw (p2++);
+            for ( ; i < n; i++, p2++)
+                regs->GR_H((r1 + i) & 0xF) = fetch_fw (p2);
         }
         else
         {
@@ -4441,7 +4542,7 @@ VADR    ia = PSW_IA(regs, 0);           /* Unupdated instruction addr*/
 #if defined(FEATURE_ESAME)
     /* Add a mode trace entry when switching in/out of 64 bit mode */
     if((regs->CR(12) & CR12_MTRACE) && regs->psw.amode64)
-        ARCH_DEP(trace_ms) (0, PSW_IA(regs, 0), regs);
+        regs->CR(12) = ARCH_DEP(trace_ms) (0, 0, regs);
 #endif /*defined(FEATURE_ESAME)*/
 
 #if defined(FEATURE_ESAME)
@@ -4477,7 +4578,7 @@ VADR    ia = PSW_IA(regs, 0);           /* Unupdated instruction addr*/
 #if defined(FEATURE_ESAME)
     /* Add a mode trace entry when switching in/out of 64 bit mode */
     if((regs->CR(12) & CR12_MTRACE) && regs->psw.amode64)
-        ARCH_DEP(trace_ms) (0, PSW_IA(regs,0) , regs);
+        regs->CR(12) = ARCH_DEP(trace_ms) (0, 0, regs);
 #endif /*defined(FEATURE_ESAME)*/
 
 #if defined(FEATURE_ESAME)
@@ -4506,7 +4607,7 @@ DEF_INST(set_addressing_mode_64)
 #if defined(FEATURE_ESAME)
     /* Add a mode trace entry when switching in/out of 64 bit mode */
     if((regs->CR(12) & CR12_MTRACE) && !regs->psw.amode64)
-        ARCH_DEP(trace_ms) (0, PSW_IA(regs, 0), regs);
+        regs->CR(12) = ARCH_DEP(trace_ms) (0, 0, regs);
 #endif /*defined(FEATURE_ESAME)*/
 
     regs->psw.amode = regs->psw.amode64 = 1;
@@ -4837,12 +4938,18 @@ BYTE ARCH_DEP(stfl_data)[8] = {
 #endif /*defined(FEATURE_STORE_FACILITY_LIST_EXTENDED)*/
                  ,
                  0
+#if defined(FEATURE_ENHANCED_DAT_FACILITY)                      /*208*/
+                 | STFL_1_ENHANCED_DAT                          /*208*/
+#endif /*defined(FEATURE_ENHANCED_DAT_FACILITY)*/               /*208*/
 #if defined(FEATURE_SENSE_RUNNING_STATUS)
                  | STFL_1_SENSE_RUN_STATUS
 #endif /*defined(FEATURE_SENSE_RUNNING_STATUS)*/
 #if defined(FEATURE_CONDITIONAL_SSKE)
                  | STFL_1_CONDITIONAL_SSKE
 #endif /*defined(FEATURE_CONDITIONAL_SSKE)*/
+#if defined(FEATURE_CONFIGURATION_TOPOLOGY_FACILITY)            /*208*/
+                 | STFL_1_CONFIG_TOPOLOGY                       /*208*/
+#endif /*defined(FEATURE_CONFIGURATION_TOPOLOGY_FACILITY)*/     /*208*/
                  ,
                  0
 #if defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_2)
@@ -4859,7 +4966,7 @@ BYTE ARCH_DEP(stfl_data)[8] = {
                  | STFL_2_HFP_MULT_ADD_SUB
 #endif /*defined(FEATURE_HFP_MULTIPLY_ADD_SUBTRACT)*/
 #if defined(FEATURE_EXTENDED_IMMEDIATE)
-                 | STFL_2_EXTENDED_IMMED  
+                 | STFL_2_EXTENDED_IMMED
 #endif /*defined(FEATURE_EXTENDED_IMMEDIATE)*/
 #if defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_3)
                  | STFL_2_TRAN_FAC3
@@ -4875,9 +4982,12 @@ BYTE ARCH_DEP(stfl_data)[8] = {
 #if defined(FEATURE_STORE_CLOCK_FAST)
                  | STFL_3_STORE_CLOCK_FAST
 #endif /*defined(FEATURE_STORE_CLOCK_FAST)*/
-#if defined(FEATURE_MVCOS)
-                 | STFL_3_MVCOS
-#endif /*defined(FEATURE_MVCOS)*/
+#if defined(FEATURE_PARSING_ENHANCEMENT_FACILITY)               /*208*/
+                 | STFL_3_PARSING_ENHANCE                       /*208*/
+#endif /*defined(FEATURE_PARSING_ENHANCEMENT_FACILITY)*/        /*208*/
+#if defined(FEATURE_MOVE_WITH_OPTIONAL_SPECIFICATIONS)          /*208*/
+                 | STFL_3_MVCOS                                 /*208*/
+#endif /*defined(FEATURE_MOVE_WITH_OPTIONAL_SPECIFICATIONS)*/   /*208*/
 #if defined(FEATURE_TOD_CLOCK_STEERING)
                  | STFL_3_TOD_CLOCK_STEER
 #endif /*defined(FEATURE_TOD_CLOCK_STEERING)*/
@@ -4892,6 +5002,15 @@ BYTE ARCH_DEP(stfl_data)[8] = {
 #if defined(FEATURE_COMPARE_AND_SWAP_AND_STORE)
                  | STFL_4_CSSF
 #endif /*defined(FEATURE_COMPARE_AND_SWAP_AND_STORE)*/
+#if defined(FEATURE_COMPARE_AND_SWAP_AND_STORE_FACILITY_2)      /*208*/
+                 | STFL_4_CSSF2                                 /*208*/
+#endif /*FEATURE_COMPARE_AND_SWAP_AND_STORE_FACILITY_2*/        /*208*/
+#if defined(FEATURE_GENERAL_INSTRUCTIONS_EXTENSION_FACILITY)    /*208*/
+                 | STFL_4_GEN_INST_EXTN                         /*208*/
+#endif /*FEATURE_GENERAL_INSTRUCTIONS_EXTENSION_FACILITY*/      /*208*/
+#if defined(FEATURE_EXECUTE_EXTENSIONS_FACILITY)                /*208*/
+                 | STFL_4_EXECUTE_EXTN                          /*208*/
+#endif /*defined(FEATURE_EXECUTE_EXTENSIONS_FACILITY)*/         /*208*/
                  ,
                  0
 #if defined(FEATURE_FPS_ENHANCEMENT)
@@ -4937,7 +5056,7 @@ void ARCH_DEP(adjust_stfl_data) ()
         ARCH_DEP(stfl_data)[0] |= STFL_0_ASN_LX_REUSE;
     else
         ARCH_DEP(stfl_data)[0] &= ~STFL_0_ASN_LX_REUSE;
-#endif
+#endif /*defined(FEATURE_ASN_AND_LX_REUSE)*/
 } /* end ARCH_DEP(adjust_stfl_data) */
 
 /*-------------------------------------------------------------------*/
@@ -4991,7 +5110,7 @@ int     cc;                             /* Condition code            */
 
     /* Adjust the facility list to account for runtime options */
     ARCH_DEP(adjust_stfl_data)();
-     
+
     /* Calculate number of doublewords of facilities defined */
     nmax = sizeof(ARCH_DEP(stfl_data)) / 8;
 
@@ -5022,7 +5141,7 @@ int     cc;                             /* Condition code            */
 } /* end DEF_INST(store_facility_list_extended) */
 #endif /*defined(FEATURE_STORE_FACILITY_LIST_EXTENDED)*/
 
-#endif /*defined(_900) || defined(FEATURE_ESAME)*/
+#endif /*defined(FEATURE_ESAME) || defined(FEATURE_ESAME_N3_ESA390)*/
 
 
 #if defined(FEATURE_LOAD_REVERSED) && defined(FEATURE_ESAME)
@@ -6527,7 +6646,7 @@ static const unsigned int               /* Turn reg bytes off by mask*/
     case 15:
         /* Optimized case */
         regs->GR_L(r1) = ARCH_DEP(vfetch4) (effective_addr2, b2, regs);
-        regs->psw.cc = regs->GR_L(r1) ? regs->GR_L(r1) & 0x80000000 ? 
+        regs->psw.cc = regs->GR_L(r1) ? regs->GR_L(r1) & 0x80000000 ?
                        1 : 2 : 0;
         break;
 
@@ -6612,16 +6731,16 @@ U32    *p1, *p2 = NULL;                 /* Mainstor pointers         */
         m = n;
 
     /* Load from first page */
-    for (i = 0; i < m; i++)
+    for (i = 0; i < m; i++, p1++)
     {
-        regs->AR((r1 + i) & 0xF) = fetch_fw (p1++);
+        regs->AR((r1 + i) & 0xF) = fetch_fw (p1);
         SET_AEA_AR(regs, (r1 + i) & 0xF);
     }
 
     /* Load from next page */
-    for ( ; i < n; i++)
+    for ( ; i < n; i++, p2++)
     {
-        regs->AR((r1 + i) & 0xF) = fetch_fw (p2++);
+        regs->AR((r1 + i) & 0xF) = fetch_fw (p2);
         SET_AEA_AR(regs, (r1 + i) & 0xF);
     }
 
@@ -6695,8 +6814,8 @@ U32    *p1, *p2;                        /* Mainstor pointers         */
     {
         /* Boundary not crossed */
         n >>= 2;
-        for (i = 0; i < n; i++)
-            regs->GR_L((r1 + i) & 0xF) = fetch_fw (p1++);
+        for (i = 0; i < n; i++, p1++)
+            regs->GR_L((r1 + i) & 0xF) = fetch_fw (p1);
     }
     else
     {
@@ -6709,11 +6828,11 @@ U32    *p1, *p2;                        /* Mainstor pointers         */
         {
             /* Addresses are word aligned */
             m >>= 2;
-            for (i = 0; i < m; i++)
-                regs->GR_L((r1 + i) & 0xF) = fetch_fw (p1++);
+            for (i = 0; i < m; i++, p1++)
+                regs->GR_L((r1 + i) & 0xF) = fetch_fw (p1);
             n >>= 2;
-            for ( ; i < n; i++)
-                regs->GR_L((r1 + i) & 0xF) = fetch_fw (p2++);
+            for ( ; i < n; i++, p2++)
+                regs->GR_L((r1 + i) & 0xF) = fetch_fw (p2);
         }
         else
         {
@@ -6968,7 +7087,7 @@ BYTE    rbyte[4];                       /* Byte work area            */
         if (r3 & 0x8) rbyte[i++] = (regs->GR_L(r1) >> 24) & 0xFF;
         if (r3 & 0x4) rbyte[i++] = (regs->GR_L(r1) >> 16) & 0xFF;
         if (r3 & 0x2) rbyte[i++] = (regs->GR_L(r1) >>  8) & 0xFF;
-        if (r3 & 0x1) rbyte[i++] = (regs->GR_L(r1)      ) & 0xFF;  
+        if (r3 & 0x1) rbyte[i++] = (regs->GR_L(r1)      ) & 0xFF;
 
         if (i)
             ARCH_DEP(vstorec) (rbyte, i-1, effective_addr2, b2, regs);
@@ -7216,7 +7335,7 @@ U32     i2;                             /* 32-bit operand value      */
 
 } /* end DEF_INST(add_fullword_immediate) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C2x8 AGFI  - Add Long Fullword Immediate                    [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7239,7 +7358,7 @@ U32     i2;                             /* 32-bit operand value      */
 
 } /* end DEF_INST(add_long_fullword_immediate) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C2xB ALFI  - Add Logical Fullword Immediate                 [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7258,7 +7377,7 @@ U32     i2;                             /* 32-bit operand value      */
 
 } /* end DEF_INST(add_logical_fullword_immediate) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C2xA ALGFI - Add Logical Long Fullword Immediate            [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7277,7 +7396,7 @@ U32     i2;                             /* 32-bit operand value      */
 
 } /* end DEF_INST(add_logical_long_fullword_immediate) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C0xA NIHF  - And Immediate High Fullword                    [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7297,7 +7416,7 @@ U32     i2;                             /* 32-bit operand value      */
 
 } /* end DEF_INST(and_immediate_high_fullword) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C0xB NILF  - And Immediate Low Fullword                     [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7317,7 +7436,7 @@ U32     i2;                             /* 32-bit operand value      */
 
 } /* end DEF_INST(and_immediate_low_fullword) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C2xD CFI   - Compare Fullword Immediate                     [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7335,7 +7454,7 @@ U32     i2;                             /* 32-bit operand value      */
 
 } /* end DEF_INST(compare_fullword_immediate) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C2xC CGFI  - Compare Long Fullword Immediate                [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7353,7 +7472,7 @@ U32     i2;                             /* 32-bit operand value      */
 
 } /* end DEF_INST(compare_long_fullword_immediate) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C2xF CLFI  - Compare Logical Fullword Immediate             [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7371,7 +7490,7 @@ U32     i2;                             /* 32-bit operand value      */
 
 } /* end DEF_INST(compare_logical_fullword_immediate) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C2xE CLGFI - Compare Logical Long Fullword Immediate        [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7389,7 +7508,7 @@ U32     i2;                             /* 32-bit operand value      */
 
 } /* end DEF_INST(compare_logical_long_fullword_immediate) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C0x6 XIHF  - Exclusive Or Immediate High Fullword           [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7409,7 +7528,7 @@ U32     i2;                             /* 32-bit operand value      */
 
 } /* end DEF_INST(exclusive_or_immediate_high_fullword) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C0x7 XILF  - Exclusive Or Immediate Low Fullword            [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7429,7 +7548,7 @@ U32     i2;                             /* 32-bit operand value      */
 
 } /* end DEF_INST(exclusive_or_immediate_low_fullword) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C0x8 IIHF  - Insert Immediate High Fullword                 [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7446,7 +7565,7 @@ U32     i2;                             /* 32-bit operand value      */
 
 } /* end DEF_INST(insert_immediate_high_fullword) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C0x9 IILF  - Insert Immediate Low Fullword                  [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7463,7 +7582,7 @@ U32     i2;                             /* 32-bit operand value      */
 
 } /* end DEF_INST(insert_immediate_low_fullword) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C0xE LLIHF - Load Logical Immediate High Fullword           [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7475,14 +7594,14 @@ U32     i2;                             /* 32-bit operand value      */
 
     RIL0(inst, regs, r1, opcd, i2);
 
-    /* Load fullword operand into high 32 bits of register 
+    /* Load fullword operand into high 32 bits of register
        and set remaining bits to zero */
     regs->GR_H(r1) = i2;
     regs->GR_L(r1) = 0;
 
 } /* end DEF_INST(load_logical_immediate_high_fullword) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C0xF LLILF - Load Logical Immediate Low Fullword            [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7494,13 +7613,13 @@ U32     i2;                             /* 32-bit operand value      */
 
     RIL0(inst, regs, r1, opcd, i2);
 
-    /* Load fullword operand into low 32 bits of register 
+    /* Load fullword operand into low 32 bits of register
        and set remaining bits to zero */
     regs->GR_G(r1) = i2;
 
 } /* end DEF_INST(load_logical_immediate_low_fullword) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C0x1 LGFI  - Load Long Fullword Immediate                   [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7537,7 +7656,7 @@ U32     i2;                             /* 32-bit operand value      */
 
 } /* end DEF_INST(or_immediate_high_fullword) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C0xD OILF  - Or Immediate Low Fullword                      [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7557,7 +7676,7 @@ U32     i2;                             /* 32-bit operand value      */
 
 } /* end DEF_INST(or_immediate_low_fullword) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C2x5 SLFI  - Subtract Logical Fullword Immediate            [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7576,7 +7695,7 @@ U32     i2;                             /* 32-bit operand value      */
 
 } /* end DEF_INST(subtract_logical_fullword_immediate) */
 
- 
+
 /*-------------------------------------------------------------------*/
 /* C2x4 SLGFI - Subtract Logical Long Fullword Immediate       [RIL] */
 /*-------------------------------------------------------------------*/
@@ -7596,7 +7715,7 @@ U32     i2;                             /* 32-bit operand value      */
 } /* end DEF_INST(subtract_logical_long_fullword_immediate) */
 #endif /*defined(FEATURE_EXTENDED_IMMEDIATE)*/                  /*@Z9*/
 
- 
+
 #if defined(FEATURE_EXTENDED_IMMEDIATE)                         /*@Z9*/
 /*-------------------------------------------------------------------*/
 /* E312 LT    - Load and Test                                  [RXY] */
@@ -7617,8 +7736,8 @@ VADR    effective_addr2;                /* Effective address         */
                    (S32)regs->GR_L(r1) > 0 ? 2 : 0;
 
 } /* end DEF_INST(load_and_test) */
-                    
-                    
+
+
 /*-------------------------------------------------------------------*/
 /* E302 LTG   - Load and Test Long                             [RXY] */
 /*-------------------------------------------------------------------*/
@@ -7636,10 +7755,10 @@ VADR    effective_addr2;                /* Effective address         */
     /* Set condition code according to value loaded */
     regs->psw.cc = (S64)regs->GR_G(r1) < 0 ? 1 :
                    (S64)regs->GR_G(r1) > 0 ? 2 : 0;
-                    
+
 } /* end DEF_INST(load_and_test_long) */
-                    
-                    
+
+
 /*-------------------------------------------------------------------*/
 /* B926 LBR   - Load Byte Register                             [RRE] */
 /*-------------------------------------------------------------------*/
@@ -7810,7 +7929,7 @@ int     n;                              /* Position of leftmost one  */
     op = regs->GR_G(r2);
 
     /* If R2 contents is all zero, set R1 register to 64,
-       set R1+1 register to zero, and return cond code 0 */                                                                                                                                                                                                   
+       set R1+1 register to zero, and return cond code 0 */
     if (op == 0)
     {
         regs->GR_G(r1) = 64;

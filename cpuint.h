@@ -1,6 +1,9 @@
-// $Id: cpuint.h,v 1.39 2006/12/21 22:39:38 gsmith Exp $
+// $Id: cpuint.h,v 1.40 2008/02/15 21:15:51 ptl00 Exp $
 //
 // $Log: cpuint.h,v $
+// Revision 1.40  2008/02/15 21:15:51  ptl00
+// Fix SET_IC_PER so it ANDs PER bits before ORing new ones
+//
 // Revision 1.39  2006/12/21 22:39:38  gsmith
 // 21 Dec 2006 Range for s+, t+ - Greg Smith
 //
@@ -284,6 +287,7 @@
 
 #define SET_IC_PER(_regs) \
  do { \
+  (_regs)->ints_state &= (~IC_PER_MASK); \
   (_regs)->ints_state |= (((_regs)->CR(9) >> IC_CR9_SHIFT) & IC_PER_MASK); \
   (_regs)->ints_mask  &= (~IC_PER_MASK | (_regs)->ints_state); \
  } while (0)

@@ -4,7 +4,7 @@
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 
-// $Id: control.c,v 1.255 2007/06/23 00:04:05 ivan Exp $
+// $Id: control.c,v 1.271 2008/12/25 23:39:46 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements all control instructions of the            */
@@ -31,6 +31,55 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: control.c,v $
+// Revision 1.271  2008/12/25 23:39:46  ivan
+// STSI FC 2 : Set CC to 0 at completion
+//
+// Revision 1.270  2008/12/25 23:31:17  ivan
+// STSI Update Part III : FC 2 - Store LPAR Information
+//
+// Revision 1.269  2008/12/25 21:30:31  ivan
+// STSI Update part II : Add secondary CPU capacity in 1.2.2 SYSIB
+//
+// Revision 1.268  2008/12/25 21:14:31  ivan
+// STSI Update part 1 : add CPU Type percentage fields in 1.1.1 SYSIB
+//
+// Revision 1.267  2008/05/06 22:15:42  rbowler
+// Fix warning: operation on `p1' may be undefined
+//
+// Revision 1.266  2008/04/11 14:28:00  bernard
+// Integrate regs->exrl into base Hercules code.
+//
+// Revision 1.265  2008/04/08 23:57:15  rbowler
+// Fix '#' : invalid character : possibly the result of a macro expansion
+//
+// Revision 1.264  2008/04/08 17:12:03  bernard
+// Added execute relative long instruction
+//
+// Revision 1.263  2008/03/16 00:09:57  rbowler
+// Add MVCOS instruction (part 2)
+//
+// Revision 1.262  2008/03/12 23:44:03  rbowler
+// Add MVCOS instruction (part 1)
+//
+// Revision 1.261  2008/02/28 22:05:57  ptl00
+// Fix mode switch trace
+//
+// Revision 1.260  2008/02/23 00:18:28  ptl00
+// Fix BSA pic06 in z/arch mode
+//
+// Revision 1.259  2008/02/20 23:45:54  ptl00
+// Fix BSA pic06/05
+//
+// Revision 1.258  2008/02/15 21:12:33  ptl00
+//
+// Fix PC pic13 (higher pri than trace exceptions)
+//
+// Revision 1.257  2008/02/13 06:54:35  jj
+// *** empty log message ***
+//
+// Revision 1.256  2007/12/10 23:12:02  gsmith
+// Tweaks to OPTION_MIPS_COUNTING processing
+//
 // Revision 1.255  2007/06/23 00:04:05  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -319,9 +368,9 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         else
       #endif /*defined(FEATURE_ESAME)*/
         {
-            UPD_PSW_IA(regs, duct_reta & DUCT_IA31);
             regs->psw.amode = (duct_reta & DUCT_AM31) ? 1 : 0;
             regs->psw.AMASK = regs->psw.amode ? AMASK31 : AMASK24;
+            UPD_PSW_IA(regs, duct_reta & DUCT_IA31);
         }
 
         /* Restore the PSW key mask from the DUCT */
@@ -345,17 +394,22 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         ARCH_DEP(store_fullword_absolute) (duct_pkrp, ducto+36, regs);
       #endif /*!defined(FEATURE_ESAME)*/
 
-        /* Specification exception if the PSW is now invalid */
-        if ((regs->psw.IA & 1)
+        /* Specification exception if the PSW is now invalid. */
+        /* (Since UPD_PSW_IA used above masks off inval bits  */
+        /* in psw.IA, test duct_reta for invalid bits).       */
+        if ((duct_reta & 1)
       #if defined(FEATURE_ESAME)
-            || (regs->psw.amode64 == 0 && regs->psw.amode == 1
-                && regs->psw.IA > 0x7FFFFFFF)
             || (regs->psw.amode64 == 0 && regs->psw.amode == 0
-                && regs->psw.IA > 0x00FFFFFF))
+                && (duct_reta & 0x7F000000)))
       #else /*!defined(FEATURE_ESAME)*/
-            || (regs->psw.amode == 0 && regs->psw.IA > 0x00FFFFFF))
+            || (regs->psw.amode == 0 && duct_reta > 0x00FFFFFF))
       #endif /*!defined(FEATURE_ESAME)*/
         {
+            /* program_interrupt will invoke INVALIDATE_AIA which */
+            /* will apply address mask to psw.IA if aie valid. */
+            regs->aie = NULL;
+            regs->psw.IA = duct_reta;
+            regs->psw.zeroilc = 1;
             ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
         }
 
@@ -1929,16 +1983,16 @@ U16     updated = 0;                    /* Updated control regs      */
         m = n;
 
     /* Copy from operand beginning */
-    for (i = 0; i < m; i++)
+    for (i = 0; i < m; i++, p1++)
     {
-        regs->CR_L((r1 + i) & 0xF) = fetch_fw (p1++);
+        regs->CR_L((r1 + i) & 0xF) = fetch_fw (p1);
         updated |= BIT((r1 + i) & 0xF);
     }
 
     /* Copy from next page */
-    for ( ; i < n; i++)
+    for ( ; i < n; i++, p2++)
     {
-        regs->CR_L((r1 + i) & 0xF) = fetch_fw (p2++);
+        regs->CR_L((r1 + i) & 0xF) = fetch_fw (p2);
         updated |= BIT((r1 + i) & 0xF);
     }
 
@@ -2516,6 +2570,114 @@ GREG    l;                              /* Unsigned workarea         */
 #endif /*defined(FEATURE_DUAL_ADDRESS_SPACE)*/
 
 
+#if defined(FEATURE_MOVE_WITH_OPTIONAL_SPECIFICATIONS)
+/*-------------------------------------------------------------------*/
+/* C8x0 MVCOS - Move with Optional Specifications              [SSF] */
+/*-------------------------------------------------------------------*/
+DEF_INST(move_with_optional_specifications)
+{
+int     r3;                             /* Register number           */
+int     b1, b2;                         /* Base register numbers     */
+VADR    effective_addr1,
+        effective_addr2;                /* Effective addresses       */
+int     kbit1, kbit2, abit1, abit2;     /* Key and AS validity bits  */
+int     key1, key2;                     /* Access keys in bits 0-3   */
+int     asc1, asc2;                     /* AS controls (same as PSW) */
+int     cc;                             /* Condition code            */
+GREG    len;                            /* Effective length          */
+int     space1, space2;                 /* Address space modifiers   */
+
+    SSF(inst, regs, b1, effective_addr1, b2, effective_addr2, r3);
+
+    SIE_XC_INTERCEPT(regs);
+
+    /* Program check if DAT is off */
+    if (REAL_MODE(&regs->psw))
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+
+    /* Extract the access key and address-space control for operand 1 */
+    abit1 = regs->GR_LHH(0) & 0x0001;
+    kbit1 = (regs->GR_LHH(0) & 0x0002) >> 1;
+    asc1 = regs->GR_LHH(0) & 0x00C0;
+    key1 = (regs->GR_LHH(0) & 0xF000) >> 8;
+
+    /* Extract the access key and address-space control for operand 2 */
+    abit2 = regs->GR_LHL(0) & 0x0001;
+    kbit2 = (regs->GR_LHL(0) & 0x0002) >> 1;
+    asc2 = regs->GR_LHL(0) & 0x00C0;
+    key2 = (regs->GR_LHL(0) & 0xF000) >> 8;
+
+    /* Use PSW address-space control for operand 1 if A bit is zero */
+    if (abit1 == 0)
+        asc1 = regs->psw.asc;
+
+    /* Use PSW address-space control for operand 2 if A bit is zero */
+    if (abit2 == 0)
+        asc2 = regs->psw.asc;
+
+    /* Use PSW key for operand 1 if K bit is zero */
+    if (kbit1 == 0)
+        key1 = regs->psw.pkey;
+
+    /* Use PSW key for operand 2 if K bit is zero */
+    if (kbit2 == 0)
+        key2 = regs->psw.pkey;
+
+    /* Program check if home-space mode is specified for operand 1
+       and PSW indicates problem state */
+    if (abit1 && asc1 == PSW_HOME_SPACE_MODE
+        && PROBSTATE(&regs->psw))
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+
+    /* Program check if secondary space control (CR0 bit 5/37) is 0, and
+       secondary space mode is specified or implied for either operand */
+    if ((regs->CR(0) & CR0_SEC_SPACE) == 0
+        && (asc1 == PSW_SECONDARY_SPACE_MODE
+            || asc2 == PSW_SECONDARY_SPACE_MODE))
+        ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+
+    /* Program check if in problem state and the key mask in CR3 is zero
+       for the specified or implied access key for either operand */
+    if (PROBSTATE(&regs->psw)
+        && ( ((regs->CR(3) << (key1 >> 4)) & 0x80000000) == 0
+            || ((regs->CR(3) << (key2 >> 4)) & 0x80000000) == 0 ))
+        ARCH_DEP(program_interrupt) (regs, PGM_PRIVILEGED_OPERATION_EXCEPTION);
+
+    /* Load true length from R3 register */
+    len = GR_A(r3,regs);
+
+    /* If the true length does not exceed 4096, set condition code
+       zero, otherwise set cc=3 and use effective length of 4096 */
+    if (len <= 4096)
+        cc = 0;
+    else {
+        cc = 3;
+        len = 4096;
+    }
+
+    /* Set the address space modifier for operand 1 */
+    space1 = (asc1 == PSW_PRIMARY_SPACE_MODE) ? USE_PRIMARY_SPACE :
+        (asc1 == PSW_SECONDARY_SPACE_MODE) ? USE_SECONDARY_SPACE :
+        (asc1 == PSW_ACCESS_REGISTER_MODE) ? USE_ARMODE | b1 :
+        (asc1 == PSW_HOME_SPACE_MODE) ? USE_HOME_SPACE : 0;
+
+    /* Set the address space modifier for operand 2 */
+    space2 = (asc2 == PSW_PRIMARY_SPACE_MODE) ? USE_PRIMARY_SPACE :
+        (asc2 == PSW_SECONDARY_SPACE_MODE) ? USE_SECONDARY_SPACE :
+        (asc2 == PSW_ACCESS_REGISTER_MODE) ? USE_ARMODE | b2 :
+        (asc2 == PSW_HOME_SPACE_MODE) ? USE_HOME_SPACE : 0;
+
+    /* Perform the move */
+    ARCH_DEP(move_charx) (effective_addr1, space1, key1,
+                effective_addr2, space2, key2, len, regs);
+
+    /* Set the condition code */
+    regs->psw.cc = cc;
+
+} /* end DEF_INST(move_with_optional_specifications) */
+#endif /*defined(FEATURE_MOVE_WITH_OPTIONAL_SPECIFICATIONS)*/
+
+
 /*-------------------------------------------------------------------*/
 /* E50E MVCSK - Move with Source Key                           [SSE] */
 /*-------------------------------------------------------------------*/
@@ -2590,6 +2752,9 @@ VADR    retn;                           /* Return address and amode  */
 #ifdef FEATURE_TRACING
 CREG    newcr12 = 0;                    /* CR12 upon completion      */
 #endif /*FEATURE_TRACING*/
+#if defined(FEATURE_ESAME)
+CREG    savecr12 = 0;                   /* CR12 save                 */
+#endif /*FEATURE_ESAME*/
 
     S(inst, regs, b2, effective_addr2);
 
@@ -2647,12 +2812,6 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
     oldpasn = regs->CR(4) & CR4_PASN;
     oldpstd = regs->CR(1);
 
-#ifdef FEATURE_TRACING
-    /* Form trace entry if ASN tracing is active */
-    if (regs->CR(12) & CR12_ASNTRACE)
-        newcr12 = ARCH_DEP(trace_pc) (pctea, regs);
-#endif /*FEATURE_TRACING*/
-
     /* [5.5.3.1] Load the linkage table designation */
     if (!ASF_ENABLED(regs))
     {
@@ -2694,6 +2853,12 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
        control bit in linkage table designation is zero */
     if ((ltdesig & LTD_SSLINK) == 0)
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
+
+#ifdef FEATURE_TRACING
+    /* Form trace entry if ASN tracing is active */
+    if (regs->CR(12) & CR12_ASNTRACE)
+        newcr12 = ARCH_DEP(trace_pc) (pctea, regs);
+#endif /*FEATURE_TRACING*/
 
     /* [5.5.3.2] Linkage table lookup */
     if (!ASN_AND_LX_REUSE_ENABLED(regs))
@@ -3027,11 +3192,22 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
         if (!ASF_ENABLED(regs))
             ARCH_DEP(program_interrupt) (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
+#ifdef FEATURE_TRACING
       #if defined(FEATURE_ESAME)
         /* Add a mode trace entry when switching in/out of 64 bit mode */
-        if((regs->CR(12) & CR12_MTRACE) && regs->psw.amode64 != (ete[4] & ETE4_G) ? 1 : 0)
-            ARCH_DEP(trace_ms) (0,((U64)(ete[0]) << 32) | (U64)(ete[1] & 0xFFFFFFFE), regs);
+        if((regs->CR(12) & CR12_MTRACE) && (regs->psw.amode64 != ((ete[4] & ETE4_G) ? 1 : 0)))
+        {
+            /* since ASN trace might be made already, need to save
+               current CR12 and use newcr12 for this second entry */
+            if (!newcr12) 
+                newcr12 = regs->CR(12);
+            savecr12 = regs->CR(12);
+            regs->CR(12) = newcr12; 
+            newcr12 = ARCH_DEP(trace_ms) (0, 0, regs);
+            regs->CR(12) = savecr12;
+        }
       #endif /*defined(FEATURE_ESAME)*/
+#endif /*FEATURE_TRACING*/
 
         /* Set the called-space identification */
         if (pasn == 0)
@@ -3199,8 +3375,8 @@ CREG    newcr12 = 0;                    /* CR12 upon completion      */
     } /* end if(PC-ss) */
 
 #ifdef FEATURE_TRACING
-    /* Update trace table address if ASN tracing is active */
-    if (regs->CR(12) & CR12_ASNTRACE)
+    /* Update trace table address if ASN or Mode switch made trace entry */
+    if (newcr12)
         regs->CR(12) = newcr12;
 #endif /*FEATURE_TRACING*/
 
@@ -3282,7 +3458,8 @@ int     rc;                             /* return code from load_psw */
     newregs.tlbID = 1;
 
     /* Set the breaking event address register in the copy */
-    SET_BEAR_REG(&newregs, newregs.ip - (newregs.execflag ? 4 : 2));
+    SET_BEAR_REG(&newregs, newregs.ip - (newregs.execflag ?
+                                        newregs.exrl ? 6 : 4 : 2));
 
     /* Save the primary ASN (CR4) and primary STD (CR1) */
     oldpasn = regs->CR_LHL(4);
@@ -3290,6 +3467,17 @@ int     rc;                             /* return code from load_psw */
 
     /* Perform the unstacking process */
     etype = ARCH_DEP(program_return_unstack) (&newregs, &alsed, &rc);
+
+#ifdef FEATURE_TRACING
+      #if defined(FEATURE_ESAME)
+        /* If unstacked entry was a BAKR:                              */
+        /* Add a mode trace entry when switching in/out of 64 bit mode */
+    if((etype == LSED_UET_BAKR)
+        && (regs->CR(12) & CR12_MTRACE)
+        && (regs->psw.amode64 != newregs.psw.amode64))
+        newregs.CR(12) = ARCH_DEP(trace_ms) (0, 0, regs);
+      #endif /*defined(FEATURE_ESAME)*/
+#endif /*FEATURE_TRACING*/
 
     /* Perform PR-cp or PR-ss if unstacked entry was a program call */
     if (etype == LSED_UET_PC)
@@ -3305,8 +3493,8 @@ int     rc;                             /* return code from load_psw */
       #if defined(FEATURE_ESAME)
         else
         /* Add a mode trace entry when switching in/out of 64 bit mode */
-        if((regs->CR(12) & CR12_MTRACE) && regs->psw.amode64 != newregs.psw.amode64)
-            ARCH_DEP(trace_ms) (0, newregs.psw.IA & ADDRESS_MAXWRAP(regs), regs);
+        if((regs->CR(12) & CR12_MTRACE) && (regs->psw.amode64 != newregs.psw.amode64))
+            newregs.CR(12) = ARCH_DEP(trace_ms) (0, 0, regs);
       #endif /*defined(FEATURE_ESAME)*/
 
 #endif /*FEATURE_TRACING*/
@@ -4613,6 +4801,7 @@ BYTE    pkey;                           /* Original key              */
 
     /* Set PSW key */
     regs->psw.pkey = n;
+    INVALIDATE_AIA(regs);
 }
 
 
@@ -6344,7 +6533,7 @@ struct rusage     usage;               /* RMF type data              */
         getrusage(RUSAGE_SELF,&usage);
         dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec);
         dreg = (dreg * 1000000) + (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec);
-        dreg = regs->instcount / (dreg ? dreg : 1);
+        dreg = INSTCOUNT(regs) / (dreg ? dreg : 1);
         dreg *= SUSEC_PER_MIPS;
         return 0x800000 / (dreg ? dreg : 1);
 
@@ -6418,9 +6607,9 @@ int     i;
 SYSIB111  *sysib111;                    /* Basic machine conf        */
 SYSIB121  *sysib121;                    /* Basic machine CPU         */
 SYSIB122  *sysib122;                    /* Basic machine CPUs        */
-#if 0
 SYSIB221  *sysib221;                    /* LPAR CPU                  */
 SYSIB222  *sysib222;                    /* LPAR CPUs                 */
+#if 0
 SYSIB322  *sysib322;                    /* VM CPUs                   */
 SYSIBVMDB *sysib322;                    /* VM description block      */
 #endif
@@ -6461,7 +6650,7 @@ static BYTE mpfact[32*2] = { 0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
     SIE_INTERCEPT(regs);
 
     /* Check function code */
-    if((regs->GR_L(0) & STSI_GPR0_FC_MASK) > STSI_GPR0_FC_BASIC)
+    if((regs->GR_L(0) & STSI_GPR0_FC_MASK) > STSI_GPR0_FC_LPAR)
     {
         regs->psw.cc = 3;
         return;
@@ -6475,8 +6664,8 @@ static BYTE mpfact[32*2] = { 0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
     /* Return current level if function code is zero */
     if((regs->GR_L(0) & STSI_GPR0_FC_MASK) == STSI_GPR0_FC_CURRENT)
     {
-        regs->GR_L(0) |= STSI_GPR0_FC_BASIC;
-//      regs->GR_L(0) |= STSI_GPR0_FC_LPAR;
+ //     regs->GR_L(0) |= STSI_GPR0_FC_BASIC;
+        regs->GR_L(0) |= STSI_GPR0_FC_LPAR;
         regs->psw.cc = 0;
         return;
     }
@@ -6486,7 +6675,7 @@ static BYTE mpfact[32*2] = { 0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
         ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Return with cc3 if selector codes invalid */
-    if( ((regs->GR_L(0) & STSI_GPR0_FC_MASK)   == 0x10000000
+    if( ((regs->GR_L(0) & STSI_GPR0_FC_MASK)   == STSI_GPR0_FC_BASIC
       && (regs->GR_L(0) & STSI_GPR0_SEL1_MASK) == 1
       && (regs->GR_L(1) & STSI_GPR1_SEL2_MASK) >  1)
       || (regs->GR_L(0) & STSI_GPR0_SEL1_MASK) == 0
@@ -6515,17 +6704,22 @@ static BYTE mpfact[32*2] = { 0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
             case 1:
                 sysib111 = (SYSIB111*)(m);
                 memset(sysib111, 0x00, sizeof(SYSIB111));
+                sysib111->flag1|=SYSIB111_PFLAG;
                 memcpy(sysib111->manufact,manufact,sizeof(manufact));
                 for(i = 0; i < 4; i++)
                     sysib111->type[i] =
                         hexebcdic[(sysblk.cpuid >> (28 - (i*4))) & 0x0F];
-                memset(sysib111->model, 0x40, sizeof(sysib111->model));
-                memcpy(sysib111->model, model, sizeof(model));
+                memset(sysib111->modcapaid, 0x40, sizeof(sysib111->model));
+                memcpy(sysib111->modcapaid, model, sizeof(model));
                 memset(sysib111->seqc,0xF0,sizeof(sysib111->seqc));
                 for(i = 0; i < 6; i++)
                     sysib111->seqc[(sizeof(sysib111->seqc) - 6) + i] =
                     hexebcdic[(sysblk.cpuid >> (52 - (i*4))) & 0x0F];
                 memcpy(sysib111->plant,plant,sizeof(plant));
+                for(i=0;i<5;i++)
+                {
+                    sysib111->typepct[i]=100;
+                }
                 regs->psw.cc = 0;
                 break;
 
@@ -6553,6 +6747,7 @@ static BYTE mpfact[32*2] = { 0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
             case 2:
                 sysib122 = (SYSIB122*)(m);
                 memset(sysib122, 0x00, sizeof(SYSIB122));
+                STORE_FW(sysib122->sccap, STSI_CAPABILITY);
                 STORE_FW(sysib122->cap, STSI_CAPABILITY);
                 STORE_HW(sysib122->totcpu, MAX_CPU);
                 STORE_HW(sysib122->confcpu, sysblk.cpus);
@@ -6569,6 +6764,42 @@ static BYTE mpfact[32*2] = { 0x00,0x4B,0x00,0x4B,0x00,0x4B,0x00,0x4B,
         default:
             regs->psw.cc = 3;
         } /* selector 1 */
+        break;
+
+    case STSI_GPR0_FC_LPAR:
+       
+        switch(regs->GR_L(1) & STSI_GPR1_SEL2_MASK)
+        {
+            case 1:
+                /* CURRENT CPU LPAR CONFIG */
+                sysib221 = (SYSIB221 *)(m);
+                memset(sysib221, 0x00, sizeof(SYSIB221));
+                memset(sysib221->seqc,0xF0,sizeof(sysib111->seqc));
+                for(i = 0; i < 6; i++)
+                    sysib221->seqc[(sizeof(sysib221->seqc) - 6) + i] =
+                    hexebcdic[(sysblk.cpuid >> (52 - (i*4))) & 0x0F];
+                STORE_HW(sysib221->lcpuid,regs->cpuad);
+                STORE_HW(sysib221->cpuad,regs->cpuad);
+                regs->psw.cc = 0;
+                break;
+            case 2:
+                /* All CPUS LPAR CONFIG */
+                sysib222 = (SYSIB222 *)(m);
+                memset(sysib222, 0x00, sizeof(SYSIB222));
+                STORE_HW(sysib222->lparnum,1);
+                sysib222->lcpuc[0]=SYSIB222_LCPUC_SHARED;
+                STORE_HW(sysib222->totcpu,MAX_CPU);
+                STORE_HW(sysib222->confcpu,sysblk.cpus);
+                STORE_HW(sysib222->sbcpu,MAX_CPU - sysblk.cpus);
+                get_lparname(sysib222->lparname);
+                STORE_FW(sysib222->lparcaf,1000);   /* Full capability factor */
+                STORE_HW(sysib222->shrcpu,sysblk.cpus);
+                regs->psw.cc = 0;
+                break;
+            default:
+                regs->psw.cc = 3;
+                break;
+        }
         break;
 
     default:

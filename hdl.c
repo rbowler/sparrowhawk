@@ -1,9 +1,12 @@
 /* HDL.C        (c) Copyright Jan Jaeger, 2003-2007                  */
 /*              Hercules Dynamic Loader                              */
 
-// $Id: hdl.c,v 1.53 2007/06/23 00:04:10 ivan Exp $
+// $Id: hdl.c,v 1.54 2008/11/23 23:29:44 rbowler Exp $
 //
 // $Log: hdl.c,v $
+// Revision 1.54  2008/11/23 23:29:44  rbowler
+// Fix win64 type conversion warnings in hdl.c
+//
 // Revision 1.53  2007/06/23 00:04:10  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -143,7 +146,7 @@ static void * hdl_dlopen(char *filename, int flag _HDL_UNUSED)
 {
 char *fullname;
 void *ret;
-int fulllen = 0;
+size_t fulllen = 0;
 
     if(filename && *filename != '/' && *filename != '.')
     {

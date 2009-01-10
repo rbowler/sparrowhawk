@@ -1,12 +1,19 @@
 /* CLOCK.C      (c) Copyright Jan Jaeger, 2000-2007                  */
 /*              TOD Clock functions                                  */
 
-// $Id: clock.c,v 1.41 2007/06/23 00:04:04 ivan Exp $
+// $Id: clock.c,v 1.43 2008/08/22 04:43:50 fish Exp $
 
 /* The emulated hardware clock is based on the host clock, adjusted  */
 /* by means of an offset and a steering rate.                        */
 
 // $Log: clock.c,v $
+// Revision 1.43  2008/08/22 04:43:50  fish
+// Fix TOD clock race condition identified by Fred
+// Feucht -- by Marcin Cieslak [saper@system.pl]
+//
+// Revision 1.42  2007/11/21 22:55:49  fish
+// (untab)
+//
 // Revision 1.41  2007/06/23 00:04:04  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -93,7 +100,7 @@ static inline U64 hw_adjust(U64 base_tod)
     if(hw_tod < base_tod)
         return base_tod;
     else
-	return hw_tod += 0x10;
+    return hw_tod += 0x10;
 }
 
 
@@ -101,10 +108,10 @@ U64 hw_clock(void)
 {
 U64 temp_tod;
 
+    obtain_lock(&sysblk.todlock);
+
     /* Get the time of day (GMT) */
     temp_tod = universal_clock();
-
-    obtain_lock(&sysblk.todlock);
 
     /* Ajust speed and ensure uniqueness */
     hw_tod = hw_adjust(temp_tod);

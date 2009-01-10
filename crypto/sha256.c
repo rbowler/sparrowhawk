@@ -1,7 +1,7 @@
 /* $OpenBSD: sha2.c,v 1.6 2004/05/03 02:57:36 millert Exp $ */
 /* modified for use with dyncrypt */
 
-// $Id: sha256.c,v 1.9 2006/12/08 09:43:35 jj Exp $
+// $Id: sha256.c,v 1.10 2008/02/28 10:16:39 rbowler Exp $
 
 /*
  * FILE: sha2.c
@@ -38,6 +38,9 @@
  */
 
 // $Log: sha256.c,v $
+// Revision 1.10  2008/02/28 10:16:39  rbowler
+// Fix unresolved external symbol _sha512_process
+//
 // Revision 1.9  2006/12/08 09:43:35  jj
 // Add CVS message log
 //
@@ -515,12 +518,18 @@ SHA256_Final(u_int8_t digest[], SHA256_CTX *context)
 }
 
 
-/* Hashing-only function called by dyncrypt */
+/* Hashing-only functions called by dyncrypt */
 
 void
 sha256_process(sha256_context *ctx, u_int8_t data[64])
 {
  SHA256_Transform(ctx, data);
+}
+
+void
+sha512_process(sha512_context *ctx, u_int8_t data[64])
+{
+ SHA512_Transform(ctx, data);
 }
 
 

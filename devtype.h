@@ -1,9 +1,12 @@
 /* DEVTYPE.H    (c) Copyright Jan Jaeger, 1999-2007                  */
 /*              Hercules Device Definitions                          */
 
-// $Id: devtype.h,v 1.20 2007/06/23 00:04:08 ivan Exp $
+// $Id: devtype.h,v 1.21 2007/11/21 22:48:45 fish Exp $
 //
 // $Log: devtype.h,v $
+// Revision 1.21  2007/11/21 22:48:45  fish
+// New BEGIN_DEVICE_CLASS_QUERY macro
+//
 // Revision 1.20  2007/06/23 00:04:08  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -57,6 +60,10 @@ struct DEVHND {
         DEVSR *hsuspend;               /* Hercules suspend           */
         DEVSR *hresume;                /* Hercules resume            */
 };
+
+#define BEGIN_DEVICE_CLASS_QUERY( _classname, _dev, _class, _buflen, _buffer ) \
+    if (_class) *_class = _classname; \
+    if (!_dev || !_class || !_buflen || !_buffer) return
 
 
 #if !defined(OPTION_DYNAMIC_LOAD)

@@ -1,13 +1,41 @@
 /* DASDCOPY.C   (c) Copyright Roger Bowler, 1999-2007                */
-/*       Copy a dasd file to another dasd file.                      */
-/*       Input file and output file may be compressed or not.        */
-/*       Files may be either ckd (or cckd) or fba (or cfba) but      */
-/*       file types (ckd/cckd or fba/cfba) may not be mixed.         */
+/*              Copy a dasd file to another dasd file                */
+
+// $Id: dasdcopy.c,v 1.32 2008/11/04 04:50:45 fish Exp $
+
+/*-------------------------------------------------------------------*/
+/*      This program copies a dasd file to another dasd file.        */
+/*      Input file and output file may be compressed or not.         */
+/*      Files may be either ckd (or cckd) or fba (or cfba) but       */
+/*      file types (ckd/cckd or fba/cfba) may not be mixed.          */
+/*                                                                   */
+/*      Usage:                                                       */
+/*              dasdcopy [-options] ifile [sf=sfile] ofile           */
+/*                                                                   */
+/*      Refer to the usage section below for details of options.     */
+/*                                                                   */
+/*      The program may also be invoked by one of the following      */
+/*      aliases which override the default output file format:       */
+/*                                                                   */
+/*              ckd2cckd [-options] ifile ofile                      */
+/*              cckd2ckd [-options] ifile [sf=sfile] ofile           */
+/*              fba2cfba [-options] ifile ofile                      */
+/*              cfba2fba [-options] ifile [sf=sfile] ofile           */
 /*-------------------------------------------------------------------*/
 
-// $Id: dasdcopy.c,v 1.28 2007/06/23 00:04:08 ivan Exp $
-//
 // $Log: dasdcopy.c,v $
+// Revision 1.32  2008/11/04 04:50:45  fish
+// Ensure consistent utility startup
+//
+// Revision 1.31  2008/11/03 00:03:52  rbowler
+// Program name may be corrupted in dasdcopy messages
+//
+// Revision 1.30  2008/11/02 22:57:01  rbowler
+// Ensure message HHCDC010I is correctly aligned
+//
+// Revision 1.29  2008/04/03 16:16:30  rbowler
+// Standardize comment block in module header (cosmetic change only)
+//
 // Revision 1.28  2007/06/23 00:04:08  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -66,26 +94,13 @@ char            msgbuf[512];            /* Message buffer            */
 size_t          fba_bytes_remaining=0;  /* FBA bytes to be copied    */
 int             nullfmt = CKDDASD_NULLTRK_FMT0; /* Null track format */
 char            pathname[MAX_PATH];     /* file path in host format  */
+char            pgmpath[MAX_PATH];      /* prog path in host format  */
 
-#if defined(ENABLE_NLS)
-    setlocale(LC_ALL, "");
-    bindtextdomain(PACKAGE, HERC_LOCALEDIR);
-    textdomain(PACKAGE);
-#endif
-
-#ifdef EXTERNALGUI
-    if (argc >= 1 && strcmp(argv[argc-1],"EXTERNALGUI") == 0)
-    {
-        extgui = 1;
-        argc--;
-        setvbuf(stderr, NULL, _IONBF, 0);
-        setvbuf(stdout, NULL, _IONBF, 0);
-    }
-#endif /*EXTERNALGUI*/
+    INITIALIZE_UTILITY("dasdcopy");
 
     /* Figure out processing based on the program name */
-    hostpath(pathname, argv[0], sizeof(pathname));
-    pgm = strrchr (pathname, '/');
+    hostpath(pgmpath, argv[0], sizeof(pgmpath));
+    pgm = strrchr (pgmpath, '/');
     if (pgm) pgm++;
     else pgm = argv[0];
     strtok (pgm, ".");
@@ -426,7 +441,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
     }
 
     close_image_file(icif); close_image_file(ocif);
-    if (!quiet) printf (_("HHCDC010I %s successfully completed.\n"), pgm);
+    printf (_("\r" "HHCDC010I %s successfully completed.\n"), pgm);
     return 0;
 }
 
@@ -497,7 +512,7 @@ BYTE           *pos;                    /* -> Next position in buffer*/
             pos += 4096;
         }
     }
- 
+
     /* Build the end of track marker */
     memcpy (pos, eighthexFF, 8);
     pos += 8;

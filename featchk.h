@@ -10,9 +10,23 @@
 /*                                                                   */
 /*-------------------------------------------------------------------*/
 
-// $Id: featchk.h,v 1.47 2007/06/23 00:04:09 ivan Exp $
+// $Id: featchk.h,v 1.51 2008/12/27 23:34:37 rbowler Exp $
 //
 // $Log: featchk.h,v $
+// Revision 1.51  2008/12/27 23:34:37  rbowler
+// Integrated 3270 (SYSG) console send command
+//
+// Revision 1.50  2008/12/24 22:35:53  rbowler
+// Framework for integrated 3270 and ASCII console features
+//
+// Revision 1.49  2008/12/22 00:29:10  ivan
+// Implement February 2008 z/Arch Compare And Swap And Store Facility 2
+// Update FAQ to reflect change
+// update FAQ to also indicate z/Arch DAT Enhancement is implemented
+//
+// Revision 1.48  2007/12/23 00:29:20  rbowler
+// reset_channel_path, cancel_subchannel unresolved if no channel subsystem feature
+//
 // Revision 1.47  2007/06/23 00:04:09  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -136,6 +150,14 @@
  #define _FEATURE_ASN_AND_LX_REUSE
 #endif
 
+#if defined(FEATURE_INTEGRATED_3270_CONSOLE)
+ #define _FEATURE_INTEGRATED_3270_CONSOLE
+#endif
+
+#if defined(FEATURE_INTEGRATED_ASCII_CONSOLE)
+ #define _FEATURE_INTEGRATED_ASCII_CONSOLE
+#endif
+
 #undef _VSTORE_C_STATIC
 #if !defined(OPTION_NO_INLINE_VSTORE)
  #define _VSTORE_C_STATIC static inline
@@ -249,6 +271,19 @@
 
 #if defined(_900) && defined(FEATURE_VECTOR_FACILITY)
  #error Vector Facility not supported on ESAME capable processors
+#endif
+
+#if !defined(FEATURE_S370_CHANNEL) && !defined(FEATURE_CHANNEL_SUBSYSTEM)
+ #error Either S/370 Channel or Channel Subsystem must be defined
+#endif
+
+#if defined(FEATURE_S370_CHANNEL) && defined(FEATURE_CHANNEL_SUBSYSTEM)
+ #error S/370 Channel and Channel Subsystem cannot both be defined
+#endif
+
+#if defined(FEATURE_CANCEL_IO_FACILITY) \
+ && !defined(FEATURE_CHANNEL_SUBSYSTEM)
+ #error Cancel I/O facility requires Channel Subsystem
 #endif
 
 #if defined(FEATURE_MOVE_PAGE_FACILITY_2) \
@@ -375,6 +410,18 @@
 
 #if defined(FEATURE_PER3) && !defined(FEATURE_PER)
  #error FEATURE_PER must be defined when using FEATURE_PER3
+#endif
+
+#if defined(FEATURE_COMPARE_AND_SWAP_AND_STORE_FACILITY_2) && !defined(FEATURE_COMPARE_AND_SWAP_AND_STORE)
+ #error FEATURE_COMPARE_AND_SWAP_AND_STORE must be defined when using FEATURE_COMPARE_AND_SWAP_AND_STORE_FACILITY_2
+#endif
+
+#if defined(FEATURE_INTEGRATED_3270_CONSOLE) && !defined(FEATURE_SYSTEM_CONSOLE)
+ #error Integrated 3270 console requires FEATURE_SYSTEM_CONSOLE
+#endif
+
+#if defined(FEATURE_INTEGRATED_ASCII_CONSOLE) && !defined(FEATURE_SYSTEM_CONSOLE)
+ #error Integrated ASCII console requires FEATURE_SYSTEM_CONSOLE
 #endif
 
 

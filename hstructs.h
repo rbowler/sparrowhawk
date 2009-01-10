@@ -6,9 +6,102 @@
 //      The <config.h> header and other required headers are
 //      presumed to have already been #included ahead of it...
 
-// $Id: hstructs.h,v 1.69 2007/06/23 00:04:11 ivan Exp $
+// $Id: hstructs.h,v 1.98 2009/01/07 16:00:26 bernard Exp $
 //
 // $Log: hstructs.h,v $
+// Revision 1.98  2009/01/07 16:00:26  bernard
+// add msghldsec command
+//
+// Revision 1.97  2008/12/27 23:34:37  rbowler
+// Integrated 3270 (SYSG) console send command
+//
+// Revision 1.96  2008/11/24 14:52:21  jj
+// Add PTYP=IFL
+// Change SCPINFO processing to check on ptyp for IFL specifics
+//
+// Revision 1.95  2008/11/04 05:56:31  fish
+// Put ensure consistent create_thread ATTR usage change back in
+//
+// Revision 1.94  2008/11/03 15:31:54  rbowler
+// Back out consistent create_thread ATTR modification
+//
+// Revision 1.93  2008/10/18 09:32:21  fish
+// Ensure consistent create_thread ATTR usage
+//
+// Revision 1.92  2008/10/14 20:56:21  rbowler
+// Propagate processor type from sysblk
+//
+// Revision 1.91  2008/08/21 18:34:47  fish
+// Fix i/o-interrupt-queue race condition
+//
+// Revision 1.90  2008/07/24 14:44:14  bernard
+// cmdtgt version 2
+//
+// Revision 1.89  2008/07/20 12:11:11  bernard
+// OPTION_CMDTGT
+//
+// Revision 1.88  2008/07/08 05:35:51  fish
+// AUTOMOUNT redesign: support +allowed/-disallowed dirs
+// and create associated 'automount' panel command - Fish
+//
+// Revision 1.87  2008/05/28 16:46:29  fish
+// Misleading VTAPE support renamed to AUTOMOUNT instead and fixed and enhanced so that it actually WORKS now.
+//
+// Revision 1.86  2008/05/25 06:36:43  fish
+// VTAPE automount support (0x4B + 0xE4)
+//
+// Revision 1.85  2008/05/22 21:34:22  fish
+// Attempt to fix my *nix SCSI tape BSR over tapemark bug identified by Bob Schneider [bschneider@pingdata.net]
+//
+// Revision 1.84  2008/04/08 17:13:47  bernard
+// Added execute relative long instruction
+//
+// Revision 1.83  2008/03/30 02:51:33  fish
+// Fix SCSI tape EOV (end of volume) processing
+//
+// Revision 1.82  2008/03/29 08:36:46  fish
+// More complete/extensive 3490/3590 tape support
+//
+// Revision 1.81  2008/03/28 02:09:42  fish
+// Add --blkid-24 option support, poserror flag renamed to fenced,
+// added 'generic', 'readblkid' and 'locateblk' tape media handler
+// call vectors.
+//
+// Revision 1.80  2008/03/04 01:10:29  ivan
+// Add LEGACYSENSEID config statement to allow X'E4' Sense ID on devices
+// that originally didn't support it. Defaults to off for compatibility reasons
+//
+// Revision 1.79  2008/02/29 15:53:10  rbowler
+// Instruction decoder for C4xx and C6xx instructions
+//
+// Revision 1.78  2008/01/04 02:28:52  gsmith
+// sf commands update
+//
+// Revision 1.77  2007/12/10 23:12:02  gsmith
+// Tweaks to OPTION_MIPS_COUNTING processing
+//
+// Revision 1.76  2007/12/02 16:22:09  rbowler
+// Enable B9xx,EBxx opcodes in S/370 mode for ETF2
+//
+// Revision 1.75  2007/11/21 00:31:38  gsmith
+// LRE support (try #1)
+//
+// Revision 1.74  2007/11/18 22:18:51  rbowler
+// Permit FEATURE_IMMEDIATE_AND_RELATIVE to be activated in S/370 mode
+//
+// Revision 1.73  2007/09/05 00:24:18  gsmith
+// Use integer arithmetic calculating cpupct
+//
+// Revision 1.72  2007/08/06 22:12:49  gsmith
+// cpu thread exitjmp
+//
+// Revision 1.71  2007/08/06 16:48:20  ivan
+// Implement "PARM" option for IPL command (same as VM IPL PARM XXX)
+// Also add command helps for ipl, iplc, sysclear, sysreset
+//
+// Revision 1.70  2007/07/24 22:39:35  fish
+// (align a single comment; no code was changed)
+//
 // Revision 1.69  2007/06/23 00:04:11  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -112,6 +205,7 @@ struct REGS {                           /* Processor registers       */
 
         unsigned int                    /* Flags (cpu thread only)   */
                 execflag:1,             /* 1=EXecuted instruction    */
+                exrl:1,                 /* 1=EXRL, 0=EX instruction  */
                 permode:1,              /* 1=PER active              */
                 instinvalid:1,          /* 1=Inst field is invalid   */
                 opinterv:1,             /* 1=Operator intervening    */
@@ -139,13 +233,13 @@ struct REGS {                           /* Processor registers       */
         S64     ecps_vtimer;            /* ECPS Virtual Int. timer   */
         S32     ecps_oldtmr;            /* ECPS Virtual Int. tmr int */
         BYTE   *ecps_vtmrpt;            /* Pointer to VTMR or zero   */
-        U64     instcount;              /* Instruction counter       */
+        U32     instcount;              /* Instruction counter       */
         U64     prevcount;              /* Previous instruction count*/
         U32     mipsrate;               /* Instructions per second   */
         U32     siocount;               /* SIO/SSCH counter          */
         U32     siosrate;               /* IOs per second            */
         U64     siototal;               /* Total SIO/SSCH count      */
-        double  cpupct;                 /* Percent CPU busy          */
+        int     cpupct;                 /* Percent CPU busy          */
         U64     waittod;                /* Time of day last wait (us)*/
         U64     waittime;               /* Wait time (us) in interval*/
         DAT     dat;                    /* Fields for DAT use        */
@@ -273,9 +367,10 @@ struct REGS {                           /* Processor registers       */
 
         jmp_buf progjmp;                /* longjmp destination for
                                            program check return      */
-
         jmp_buf archjmp;                /* longjmp destination to
                                            switch architecture mode  */
+        jmp_buf exitjmp;                /* longjmp destination for
+                                           CPU thread exit           */
         COND    intcond;                /* CPU interrupt condition   */
         LOCK    *cpulock;               /* CPU lock for this CPU     */
 
@@ -307,10 +402,19 @@ struct REGS {                           /* Processor registers       */
                *s370_opcode_a5xx,
                *s370_opcode_a6xx,
  #if defined(MULTI_BYTE_ASSIST)
+                s370_opcode_a7xx[256],
                 s370_opcode_b2xx[256],
+                s370_opcode_b9xx[256],
+                s370_opcode_ebxx[256],
  #else
+               *s370_opcode_a7xx,
                *s370_opcode_b2xx,
+               *s370_opcode_b9xx,
+               *s370_opcode_ebxx,
  #endif
+               *s370_opcode_c2xx,                               /*208*/
+               *s370_opcode_c4xx,                               /*208*/
+               *s370_opcode_c6xx,                               /*208*/
                *s370_opcode_e4xx,
                *s370_opcode_e5xx,
                *s370_opcode_e6xx,
@@ -338,6 +442,8 @@ struct REGS {                           /* Processor registers       */
  #endif
                *s390_opcode_b3xx,
                *s390_opcode_c2xx,
+               *s390_opcode_c4xx,                               /*208*/
+               *s390_opcode_c6xx,                               /*208*/
                *s390_opcode_e4xx,
                *s390_opcode_e5xx,
                *s390_opcode_ecxx,
@@ -363,6 +469,8 @@ struct REGS {                           /* Processor registers       */
  #endif
                *z900_opcode_b3xx,
                *z900_opcode_c2xx,
+               *z900_opcode_c4xx,                               /*208*/
+               *z900_opcode_c6xx,                               /*208*/
                *z900_opcode_c8xx,
                *z900_opcode_e5xx,
                *z900_opcode_ecxx,
@@ -435,6 +543,7 @@ struct SYSBLK {
         COND    cpucond;                /* CPU config/deconfig cond  */
         LOCK    cpulock[MAX_CPU_ENGINES];  /* CPU lock               */
         TID     cputid[MAX_CPU_ENGINES];   /* CPU thread identifiers */
+        BYTE    ptyp[MAX_CPU_ENGINES];  /* SCCB ptyp for each engine */
         LOCK    todlock;                /* TOD clock update lock     */
         TID     todtid;                 /* Thread-id for TOD update  */
         REGS   *regs[MAX_CPU_ENGINES+1];   /* Registers for each CPU */
@@ -456,9 +565,12 @@ struct SYSBLK {
 
         LOCK    mainlock;               /* Main storage lock         */
         LOCK    intlock;                /* Interrupt lock            */
+        LOCK    iointqlk;               /* I/O Interrupt Queue lock  */
         LOCK    sigplock;               /* Signal processor lock     */
         ATTR    detattr;                /* Detached thread attribute */
         ATTR    joinattr;               /* Joinable thread attribute */
+#define  DETACHED  &sysblk.detattr      /* (helper macro)            */
+#define  JOINABLE  &sysblk.joinattr     /* (helper macro)            */
         TID     cnsltid;                /* Thread-id for console     */
         TID     socktid;                /* Thread-id for sockdev     */
                                         /* 3270 Console Keep-Alive:  */
@@ -485,7 +597,6 @@ struct SYSBLK {
 #define SHCMDOPT_NODIAG8  0x40          /* Disallow only for DIAG8   */
         int     panrate;                /* Panel refresh rate        */
         int     timerint;               /* microsecs timer interval  */
-        int     npquiet;                /* New Panel quiet indicator */
         char   *pantitle;               /* Alt console panel title   */
 #if defined(OPTION_HAO)
         TID     haotid;                 /* Herc Auto-Oper thread-id  */
@@ -496,6 +607,7 @@ struct SYSBLK {
 #define DEFAULT_AUTO_SCSI_MOUNT_SECS  (5)
 #endif
         DEVBLK *firstdev;               /* -> First device block     */
+        DEVBLK *sysgdev;                /* -> devblk for SYSG console*/
 #if defined(OPTION_FAST_DEVLOOKUP)
         DEVBLK ***devnum_fl;            /* 1st level table for fast  */
                                         /* devnum lookup             */
@@ -520,6 +632,7 @@ struct SYSBLK {
         unsigned int                    /* Flags                     */
                 daemon_mode:1,          /* Daemon mode active        */
                 panel_init:1,           /* Panel display initialized */
+                npquiet:1,              /* New Panel quiet indicator */
                 sigintreq:1,            /* 1 = SIGINT request pending*/
                 insttrace:1,            /* 1 = Instruction trace     */
                 inststep:1,             /* 1 = Instruction step      */
@@ -531,6 +644,11 @@ struct SYSBLK {
                 showregsnone:1,         /* 1 = show no registers     */
                 nomountedtapereinit:1,  /* 1 = disallow tape devinit
                                              if tape already mounted */
+                legacysenseid:1,        /* ena/disa senseid on       */
+                                        /*   legacy devices          */
+#if defined(OPTION_IPLPARM)
+                haveiplparm:1,          /* IPL PARM a la VM          */
+#endif
                 logoptnotime:1;         /* 1 = don't timestamp log   */
         U32     ints_state;             /* Common Interrupts Status  */
         U32     config_mask;            /* Configured CPUs           */
@@ -538,6 +656,9 @@ struct SYSBLK {
         U32     waiting_mask;           /* Waiting CPUs              */
         U64     traceaddr[2];           /* Tracing address range     */
         U64     stepaddr[2];            /* Stepping address range    */
+#if defined(OPTION_IPLPARM)
+        BYTE    iplparmstring[64];      /* 64 bytes loadable at IPL  */
+#endif
 #ifdef FEATURE_ECPSVM
 //
         /* ECPS:VM */
@@ -548,20 +669,22 @@ struct SYSBLK {
         } ecpsvm;                       /* ECPS:VM structure         */
 //
 #endif
-
         U64     pgminttr;               /* Program int trace mask    */
         int     pcpu;                   /* Tgt CPU panel cmd & displ */
         int     hercprio;               /* Hercules process priority */
         int     todprio;                /* TOD Clock thread priority */
         int     cpuprio;                /* CPU thread priority       */
         int     devprio;                /* Device thread priority    */
-        int     pgmprdos;               /* Program product OS flag   */
         TID     httptid;                /* HTTP listener thread id   */
         U16     httpport;               /* HTTP port number or zero  */
         int     httpauth;               /* HTTP auth required flag   */
         char   *httpuser;               /* HTTP userid               */
         char   *httppass;               /* HTTP password             */
         char   *httproot;               /* HTTP root                 */
+#if defined( OPTION_TAPE_AUTOMOUNT )
+        TAMDIR *tamdir;                 /* Acc/Rej AUTOMOUNT dir ctl */
+        char   *defdir;                 /* Default AUTOMOUNT dir     */
+#endif
      /* Fields used by SYNCHRONIZE_CPUS */
         int     syncing;                /* 1=Sync in progress        */
         U32     sync_mask;              /* CPU mask for syncing CPUs */
@@ -573,7 +696,6 @@ struct SYSBLK {
 #if defined(OPTION_SHARED_DEVICES)
         TID     shrdtid;                /* Shared device listener    */
         U16     shrdport;               /* Shared device server port */
-        U32     shrdrate;               /* IOs per second            */
         U32     shrdcount;              /* IO count                  */
         SHRD_TRACE  *shrdtrace;         /* Internal trace table      */
         SHRD_TRACE  *shrdtracep;        /* Current pointer           */
@@ -610,6 +732,8 @@ struct SYSBLK {
         U64 imapb9[256];
         U64 imapc0[16];
         U64 imapc2[16];                                         /*@Z9*/
+        U64 imapc4[16];                                         /*208*/
+        U64 imapc6[16];                                         /*208*/
         U64 imapc8[16];
         U64 imape3[256];
         U64 imape4[256];
@@ -629,6 +753,8 @@ struct SYSBLK {
             + sizeof(sysblk.imapb9) \
             + sizeof(sysblk.imapc0) \
             + sizeof(sysblk.imapc2) /*@Z9*/ \
+            + sizeof(sysblk.imapc4) /*208*/ \
+            + sizeof(sysblk.imapc6) /*208*/ \
             + sizeof(sysblk.imapc8) \
             + sizeof(sysblk.imape3) \
             + sizeof(sysblk.imape4) \
@@ -649,9 +775,17 @@ struct SYSBLK {
         U32     siosrate;               /* IOs per second            */
 #endif /*defined(OPTION_MIPS_COUNTING)*/
 
+#ifdef OPTION_CMDTGT
+        int     cmdtgt;                 /* 0=herc,1=scp,2=!scp       */
+#endif // OPTION_CMDTGT
+
         int     regs_copy_len;          /* Length to copy for REGS   */
 
         REGS    dummyregs;              /* Regs for unconfigured CPU */
+
+#ifdef OPTION_MSGHLD
+        int     keep_timeout_secs;      /* Message hold time         */
+#endif
 
 };
 
@@ -808,8 +942,7 @@ struct DEVBLK {                         /* Device configuration block*/
         int     ioactive;               /* System Id active on device*/
 #define DEV_SYS_NONE    0               /* No active system on device*/
 #define DEV_SYS_LOCAL   0xffff          /* Local system active on dev*/
-        /* By Adrian - Password for Tape drive (and 1 spare)         */   
-        BYTE    drvpwd[11];               /* Password for drive        */   
+        BYTE    drvpwd[11];             /* Password for drive        */   
         BYTE    reserved3;              /* (pad/align/unused/avail)  */   
 
         /*  control flags...                                         */
@@ -957,6 +1090,8 @@ struct DEVBLK {                         /* Device configuration block*/
                                            from current block        */
         U16     curbufoff;              /* Offset into buffer of data
                                            for next data chained CCW */
+        U16     tapssdlen;              /* #of bytes of data prepared
+                                           for Read Subsystem Data   */
         HETB   *hetb;                   /* HET control block         */
 
         struct                          /* HET device parms          */
@@ -973,12 +1108,12 @@ struct DEVBLK {                         /* Device configuration block*/
           U16   chksize;                /* Chunk size                */
           off_t maxsize;                /* Maximum allowed TAPE file
                                            size                      */
-          off_t eotmargin;              /* Amount of space left
-                                           before reporting EOT      */
         }       tdparms;                /* HET device parms          */
-        u_int   poserror:1;             /* Positioning error         */
+
+        off_t   eotmargin;              /* Amount of space left before
+                                           reporting EOT (in bytes)  */
+        u_int   fenced:1;               /* 1=Pos err; volume fenced  */
         u_int   readonly:1;             /* 1=Tape is write-protected */
-        u_int   longfmt:1;              /* 1=Long record format (DDR)*/ /*DDR*/
         u_int   sns_pending:1;          /* Contingency Allegiance    */
                                         /* - means : don't build a   */
                                         /* sense on X'04' : it's     */
@@ -986,8 +1121,17 @@ struct DEVBLK {                         /* Device configuration block*/
                                         /* NOTE : flag cleared by    */
                                         /*        sense command only */
                                         /*        or a device init   */
+        u_int   SIC_supported:1;        /* 1=Spec Intcpt Cond support*/
+        u_int   SIC_active:1;           /* 1=SIC active              */
+        u_int   forced_logging:1;       /* 1=Forced Error Logging    */
+        u_int   eotwarning:1;           /* 1=EOT warning area reached*/
+#if defined( OPTION_TAPE_AUTOMOUNT )
+        u_int   noautomount:1;          /* 1=AUTOMOUNT disabled      */
+#endif
+        U32     msgid;                  /* Message Id of async. i/o  */
 #if defined(OPTION_SCSI_TAPE)
-        U32     sstat;                  /* Generic SCSI tape device-
+        struct mtget mtget;             /* SCSI tape status struct   */
+#define sstat  mtget.mt_gstat           /* Generic SCSI tape device-
                                            independent status field;
                                            (struct mtget->mt_gstat)  */
         TID     stape_mountmon_tid;     /* Tape-mount monitor thread */
@@ -1000,7 +1144,8 @@ struct DEVBLK {                         /* Device configuration block*/
         LOCK    stape_getstat_lock;     /* LOCK for status wrkr thrd */
         COND    stape_getstat_cond;     /* COND for status wrkr thrd */
         COND    stape_exit_cond;        /* thread wait for exit COND */
-        U32     stape_getstat_sstat;    /* status wrkr thrd status   */
+        struct mtget stape_getstat_mtget;/* status wrkr thrd status  */
+#define stape_getstat_sstat stape_getstat_mtget.mt_gstat /* (gstat)  */
         struct timeval
                 stape_getstat_query_tod;/* TOD of actual drive query */
 #endif
@@ -1119,6 +1264,7 @@ struct DEVBLK {                         /* Device configuration block*/
         BYTE    ckdxgattr;              /* Define extent global attr */
         U16     ckdltranlf;             /* Locate record transfer
                                            length factor             */
+        U16     ckdlmask;               /* Locate record mask        */
         BYTE    ckdloper;               /* Locate record operation   */
         BYTE    ckdlaux;                /* Locate record aux byte    */
         BYTE    ckdlcount;              /* Locate record count       */
@@ -1352,9 +1498,10 @@ typedef  char         CCKD_TRACE[128];  /* Trace table entry         */
 struct CCKDBLK {                        /* Global cckd dasd block    */
         BYTE             id[8];         /* "CCKDBLK "                */
         DEVBLK          *dev1st;        /* 1st device in cckd queue  */
-        int              batch:1;       /* 1=called in batch mode    */
-
-        ATTR             attr;          /* Thread attributes         */
+        unsigned int     batch:1,       /* 1=called in batch mode    */
+                         sfmerge:1,     /* 1=sf-* merge              */
+                         sfforce:1;     /* 1=sf-* force              */
+        int              sflevel;       /* sfk xxxx level            */
 
         BYTE             comps;         /* Supported compressions    */
         BYTE             comp;          /* Override compression      */
@@ -1436,7 +1583,10 @@ struct CCKDDASD_EXT {                   /* Ext for compressed ckd    */
                          merging:1,     /* 1=File merge in progress  */
                          stopping:1,    /* 1=Device is closing       */
                          notnull:1,     /* 1=Device has track images */
-                         l2ok:1;        /* 1=All l2s below bounds    */
+                         l2ok:1,        /* 1=All l2s below bounds    */
+                         sfmerge:1,     /* 1=sf-xxxx merge           */
+                         sfforce:1;     /* 1=sf-xxxx force           */
+        int              sflevel;       /* sfk xxxx level            */
         LOCK             filelock;      /* File lock                 */
         LOCK             iolock;        /* I/O lock                  */
         COND             iocond;        /* I/O condition             */

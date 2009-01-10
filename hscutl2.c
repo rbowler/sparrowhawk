@@ -13,7 +13,7 @@
 /*  Hercules header files.                                            */
 /*                                                                    */
 /*  Released under the Q Public License                               */
-/*  (http://www.conmicro.cx/hercules/herclic.html)                    */
+/*  (http://www.hercules-390.org/herclic.html)                        */
 /*  as modifications to Hercules.                                     */
 /*                                                                    */
 /*  This file is portion of the HERCULES S/370, S/390 and             */
@@ -21,9 +21,12 @@
 /*                                                                    */
 /**********************************************************************/
 
-// $Id: hscutl2.c,v 1.10 2006/12/08 09:43:26 jj Exp $
+// $Id: hscutl2.c,v 1.11 2007/11/30 14:54:33 jmaynard Exp $
 //
 // $Log: hscutl2.c,v $
+// Revision 1.11  2007/11/30 14:54:33  jmaynard
+// Changed conmicro.cx to hercules-390.org or conmicro.com, as needed.
+//
 // Revision 1.10  2006/12/08 09:43:26  jj
 // Add CVS message log
 //

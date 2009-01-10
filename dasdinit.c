@@ -1,10 +1,9 @@
 /* DASDINIT.C   (c) Copyright Roger Bowler, 1999-2007                */
 /*              Hercules DASD Utilities: DASD image builder          */
 
-// $Id: dasdinit.c,v 1.47 2007/06/23 00:04:08 ivan Exp $
+// $Id: dasdinit.c,v 1.50 2008/11/04 04:50:46 fish Exp $
 
 /*-------------------------------------------------------------------*/
-/*                                                                   */
 /* This program creates a disk image file and initializes it as      */
 /* a blank FBA or CKD DASD volume.                                   */
 /*                                                                   */
@@ -41,6 +40,15 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: dasdinit.c,v $
+// Revision 1.50  2008/11/04 04:50:46  fish
+// Ensure consistent utility startup
+//
+// Revision 1.49  2007/09/30 13:30:08  rbowler
+// Revert extra blank lines inserted by rev 1.12
+//
+// Revision 1.48  2007/09/30 12:23:22  rbowler
+// Error message if DASD initialisation unsuccessful
+//
 // Revision 1.47  2007/06/23 00:04:08  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -161,16 +169,9 @@ CKDDEV *ckd;                            /* -> CKD device table entry */
 FBADEV *fba;                            /* -> FBA device table entry */
 int     lfs = 0;                        /* 1 = Build large file      */
 int     nullfmt = CKDDASD_NULLTRK_FMT1; /* Null track format type    */
+int     rc;                             /* Return code               */
 
-#ifdef EXTERNALGUI
-    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
-    {
-        extgui = 1;
-        argc--;
-        setvbuf(stderr, NULL, _IONBF, 0);
-        setvbuf(stdout, NULL, _IONBF, 0);
-    }
-#endif /*EXTERNALGUI*/
+    INITIALIZE_UTILITY("dasdinit");
 
     /* Display program identification and help */
     if (argc <= 1 || (argc == 2 && !strcmp(argv[1], "-v")))
@@ -201,22 +202,19 @@ int     nullfmt = CKDDASD_NULLTRK_FMT1; /* Null track format type    */
     }
 
     /* Check remaining number of arguments */
-
     if (argc < (rawflag ? 3 : 4) || argc > (rawflag ? 4 : 5))
         argexit(5, NULL);
 
     /* The first argument is the file name */
-
-    if (!argv[1] || strlen(argv[1]) == 0
+    if (argv[1] == NULL || strlen(argv[1]) == 0
         || strlen(argv[1]) > sizeof(fname)-1)
         argexit(1, argv[1]);
 
     strcpy (fname, argv[1]);
 
-    /* The second argument is the device type,
-       with or without the model number. */
-
-    if (!argv[2])
+    /* The second argument is the device type.
+       Model number may also be specified */
+    if (argv[2] == NULL)
         argexit(2, argv[2]);
     ckd = dasd_lookup (DASD_CKDDEV, argv[2], 0, 0);
     if (ckd != NULL)
@@ -255,7 +253,7 @@ int     nullfmt = CKDDASD_NULLTRK_FMT1; /* Null track format type    */
         volsize_argnum = 4;
 
         /* The third argument is the volume serial number */
-        if (!argv[3] || strlen(argv[3]) == 0
+        if (argv[3] == NULL || strlen(argv[3]) == 0
             || strlen(argv[3]) > sizeof(volser)-1)
             argexit(3, argv[3]);
 
@@ -284,19 +282,23 @@ int     nullfmt = CKDDASD_NULLTRK_FMT1; /* Null track format type    */
         size += altsize;
 
     /* Create the device */
-
     if (type == 'C')
-        create_ckd (fname, devtype, heads, maxdlen, size, volser,
-                    comp, lfs, 0, nullfmt, rawflag);
+        rc = create_ckd (fname, devtype, heads, maxdlen, size, volser,
+                        comp, lfs, 0, nullfmt, rawflag);
     else
-        create_fba (fname, devtype, sectsize, size, volser, comp,
-                    lfs, 0, rawflag);
+        rc = create_fba (fname, devtype, sectsize, size, volser, comp,
+                        lfs, 0, rawflag);
 
     /* Display completion message */
+    if (rc == 0)
+    {
+        fprintf (stderr, _("HHCDI001I DASD initialization successfully "
+                "completed.\n"));
+    } else {
+        fprintf (stderr, _("HHCDI002I DASD initialization unsuccessful"
+                "\n"));
+    }
 
-    fprintf (stderr, _("HHCDI001I DASD initialization successfully "
-                     "completed.\n"));
-
-    return 0;
+    return rc;
 
 } /* end function main */

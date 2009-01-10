@@ -2,7 +2,7 @@
 // W32STAPE.C   --   Hercules Win32 SCSI Tape handling module
 //
 // (c) Copyright "Fish" (David B. Trout), 2005-2007. Released under
-// the Q Public License (http://www.conmicro.cx/hercules/herclic.html)
+// the Q Public License (http://www.hercules-390.org/herclic.html)
 // as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 //
@@ -14,9 +14,24 @@
 //
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: w32stape.c,v 1.13 2007/06/23 00:04:19 ivan Exp $
+// $Id: w32stape.c,v 1.18 2008/03/31 06:36:49 fish Exp $
 //
 // $Log: w32stape.c,v $
+// Revision 1.18  2008/03/31 06:36:49  fish
+// (untab)
+//
+// Revision 1.17  2008/03/30 02:51:34  fish
+// Fix SCSI tape EOV (end of volume) processing
+//
+// Revision 1.16  2007/11/30 14:54:33  jmaynard
+// Changed conmicro.cx to hercules-390.org or conmicro.com, as needed.
+//
+// Revision 1.15  2007/07/24 22:36:33  fish
+// Fix tape Synchronize CCW (x'43') to do actual commit
+//
+// Revision 1.14  2007/07/24 21:57:29  fish
+// Fix Win32 SCSI tape "Locate" and "ReadBlockId" SNAFU
+//
 // Revision 1.13  2007/06/23 00:04:19  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -413,6 +428,102 @@ int w32_internal_rc ( U32* pStat )
 
         case ERROR_BEGINNING_OF_MEDIA: *pStat |= GMT_BOT     (0xFFFFFFFF); errno = EIO;       break;
         case ERROR_END_OF_MEDIA:       *pStat |= GMT_EOT     (0xFFFFFFFF); errno = ENOSPC;    break;
+
+        //  "ERROR_END_OF_MEDIA"
+        //
+        //      Msg:   "The physical end of the tape has been reached."
+        //
+        //      The EOT warning reflector has been reached or passed (i.e. you're
+        //      now/still in the "EOT Warning Zone" area). Writing additional data
+        //      and/or tapemarks may still be possible depending on the size of the
+        //      EOT Warning Zone (as set by a SetTapeParameters call with a non-zero
+        //      EOTWarningZoneSize value (if supported; see further below)) and
+        //      how much data you've already written to the EOT Warning Zone area
+        //      (i.e. once you're in the warning area, this "error" occurs after
+        //      EACH and EVERY I/O [in the warning zone area] until the ABSOLUTE
+        //      physical end-of-tape (ERROR_EOM_OVERFLOW) is reached; see below).
+        //
+        //
+        //                       ***********************
+        //                       **  IMPORTANT NOTE!  **
+        //                       ***********************
+        //
+        //                    This is NOT actually an "error"!!!
+        //
+        //
+        //      When this "error" occurs, your "ReadFile" and/or "WriteFile" call
+        //      returns 'FALSE' even though ALL of your requested data was actually
+        //      written successfully!! This can be verified by checking to ensure
+        //      the returned "number of bytes written" actually matches the amount
+        //      you asked to be written. If they're the same (and they ALWAYS will
+        //      be for this specific "error" code), then it means this "error" is
+        //      NOT actually an error at all, but rather just a WARNING instead!!
+        //      (Had it been an actual i/o error, the error code would have been
+        //      some other DIFFERENT error code value instead!!)
+        //
+        //
+        //                       ***********************
+        //                       **  ALSO IMPORTANT!  **
+        //                       ***********************
+        //      See also:
+        //
+        //    http://fixunix.com/storage/205622-bug-dlttape-sys-no-eot-warning.html
+        //
+        //      for ADDITIONAL IMPORTANT INFORMATION regarding always having to
+        //      specifically request that this "error" code be returned to you:
+        //
+        //      Even when a drive reports it does not support the setting of the
+        //      the 'EOTWarningZoneSize' value (i.e. the FeaturesLow field of the
+        //      GetTapeParameters call returns '0' for TAPE_DRIVE_SET_EOT_WZ_SIZE
+        //      field), it may still be possible for "ERROR_END_OF_MEDIA" warnings
+        //      to be generated anyway by simply calling SetTapeParameters with a
+        //      non-zero 'EOTWarningZoneSize' value anyway.
+        //
+        //      The reason for this is because some drives may not allow CHANGING
+        //      the value (thus the reason for it reporting that setting the value
+        //      is not supported), but may nevertheless still support the ENABLING
+        //      of their own hard-coded internal value. That is to say, while the
+        //      size of the warning zone may not be modifiable (as it may be hard-
+        //      coded and thus unchangeable), the drive may still have the ability
+        //      to REPORT reaching the EOT Warning zone IF SPECIFICALLY REQUESTED
+        //      TO DO SO! (which is presumably what requesting a non-zero Warning
+        //      Zone size would end up doing: i.e. even though such calls APPEAR
+        //      to fail, they actually DO succeed in accomplishing SOMETHING, just
+        //      not what you originally/specifically requested).
+        //
+        //      Thus calling SetTapeParameters with a non-zero 'EOTWarningZoneSize'
+        //      value might very well succeed anyway even though GetTapeParameters
+        //      reports that doing so is not supported, and by so doing, may cause
+        //      the drive to begin reporting of "ERROR_END_OF_MEDIA" (whereas not
+        //      attempting to do so would end up leaving the drive in its default
+        //      non-reporting mode. That is to say, you should ALWAYS try setting
+        //      a non-zero 'EOTWarningZoneSize' value, ignoring any "unsupported"
+        //      error code that may be returned from such a call.)
+
+        case ERROR_EOM_OVERFLOW:       *pStat |= GMT_EOT     (0xFFFFFFFF); errno = EIO;       break;
+
+        //  "ERROR_EOM_OVERFLOW"
+        //
+        //      Msg:   "Physical end of tape encountered."
+        //
+        //      This error code means that the actual physical end-of-media has been
+        //      reached, and no more data can be written to the tape. This includes
+        //      tapemarks as well.
+        //
+        //                       ***********************
+        //                       **  IMPORTANT NOTE!  **
+        //                       ***********************
+        //
+        //                 This is a HARD (UNRECOVERABLE) error!!
+        //
+        //      To be programmatically informed of when you are coming close to the
+        //      physical end-of-the-tape (such that you could be assured room still
+        //      remained to write logical end-of-volume labels for example), simply
+        //      call SetTapeParameters with a non-zero 'EOTWarningZoneSize' value
+        //      and treat any "ERROR_END_OF_MEDIA" "errors" received when writing
+        //      as warnings instead. (See prior discussion of "ERROR_END_OF_MEDIA"
+        //      return code further above)
+
         case ERROR_NO_DATA_DETECTED:   *pStat |= GMT_EOD     (0xFFFFFFFF); errno = EIO;       break;
         case ERROR_FILEMARK_DETECTED:  *pStat |= GMT_EOF     (0xFFFFFFFF); errno = EIO;       break;
         case ERROR_SETMARK_DETECTED:   *pStat |= GMT_SM      (0xFFFFFFFF); errno = EIO;       break;
@@ -428,7 +539,8 @@ int w32_internal_rc ( U32* pStat )
 
 int  w32_internal_mtop  ( HANDLE hFile, U32* pStat, struct mtop*  mtop,  ifd_t ifd );
 int  w32_internal_mtget ( HANDLE hFile, U32* pStat, struct mtget* mtget, ifd_t ifd );
-int  w32_internal_mtpos ( HANDLE hFile, U32* pStat, DWORD* pdwPos,       ifd_t ifd ); // "GetTapePosition()"
+int  w32_internal_mtpos ( HANDLE hFile, U32* pStat, DWORD* pdwLogPos,
+                                                    DWORD* pdwAbsPos,    ifd_t ifd );
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Close tape device...
@@ -482,6 +594,7 @@ ssize_t  w32_read_tape ( ufd_t ufd, void* buf, size_t nbyte )
 {
     BOOL    bSuccess;
     DWORD   dwBytesRead;
+    DWORD   dwLastError;
 
     ifd_t   ifd    = W32STAPE_UFD2IFD( ufd );
     U32*    pStat  = NULL;
@@ -516,24 +629,35 @@ ssize_t  w32_read_tape ( ufd_t ufd, void* buf, size_t nbyte )
 
     do
     {
-        bSuccess = ReadFile( hFile, buf, nbyte, &dwBytesRead, NULL );
-        errno    = GetLastError();
-        errno    = w32_internal_rc ( pStat );
+        dwBytesRead = 0;
+        bSuccess    = ReadFile( hFile, buf, nbyte, &dwBytesRead, NULL );
+        errno       = (dwLastError = GetLastError());
+        errno       = w32_internal_rc ( pStat );
     }
     while ( !bSuccess && EINTR == errno );
 
-    if (bSuccess)
+    // Success?  (see: "ERROR_END_OF_MEDIA" in function 'w32_internal_rc')
+
+    if (bSuccess || ERROR_END_OF_MEDIA == dwLastError)
+    {
+        ASSERT( bSuccess || ENOSPC == errno );
         return ( (ssize_t) dwBytesRead );
+    }
 
-    // The i/o failed. Check if
-    // just a tapemark was read...
+    ASSERT( !bSuccess && ERROR_END_OF_MEDIA != dwLastError && ENOSPC != errno );
 
-    if ( EIO != errno || !GMT_EOF( *pStat ) )
-        return -1;
+    // The i/o "failed".  Check to see if it was just a tapemark...
 
-    // EIO == errno && GMT_EOF( *pStat )  -->  i.e. tapemark...
+    if ( EIO == errno && GMT_EOF( *pStat ) )
+    {
+        ASSERT( ERROR_FILEMARK_DETECTED == dwLastError );
+        return 0;   // (tapemark)
+    }
 
-    return 0;   // (tapemark)
+    // EIO != errno || !GMT_EOF( *pStat )  -->  bona fide i/o error...
+
+    ASSERT( ERROR_FILEMARK_DETECTED != dwLastError );
+    return -1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////
@@ -544,6 +668,7 @@ ssize_t  w32_write_tape ( ufd_t ufd, const void* buf, size_t nbyte )
 {
     BOOL     bSuccess;
     DWORD    dwBytesWritten;
+    DWORD    dwLastError;
 
     ifd_t    ifd    = W32STAPE_UFD2IFD( ufd );
     U32*     pStat  = NULL;
@@ -578,16 +703,26 @@ ssize_t  w32_write_tape ( ufd_t ufd, const void* buf, size_t nbyte )
 
     do
     {
-        bSuccess = WriteFile( hFile, buf, nbyte, &dwBytesWritten, NULL );
-        errno    = GetLastError();
-        errno    = w32_internal_rc ( pStat );
+        dwBytesWritten = 0;
+        bSuccess       = WriteFile( hFile, buf, nbyte, &dwBytesWritten, NULL );
+        errno          = (dwLastError = GetLastError());
+        errno          = w32_internal_rc ( pStat );
     }
     while ( !bSuccess && EINTR == errno );
 
-    if (!bSuccess)
-        return -1;
+    // Success?  (see: "ERROR_END_OF_MEDIA" in function 'w32_internal_rc')
 
-    return ( (ssize_t) dwBytesWritten );
+    if (bSuccess || ERROR_END_OF_MEDIA == dwLastError)
+    {
+        ASSERT( bSuccess || ENOSPC == errno );
+        ASSERT( ((size_t)dwBytesWritten) == nbyte );  // (MUST be true!!)
+        return ( (ssize_t) dwBytesWritten );
+    }
+
+    // I/O error...
+
+    ASSERT( !bSuccess && ERROR_END_OF_MEDIA != dwLastError && ENOSPC != errno );
+    return -1;
 }
 
 ////////////////////////////////////////////////////////////////////////////////////
@@ -651,7 +786,7 @@ int w32_ioctl_tape ( ufd_t ufd, int request, ... )
         {
             struct mtpos* mtpos = ptr;
             memset( mtpos, 0, sizeof(*mtpos) );
-            rc = w32_internal_mtpos( hFile, pStat, &mtpos->mt_blkno, ifd );
+            rc = w32_internal_mtpos( hFile, pStat, &mtpos->mt_blkno, NULL, ifd );
         }
         break;
 
@@ -724,7 +859,7 @@ int w32_internal_mtop ( HANDLE hFile, U32* pStat, struct mtop* mtop, ifd_t ifd )
         {
             do
             {
-                errno = SetTapePosition( hFile, TAPE_ABSOLUTE_BLOCK, 0, mtop->mt_count, 0, FALSE );
+                errno = SetTapePosition( hFile, TAPE_LOGICAL_BLOCK, 0, mtop->mt_count, 0, FALSE );
                 errno = w32_internal_rc ( pStat );
             }
             while ( EINTR == errno );
@@ -819,9 +954,28 @@ int w32_internal_mtop ( HANDLE hFile, U32* pStat, struct mtop* mtop, ifd_t ifd )
         }
         break;
 
+        case MTEOTWARN:   // (set EOT Warning Zone size in bytes)
+        {
+            TAPE_SET_DRIVE_PARAMETERS   set_drive_parms;
+
+            set_drive_parms.ECC                = g_drive_parms[ifd].ECC;
+            set_drive_parms.Compression        = g_drive_parms[ifd].Compression;
+            set_drive_parms.DataPadding        = g_drive_parms[ifd].DataPadding;
+            set_drive_parms.ReportSetmarks     = g_drive_parms[ifd].ReportSetmarks;
+            set_drive_parms.EOTWarningZoneSize = mtop->mt_count;
+
+            do
+            {
+                errno = SetTapeParameters( hFile, SET_TAPE_DRIVE_INFORMATION, &set_drive_parms );
+                errno = w32_internal_rc ( pStat );
+            }
+            while ( EINTR == errno );
+        }
+        break;
+
         case MTWEOF:    // (write TAPEMARK)
         {
-            if ( mtop->mt_count < 1 )
+            if ( mtop->mt_count < 0 )
             {
                 errno = EINVAL;
                 rc = -1;
@@ -870,27 +1024,12 @@ int w32_internal_mtop ( HANDLE hFile, U32* pStat, struct mtop* mtop, ifd_t ifd )
             }
             else
             {
-                DWORD  dwEraseType;     // (type of erase to perform)
-                BOOL   bImmediate;      // (wait for complete option)
-
-                // PROGRAMMING NOTE: note that we request the "return immediately
-                // after starting the i/o" (i.e. the "don't wait for the i/o to
-                // finish first before returning back to me") variety of i/o for
-                // the "data security erase" (erase rest of tape) type request.
-                //
-                // This matches the usual behavior of mainframe tape i/o wherein
-                // the erase operation begins as soon as the i/o request is made
-                // to the drive and the channel/device completes the operation
-                // asynchronously and presents its final device status later at
-                // the time when the operation eventually/finally completes...
-
-                //                                 ** 1 **            ** 0 **
-                dwEraseType = mtop->mt_count ? TAPE_ERASE_LONG : TAPE_ERASE_SHORT;
-                bImmediate  = mtop->mt_count ?      TRUE       :       FALSE;
+                DWORD  dwEraseType  =
+                    mtop->mt_count ? TAPE_ERASE_LONG : TAPE_ERASE_SHORT;
 
                 do
                 {
-                    errno = EraseTape( hFile, dwEraseType, bImmediate );
+                    errno = EraseTape( hFile, dwEraseType, FALSE );
                     errno = w32_internal_rc ( pStat );
                 }
                 while ( EINTR == errno );
@@ -913,7 +1052,7 @@ int w32_internal_mtop ( HANDLE hFile, U32* pStat, struct mtop* mtop, ifd_t ifd )
         break;
     }
 
-    return (rc = errno ? -1 : 0);
+    return (rc = (0 == errno || ENOSPC == errno) ? 0 : /* errno != 0 && errno != ENOSPC */ -1);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////
@@ -923,7 +1062,7 @@ static
 int w32_internal_mtget ( HANDLE hFile, U32* pStat, struct mtget* mtget, ifd_t ifd )
 {
     TAPE_GET_MEDIA_PARAMETERS   media_parms;
-    DWORD                       dwRetCode, dwSize, dwPosition;
+    DWORD                       dwRetCode, dwSize, dwLogicalPosition;
 
     ASSERT( pStat && mtget );
 
@@ -997,15 +1136,15 @@ int w32_internal_mtget ( HANDLE hFile, U32* pStat, struct mtget* mtget, ifd_t if
 
     // Lastly, attempt to determine if we are at BOT (i.e. load-point)...
 
-    if ( 0 != ( errno = w32_internal_mtpos( hFile, pStat, &dwPosition, ifd ) ) )
+    if ( 0 != ( errno = w32_internal_mtpos( hFile, pStat, &dwLogicalPosition, NULL, ifd ) ) )
     {
         mtget->mt_gstat = *pStat;
         return -1;
     }
 
-    mtget->mt_blkno = dwPosition;
+    mtget->mt_blkno = dwLogicalPosition;
 
-    if ( ( dwPosition & g_BOTmsk[ ifd ] ) == g_BOTbot[ ifd ] )
+    if ( ( dwLogicalPosition & g_BOTmsk[ ifd ] ) == g_BOTbot[ ifd ] )
         *pStat |=  GMT_BOT (0xFFFFFFFF);
     else
         *pStat &= ~GMT_BOT (0xFFFFFFFF);
@@ -1018,11 +1157,12 @@ int w32_internal_mtget ( HANDLE hFile, U32* pStat, struct mtget* mtget, ifd_t if
 // Private internal helper function...   return 0 == success, -1 == failure
 
 static
-int  w32_internal_mtpos ( HANDLE hFile, U32* pStat, DWORD* pdwPos, ifd_t ifd )
+int  w32_internal_mtpos ( HANDLE hFile, U32* pStat, DWORD* pdwLogPos,
+                                                    DWORD* pdwAbsPos, ifd_t ifd )
 {
     DWORD dwDummyPartition, dwDummyPositionHigh;
 
-    ASSERT( pStat && pdwPos );    // (sanity check)
+    ASSERT( pStat && pdwLogPos );    // (sanity check)
 
     // PROGRAMMING NOTE: the SDK docs state that for the 'lpdwOffsetHigh'
     // parameter (i.e. dwDummyPositionHigh, the 5th paramater):
@@ -1042,9 +1182,9 @@ int  w32_internal_mtpos ( HANDLE hFile, U32* pStat, DWORD* pdwPos, ifd_t ifd )
         errno = GetTapePosition
         (
             hFile,
-            TAPE_ABSOLUTE_POSITION,
+            TAPE_LOGICAL_POSITION,
             &dwDummyPartition,
-            pdwPos,
+            pdwLogPos,
             &dwDummyPositionHigh
         );
         errno = w32_internal_rc ( &dummy_stat );
@@ -1054,26 +1194,41 @@ int  w32_internal_mtpos ( HANDLE hFile, U32* pStat, DWORD* pdwPos, ifd_t ifd )
     if (errno)
         return -1;
 
-    // PROGRAMMING NOTE: the absolute tape position that Windows appears to
-    // return in response to a GetTapePosition call appears to correspond to
-    // the SCSI "READ POSITION" command's "first block location" value:
-    //
-    //    Small Computer System Interface-2 (SCSI-2)
-    //
-    //    ANSI INCITS 131-1994 (R1999)
-    //    (formerly ANSI X3.131-1994 (R1999))
-    //
-    //    10.2.6 READ POSITION command
-    //
-    //    page 234: READ POSITION data
-    //
-    //    "The first block location field indicates the block address
-    //    associated with the current logical position. The value shall
-    //    indicate the block address of the next data block to be
-    //    transferred between the initiator and the target if a READ
-    //    or WRITE command is issued."
+    if (pdwAbsPos)  // (may be NULL if they're not interested in it)
+    {
+        do
+        {
+            U32 dummy_stat = 0;
+            errno = GetTapePosition
+            (
+                hFile,
+                TAPE_ABSOLUTE_POSITION,
+                &dwDummyPartition,
+                pdwAbsPos,
+                &dwDummyPositionHigh
+            );
+            errno = w32_internal_rc ( &dummy_stat );
+        }
+        while ( EINTR == errno );
 
-    if ( ( *pdwPos & g_BOTmsk[ ifd ] ) == g_BOTbot[ ifd ] )
+        if (errno)
+            return -1;
+    }
+
+    // PROGRAMMING NOTE: the Windows 'GetTapePosition' API returns either
+    // a LOGICAL position value or an ABSOLUTE position value. Based on
+    // trial and error it was determined the LOGICAL position corresponds
+    // to the SCSI "READ POSITION" command's "first block location" value,
+    // and the ABSOLUTE tape position appears to correspond to the SCSI
+    // "last block location".
+    
+    // Since what we want is what IBM calls the "Channel block ID" (which
+    // itself appears to correspond to what the SCSI documentation refers
+    // to as the "First block location"), then what we want here is what
+    // Windows refers to as the LOGICAL position, not the ABSOLUTE (i.e.
+    // device-relative) position I originally thought we needed/wanted.
+
+    if ( ( *pdwLogPos & g_BOTmsk[ ifd ] ) == g_BOTbot[ ifd ] )
         *pStat |=  GMT_BOT (0xFFFFFFFF);
     else
         *pStat &= ~GMT_BOT (0xFFFFFFFF);

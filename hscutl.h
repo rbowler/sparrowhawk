@@ -4,9 +4,13 @@
 /* laneous global utility functions.                                 */
 /*********************************************************************/
 
-// $Id: hscutl.h,v 1.21 2007/01/10 15:12:11 rbowler Exp $
+// $Id: hscutl.h,v 1.22 2008/02/19 11:49:19 ivan Exp $
 //
 // $Log: hscutl.h,v $
+// Revision 1.22  2008/02/19 11:49:19  ivan
+// - Move setting of CPU priority after spwaning timer thread
+// - Added support for Posix 1003.1e capabilities
+//
 // Revision 1.21  2007/01/10 15:12:11  rbowler
 // Console keepalive for Unix
 //
@@ -205,5 +209,11 @@ HUT_DLL_IMPORT int hprintf(int s,char *fmt,...);
 HUT_DLL_IMPORT int hwrite(int s,const char *,size_t);
 HUT_DLL_IMPORT int hgetc(int s);
 HUT_DLL_IMPORT char *hgets(char *b,size_t c,int s);
+
+/* Posix 1003.e capabilities */
+#if defined(OPTION_CAPABILITIES)
+HUT_DLL_IMPORT int drop_privileges(int c);
+HUT_DLL_IMPORT int drop_all_caps(void);
+#endif
 
 #endif /* __HSCUTL_H__ */

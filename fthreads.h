@@ -2,12 +2,22 @@
 //         fthreads.h           Fish's WIN32 version of pthreads
 ////////////////////////////////////////////////////////////////////////////////////
 // (c) Copyright "Fish" (David B. Trout), 2001-2007. Released under the Q Public License
-// (http://www.conmicro.cx/hercules/herclic.html) as modifications to Hercules.
+// (http://www.hercules-390.org/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: fthreads.h,v 1.22 2007/06/23 00:04:10 ivan Exp $
+// $Id: fthreads.h,v 1.24 2008/03/25 11:41:31 fish Exp $
 //
 // $Log: fthreads.h,v $
+// Revision 1.24  2008/03/25 11:41:31  fish
+// SCSI TAPE MODS part 1: groundwork: non-functional changes:
+// rename some functions, comments, general restructuring, etc.
+// New source modules awstape.c, omatape.c, hettape.c and
+// tapeccws.c added, but not yet used (all will be used in a future
+// commit though when tapedev.c code is eventually split)
+//
+// Revision 1.23  2007/11/30 14:54:32  jmaynard
+// Changed conmicro.cx to hercules-390.org or conmicro.com, as needed.
+//
 // Revision 1.22  2007/06/23 00:04:10  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -35,10 +45,9 @@
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////////
-// Just some handy macros to have around...
+// Just a handy macro to have around...
 
-#define  IsEventSet(h)  (WaitForSingleObject(h,0) == WAIT_OBJECT_0)
-#define  RC(rc)         (errno = rc)
+#define  RC(rc)     (errno = rc)
 
 ////////////////////////////////////////////////////////////////////////////////////
 // (need struct timespec for fthread_cond_timedwait)

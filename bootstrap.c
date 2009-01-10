@@ -2,9 +2,17 @@
 /* Hercules main executable code */
 /*********************************/
 
-// $Id: bootstrap.c,v 1.11 2006/12/28 03:04:34 fish Exp $
+// $Id: bootstrap.c,v 1.13 2008/07/17 00:22:11 fish Exp $
 //
 // $Log: bootstrap.c,v $
+// Revision 1.13  2008/07/17 00:22:11  fish
+// Increase time-intervals accuracy to 1 millisecond for Windows builds (insert
+// timeBeginPeriod/timeEndPeriod call at begin/end of Hercule 'main' function)
+//
+// Revision 1.12  2008/02/19 11:49:18  ivan
+// - Move setting of CPU priority after spwaning timer thread
+// - Added support for Posix 1003.1e capabilities
+//
 // Revision 1.11  2006/12/28 03:04:34  fish
 // Permanently disable in bootstrap.c Microsoft's completely INSANE Invalid CRT Parameter handling behavior
 //
@@ -25,6 +33,7 @@
 
 int main(int ac,char *av[])
 {
+    DROP_PRIVILEGES(CAP_SYS_NICE);
     SET_THREAD_NAME("bootstrap");
 
 #if defined( OPTION_DYNAMIC_LOAD ) && defined( HDL_USE_LIBTOOL )
@@ -81,6 +90,9 @@ static void ProcessException( EXCEPTION_POINTERS* pExceptionPtrs );
 
 ///////////////////////////////////////////////////////////////////////////////
 
+#include <Mmsystem.h>
+#pragma comment( lib, "Winmm" )
+
 int main(int ac,char *av[])
 {
     int rc = 0;
@@ -90,6 +102,10 @@ int main(int ac,char *av[])
     // Disable Microsoft's INSANE invalid crt parameter handling!
 
     DISABLE_CRT_INVALID_PARAMETER_HANDLER();
+
+    // Request the highest possible time-interval accuracy...
+
+    timeBeginPeriod( 1 );   // (one millisecond time interval accuracy)
 
     // If we're being debugged, then let the debugger
     // catch the exception. Otherwise, let our exception
@@ -141,6 +157,10 @@ int main(int ac,char *av[])
             rc = -1; // (indicate error)
         }
     }
+
+    // Each call to "timeBeginPeriod" must be matched with a call to "timeEndPeriod"
+
+    timeEndPeriod( 1 );     // (no longer care about accurate time intervals)
 
     return rc;
 }

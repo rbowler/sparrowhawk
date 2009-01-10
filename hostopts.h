@@ -2,7 +2,7 @@
 /* HOSTOPTS.H   --   HOST-specific features and options              */
 /*-------------------------------------------------------------------*/
 
-// $Id: hostopts.h,v 1.15 2007/02/26 15:34:46 fish Exp $
+// $Id: hostopts.h,v 1.18 2008/08/29 19:06:42 fish Exp $
 
 //    This header file #included by 'featall.h' and 'hercules.h'
 
@@ -38,6 +38,15 @@
 */
 
 // $Log: hostopts.h,v $
+// Revision 1.18  2008/08/29 19:06:42  fish
+// Panel display extended cursor handling (Windows only)
+//
+// Revision 1.17  2008/02/15 22:51:39  rbowler
+// Move Solaris specific definition of INADDR_NONE to hostopts.h
+//
+// Revision 1.16  2008/02/07 00:29:04  rbowler
+// Solaris build support by Jeff Savit
+//
 // Revision 1.15  2007/02/26 15:34:46  fish
 // remove stupid fish prt spooler crap
 //
@@ -124,6 +133,7 @@
 
 #define  CURSOR_SHAPE_NOT_SUPPORTED             0
 #define  CURSOR_SHAPE_VIA_SPECIAL_LINUX_ESCAPE  1
+#define  CURSOR_SHAPE_WINDOWS_NATIVE            2
 
 
 /*-------------------------------------------------------------------*/
@@ -159,6 +169,7 @@
   #define OPTION_TUNTAP_CLRIPADDR       /* TUNTAP_ClrIPAddr works    */
 
 #endif
+
 
 /*-------------------------------------------------------------------*/
 /* Hard-coded Win32-specific features and options...                 */
@@ -222,6 +233,41 @@
 #else
   #define HOW_TO_IMPLEMENT_SH_COMMAND   USE_FORK_API_FOR_SH_COMMAND
 #endif
+#define SET_CONSOLE_CURSOR_SHAPE_METHOD CURSOR_SHAPE_WINDOWS_NATIVE
+#define OPTION_EXTCURS                  /* Extended cursor handling  */
+
+
+/*-------------------------------------------------------------------*/
+/* Hard-coded Solaris-specific features and options...               */
+/*-------------------------------------------------------------------*/
+#elif defined(__sun__) && defined(__svr4__)
+
+#define __SOLARIS__ 1
+
+/* jbs 10/15/2003 need to define INADDR_NONE if using Solaris 10
+   and not Solaris Nevada aka OpenSolaris */
+#if !defined(INADDR_NONE)
+  #define INADDR_NONE                   0xffffffffU
+#endif
+
+#undef  OPTION_SCSI_TAPE                /* No SCSI tape support      */
+#undef  OPTION_SCSI_ERASE_TAPE          /* (NOT supported)           */
+#undef  OPTION_SCSI_ERASE_GAP           /* (NOT supported)           */
+#define DLL_IMPORT   extern
+#define DLL_EXPORT
+/* #undef  OPTION_PTTRACE maybe not, after all */
+
+#define MAX_DEVICE_THREADS          0   /* (0 == unlimited)          */
+#define MIXEDCASE_FILENAMES_ARE_UNIQUE  /* ("Foo" and "fOo" unique)  */
+
+#define DEFAULT_HERCPRIO    0
+#define DEFAULT_TOD_PRIO  -20
+#define DEFAULT_CPU_PRIO   15
+#define DEFAULT_DEV_PRIO    8
+
+#define HOW_TO_IMPLEMENT_SH_COMMAND       USE_ANSI_SYSTEM_API_FOR_SH_COMMAND
+#define SET_CONSOLE_CURSOR_SHAPE_METHOD   CURSOR_SHAPE_NOT_SUPPORTED
+#undef  OPTION_EXTCURS                  /* Normal cursor handling    */
 
 
 /*-------------------------------------------------------------------*/
@@ -249,6 +295,7 @@
 
 #define HOW_TO_IMPLEMENT_SH_COMMAND       USE_ANSI_SYSTEM_API_FOR_SH_COMMAND
 #define SET_CONSOLE_CURSOR_SHAPE_METHOD   CURSOR_SHAPE_NOT_SUPPORTED
+#undef  OPTION_EXTCURS                  /* Normal cursor handling    */
 
 
 /*-------------------------------------------------------------------*/
@@ -274,6 +321,8 @@
 
 #define HOW_TO_IMPLEMENT_SH_COMMAND       USE_ANSI_SYSTEM_API_FOR_SH_COMMAND
 #define SET_CONSOLE_CURSOR_SHAPE_METHOD   CURSOR_SHAPE_NOT_SUPPORTED
+#undef  OPTION_EXTCURS                  /* Normal cursor handling    */
+
 
 /*-------------------------------------------------------------------*/
 /* GNU 'C' (e.g. Linux) options...                                   */
@@ -304,6 +353,8 @@
   #define HOW_TO_IMPLEMENT_SH_COMMAND     USE_ANSI_SYSTEM_API_FOR_SH_COMMAND
 #endif
 #define SET_CONSOLE_CURSOR_SHAPE_METHOD   CURSOR_SHAPE_VIA_SPECIAL_LINUX_ESCAPE
+#undef  OPTION_EXTCURS                  /* Normal cursor handling    */
+
 
 /*-------------------------------------------------------------------*/
 /* Hard-coded OTHER (DEFAULT) host-specific features and options...  */
@@ -333,6 +384,8 @@
   #define HOW_TO_IMPLEMENT_SH_COMMAND     USE_ANSI_SYSTEM_API_FOR_SH_COMMAND
 #endif
 #define SET_CONSOLE_CURSOR_SHAPE_METHOD   CURSOR_SHAPE_NOT_SUPPORTED
+#undef  OPTION_EXTCURS                  /* Normal cursor handling    */
+
 
 #endif // (host-specific tests)
 

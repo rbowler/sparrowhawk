@@ -1,9 +1,17 @@
 /* LOADPARM.C   (c) Copyright Jan Jaeger, 2004-2007                  */
 /*              SCLP / MSSF loadparm                                 */
 
-// $Id: loadparm.c,v 1.12 2007/06/23 00:04:14 ivan Exp $
-//
+// $Id: loadparm.c,v 1.13 2008/12/30 15:40:01 rbowler Exp $
+
+/*-------------------------------------------------------------------*/
+/* This module contains functions which set, copy, and retrieve the  */
+/* values of the LOADPARM and LPARNAME parameters                    */
+/*-------------------------------------------------------------------*/
+
 // $Log: loadparm.c,v $
+// Revision 1.13  2008/12/30 15:40:01  rbowler
+// Allow $(LPARNAME) in herclogo file
+//
 // Revision 1.12  2007/06/23 00:04:14  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -12,6 +20,9 @@
 //
 
 #include "hstdinc.h"
+
+#define _HENGINE_DLL_
+#define _LOADPARM_C_
 
 #include "hercules.h"
 
@@ -80,6 +91,7 @@ void get_lparname(BYTE *dest)
 }
 
 
+LOADPARM_DLL_IMPORT
 char *str_lparname()
 {
     static char ret_lparname[sizeof(lparname)+1];

@@ -1,22 +1,29 @@
 /* TAPEDEV.C    (c) Copyright Roger Bowler, 1999-2007                */
-/* JCS - minor changes by John Summerfield                           */
 /*              ESA/390 Tape Device Handler                          */
+
 /* Original Author: Roger Bowler                                     */
 /* Prime Maintainer: Ivan Warren                                     */
+/* Secondary Maintainer: "Fish" (David B. Trout)                     */
 
-// $Id: tapedev.c,v 1.116 2007/06/23 00:04:18 ivan Exp $
+// $Id: tapedev.c,v 1.151 2008/11/01 20:40:09 fish Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
-/* 3420 magnetic tape devices for the Hercules ESA/390 emulator.     */
+/* magnetic tape devices for the Hercules ESA/390 emulator.          */
+/*-------------------------------------------------------------------*/
 /*                                                                   */
-/* Four emulated tape formats are supported:                         */
+/* Five emulated tape formats are supported:                         */
+/*                                                                   */
 /* 1. AWSTAPE   This is the format used by the P/390.                */
 /*              The entire tape is contained in a single flat file.  */
-/*              Each tape block is preceded by a 6-byte header.      */
+/*              A tape block consists of one or more block segments. */
+/*              Each block segment is preceded by a 6-byte header.   */
 /*              Files are separated by tapemarks, which consist      */
 /*              of headers with zero block length.                   */
 /*              AWSTAPE files are readable and writable.             */
+/*                                                                   */
+/*              Support for AWSTAPE is in the "AWSTAPE.C" member.    */
+/*                                                                   */
 /*                                                                   */
 /* 2. OMATAPE   This is the Optical Media Attach device format.      */
 /*              Each physical file on the tape is represented by     */
@@ -38,6 +45,10 @@
 /*              reside under the same directory which is normally    */
 /*              on CDROM but can be on disk.                         */
 /*              OMATAPE files are supported as read-only media.      */
+/*                                                                   */
+/*              OMATAPE tape Support is in the "OMATAPE.C" member.   */
+/*                                                                   */
+/*                                                                   */
 /* 3. SCSITAPE  This format allows reading and writing of 4mm or     */
 /*              8mm DAT tape, 9-track open-reel tape, or 3480-type   */
 /*              cartridge on an appropriate SCSI-attached drive.     */
@@ -46,10 +57,30 @@
 /*              the MTIOCxxx set of IOCTL commands.                  */
 /*              PROGRAMMING NOTE: the 'tape' portability macros for  */
 /*              physical (SCSI) tapes MUST be used for all tape i/o! */
+/*                                                                   */
+/*              SCSI tape Support is in the "SCSITAPE.C" member.     */
+/*                                                                   */
+/*                                                                   */
 /* 4. HET       This format is based on the AWSTAPE format but has   */
 /*              been extended to support compression.  Since the     */
 /*              basic file format has remained the same, AWSTAPEs    */
 /*              can be read/written using the HET routines.          */
+/*                                                                   */
+/*              Support for HET is in the "HETTAPE.C" member.        */
+/*                                                                   */
+/*                                                                   */
+/* 5. FAKETAPE  This is the format used by Fundamental Software      */
+/*              on their FLEX-ES systems. It it similar to the AWS   */
+/*              format. The entire tape is contained in a single     */
+/*              flat file. A tape block is preceded by a 12-ASCII-   */
+/*              hex-characters header which indicate the size of     */
+/*              the previous and next blocks. Files are separated    */
+/*              by tapemarks which consist of headers with a zero    */
+/*              current block length. FakeTapes are both readable    */
+/*              and writable.                                        */
+/*                                                                   */
+/*              Support for FAKETAPE is in the "FAKETAPE.C" member.  */
+/*                                                                   */
 /*-------------------------------------------------------------------*/
 
 /*-------------------------------------------------------------------*/
@@ -59,7 +90,10 @@
 /*      3480 Read Block ID and Locate CCWs by Brandon Hill           */
 /*      Unloaded tape support by Brandon Hill                    v209*/
 /*      HET format support by Leland Lucius                      v209*/
-/*      3590 support by Fish (David B. Trout)  ** INCOMPLETE **      */
+/*      JCS - minor changes by John Summerfield                  2003*/
+/*      PERFORM SUBSYSTEM FUNCTION / CONTROL ACCESS support by       */
+/*      Adrian Trenkwalder (with futher enhancements by Fish)        */
+/*      **INCOMPLETE** 3590 support by Fish (David B. Trout)         */
 /*-------------------------------------------------------------------*/
 
 /*-------------------------------------------------------------------*/
@@ -67,10 +101,141 @@
 /* SC53-1200 S/370 and S/390 Optical Media Attach/2 User's Guide     */
 /* SC53-1201 S/370 and S/390 Optical Media Attach/2 Technical Ref    */
 /* SG24-2506 IBM 3590 Tape Subsystem Technical Guide                 */
-/* GA32-0331 Magstar 3590 Hardware Reference                         */
+/* GA32-0331 IBM 3590 Hardware Reference                             */
+/* GA32-0329 IBM 3590 Introduction and Planning Guide                */
+/* SG24-2594 IBM 3590 Multiplatform Implementation                   */
+/* ANSI INCITS 131-1994 (R1999) SCSI-2 Reference                     */
+/* GA32-0127 IBM 3490E Hardware Reference                            */
+/* GC35-0152 EREP Release 3.5.0 Reference                            */
+/* SA22-7204 ESA/390 Common I/O-Device Commands                      */
+/* Flex FakeTape format (http://preview.tinyurl.com/67rgnp)          */
 /*-------------------------------------------------------------------*/
 
 // $Log: tapedev.c,v $
+// Revision 1.151  2008/11/01 20:40:09  fish
+// Fix tapedev gettapetype_bydata function for HET/AWS tapes
+// that start with a tapemark -- Liam Cold [liamcold@yahoo.com]
+//
+// Revision 1.150  2008/09/10 02:06:48  fish
+// Add test for OMA file "@TDF" signature
+// to 'gettapetype_bydata' function
+//
+// Revision 1.149  2008/07/21 22:13:29  rbowler
+// tapedev.c(964) : warning C4101: 'i' : unreferenced local variable
+//
+// Revision 1.148  2008/07/08 05:35:51  fish
+// AUTOMOUNT redesign: support +allowed/-disallowed dirs
+// and create associated 'automount' panel command - Fish
+//
+// Revision 1.147  2008/06/22 05:54:30  fish
+// Fix print-formatting issue (mostly in tape modules)
+// that can sometimes, in certain circumstances,
+// cause herc to crash.  (%8.8lx --> I32_FMTX, etc)
+//
+// Revision 1.146  2008/05/28 16:46:29  fish
+// Misleading VTAPE support renamed to AUTOMOUNT instead and fixed and enhanced so that it actually WORKS now.
+//
+// Revision 1.145  2008/05/25 06:36:43  fish
+// VTAPE automount support (0x4B + 0xE4)
+//
+// Revision 1.144  2008/05/23 20:37:05  fish
+// Fix "presuming" message in gettapetype function to use implemented default shortdesc in message.
+//
+// Revision 1.143  2008/05/22 21:17:29  fish
+// Tape file extension neutrality support
+//
+// Revision 1.142  2008/05/22 20:15:12  fish
+// Correct --blkid-24 typo (SHOULD be --blkid-22, not 24)
+//
+// Revision 1.141  2008/05/22 19:25:58  fish
+// Flex FakeTape support
+//
+// Revision 1.140  2008/04/05 02:36:00  fish
+// Wrap GENTMH_SCSI_ACTION... case in 'generic_tmhcall' function
+// with #ifdef OPTION_SCSI_TAPE to fix undefined symbol error
+// on non-scsi-tape build platforms
+//
+// Revision 1.139  2008/03/30 02:51:34  fish
+// Fix SCSI tape EOV (end of volume) processing
+//
+// Revision 1.138  2008/03/29 08:36:46  fish
+// More complete/extensive 3490/3590 tape support
+//
+// Revision 1.137  2008/03/28 02:09:42  fish
+// Add --blkid-24 option support, poserror flag renamed to fenced,
+// added 'generic', 'readblkid' and 'locateblk' tape media handler
+// call vectors.
+//
+// Revision 1.136  2008/03/27 07:14:17  fish
+// SCSI MODS: groundwork: part 3: final shuffling around.
+// Moved functions from one module to another and resequenced
+// functions within each. NO CODE WAS ACTUALLY CHANGED.
+// Next commit will begin the actual changes.
+//
+// Revision 1.135  2008/03/26 07:23:51  fish
+// SCSI MODS part 2: split tapedev.c: aws, het, oma processing moved
+// to separate modules, CCW processing moved to separate module.
+//
+// Revision 1.134  2008/03/25 11:41:31  fish
+// SCSI TAPE MODS part 1: groundwork: non-functional changes:
+// rename some functions, comments, general restructuring, etc.
+// New source modules awstape.c, omatape.c, hettape.c and
+// tapeccws.c added, but not yet used (all will be used in a future
+// commit though when tapedev.c code is eventually split)
+//
+// Revision 1.133  2008/03/13 01:44:17  kleonard
+// Fix residual read-only setting for tape device
+//
+// Revision 1.132  2008/03/04 01:10:29  ivan
+// Add LEGACYSENSEID config statement to allow X'E4' Sense ID on devices
+// that originally didn't support it. Defaults to off for compatibility reasons
+//
+// Revision 1.131  2008/03/04 00:25:25  ivan
+// Ooops.. finger check on 8809 case for numdevid.. Thanks Roger !
+//
+// Revision 1.130  2008/03/02 12:00:04  ivan
+// Re-disable Sense ID on 3410, 3420, 8809 : report came in that it breaks MTS
+//
+// Revision 1.129  2007/12/14 17:48:52  rbowler
+// Enable SENSE ID CCW for 2703,3410,3420
+//
+// Revision 1.128  2007/11/29 03:36:40  fish
+// Re-sequence CCW opcode 'case' statements to be in ascending order.
+// COSMETIC CHANGE ONLY. NO ACTUAL LOGIC WAS CHANGED.
+//
+// Revision 1.127  2007/11/13 15:10:52  rbowler
+// fsb_awstape support for segmented blocks
+//
+// Revision 1.126  2007/11/11 20:46:50  rbowler
+// read_awstape support for segmented blocks
+//
+// Revision 1.125  2007/11/09 14:59:34  rbowler
+// Move misplaced comment and restore original programming style
+//
+// Revision 1.124  2007/11/02 16:04:15  jmaynard
+// Removing redundant #if !(defined OPTION_SCSI_TAPE).
+//
+// Revision 1.123  2007/09/01 06:32:24  fish
+// Surround 3590 SCSI test w/#ifdef (OPTION_SCSI_TAPE)
+//
+// Revision 1.122  2007/08/26 14:37:17  fish
+// Fix missed unfixed 31 Aug 2006 non-SCSI tape Locate bug
+//
+// Revision 1.121  2007/07/24 23:06:32  fish
+// Force command-reject for 3590 Medium Sense and Mode Sense
+//
+// Revision 1.120  2007/07/24 22:54:49  fish
+// (comment changes only)
+//
+// Revision 1.119  2007/07/24 22:46:09  fish
+// Default to --blkid-32 and --no-erg for 3590 SCSI
+//
+// Revision 1.118  2007/07/24 22:36:33  fish
+// Fix tape Synchronize CCW (x'43') to do actual commit
+//
+// Revision 1.117  2007/07/24 21:57:29  fish
+// Fix Win32 SCSI tape "Locate" and "ReadBlockId" SNAFU
+//
 // Revision 1.116  2007/06/23 00:04:18  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -92,11 +257,13 @@
 // Revision 1.110  2006/12/08 09:43:30  jj
 // Add CVS message log
 //
+/*-------------------------------------------------------------------*/
 
 #include "hstdinc.h"
-
 #include "hercules.h"  /* need Hercules control blocks               */
-#include "tapedev.h"   /* This module's header file                  */
+#include "tapedev.h"   /* Main tape handler header file              */
+
+/*-------------------------------------------------------------------*/
 
 //#define  ENABLE_TRACING_STMTS     // (Fish: DEBUGGING)
 
@@ -104,6 +271,7 @@
   #if !defined(DEBUG)
     #warning DEBUG required for ENABLE_TRACING_STMTS
   #endif
+  // (TRACE, ASSERT, and VERIFY macros are #defined in hmacros.h)
 #else
   #undef  TRACE
   #undef  ASSERT
@@ -113,43 +281,940 @@
   #define VERIFY(a)   ((void)(a))
 #endif
 
+/*-------------------------------------------------------------------*/
+
 #if defined(WIN32) && defined(OPTION_DYNAMIC_LOAD) && !defined(HDL_USE_LIBTOOL) && !defined(_MSVC_)
   SYSBLK *psysblk;
   #define sysblk (*psysblk)
 #endif
 
-/*---------------------------------------*/
-/* The following table goes hand-in-hand */
-/* with the 'enum' values that follow    */
-/*---------------------------------------*/
-static PARSER ptab[] =
+/*-------------------------------------------------------------------*/
+
+DEVHND  tapedev_device_hndinfo   =
 {
-    { "awstape", NULL },
-    { "idrc", "%d" },
-    { "compress", "%d" },
-    { "method", "%d" },
-    { "level", "%d" },
-    { "chunksize", "%d" },
-    { "maxsize", "%d" },
-    { "maxsizeK", "%d" },
-    { "maxsizeM", "%d" },
-    { "eotmargin", "%d" },
-    { "strictsize", "%d" },
-    { "readonly", "%d" },
-    { "ro", NULL },
-    { "noring", NULL },
-    { "rw", NULL },
-    { "ring", NULL },
-    { "deonirq", "%d" },
-    { "--blkid-32", NULL },
-    { "--no-erg", NULL },
-    { NULL, NULL },
+    &tapedev_init_handler,             /* Device Initialisation      */
+    &tapedev_execute_ccw,              /* Device CCW execute         */
+    &tapedev_close_device,             /* Device Close               */
+    &tapedev_query_device,             /* Device Query               */
+    NULL,                              /* Device Start channel pgm   */
+    NULL,                              /* Device End channel pgm     */
+    NULL,                              /* Device Resume channel pgm  */
+    NULL,                              /* Device Suspend channel pgm */
+    NULL,                              /* Device Read                */
+    NULL,                              /* Device Write               */
+    NULL,                              /* Device Query used          */
+    NULL,                              /* Device Reserve             */
+    NULL,                              /* Device Release             */
+    NULL,                              /* Device Attention           */
+    TapeImmedCommands,                 /* Immediate CCW Codes        */
+    NULL,                              /* Signal Adapter Input       */
+    NULL,                              /* Signal Adapter Output      */
+    NULL,                              /* Hercules suspend           */
+    NULL                               /* Hercules resume            */
 };
 
-/*---------------------------------------*/
-/* The following table goes hand-in-hand */
-/* with PARSER table immediately above   */
-/*---------------------------------------*/
+/*-------------------------------------------------------------------*/
+/* Libtool static name colision resolution...                        */
+/* Note: lt_dlopen will look for symbol & modulename_LTX_symbol      */
+/*-------------------------------------------------------------------*/
+
+#if !defined(HDL_BUILD_SHARED) && defined(HDL_USE_LIBTOOL)
+
+  #define  hdl_ddev   hdt3420_LTX_hdl_ddev
+  #define  hdl_depc   hdt3420_LTX_hdl_depc
+  #define  hdl_reso   hdt3420_LTX_hdl_reso
+  #define  hdl_init   hdt3420_LTX_hdl_init
+  #define  hdl_fini   hdt3420_LTX_hdl_fini
+
+#endif
+
+/*-------------------------------------------------------------------*/
+
+#if defined(OPTION_DYNAMIC_LOAD)
+
+HDL_DEPENDENCY_SECTION;
+{
+    HDL_DEPENDENCY ( HERCULES );
+    HDL_DEPENDENCY ( DEVBLK   );
+    HDL_DEPENDENCY ( SYSBLK   );
+}
+END_DEPENDENCY_SECTION
+
+/*-------------------------------------------------------------------*/
+
+HDL_DEVICE_SECTION;
+{
+    HDL_DEVICE ( 3410, tapedev_device_hndinfo );
+    HDL_DEVICE ( 3411, tapedev_device_hndinfo );
+    HDL_DEVICE ( 3420, tapedev_device_hndinfo );
+    HDL_DEVICE ( 3422, tapedev_device_hndinfo );
+    HDL_DEVICE ( 3430, tapedev_device_hndinfo );
+    HDL_DEVICE ( 3480, tapedev_device_hndinfo );
+    HDL_DEVICE ( 3490, tapedev_device_hndinfo );
+    HDL_DEVICE ( 3590, tapedev_device_hndinfo );
+    HDL_DEVICE ( 8809, tapedev_device_hndinfo );
+    HDL_DEVICE ( 9347, tapedev_device_hndinfo );
+    HDL_DEVICE ( 9348, tapedev_device_hndinfo );
+}
+END_DEVICE_SECTION
+
+/*-------------------------------------------------------------------*/
+
+#if defined(WIN32) && !defined(HDL_USE_LIBTOOL) && !defined(_MSVC_)
+
+  #undef sysblk
+
+  HDL_RESOLVER_SECTION;
+  {
+    HDL_RESOLVE_PTRVAR ( psysblk, sysblk );
+  }
+  END_RESOLVER_SECTION
+
+#endif // defined(WIN32) && !defined(HDL_USE_LIBTOOL) && !defined(_MSVC_)
+
+#endif // defined(OPTION_DYNAMIC_LOAD)
+
+/*-------------------------------------------------------------------*/
+/*  (see 'tapedev.h' for layout of TAPEMEDIA_HANDLER structure)      */
+/*-------------------------------------------------------------------*/
+
+TAPEMEDIA_HANDLER  tmh_aws  =
+{
+    &generic_tmhcall,
+    &open_awstape,
+    &close_awstape,
+    &read_awstape,
+    &write_awstape,
+    &rewind_awstape,
+    &bsb_awstape,
+    &fsb_awstape,
+    &bsf_awstape,
+    &fsf_awstape,
+    &write_awsmark,
+    &sync_awstape,
+    &no_operation,              // (DSE)    ZZ FIXME: not coded yet
+    &no_operation,              // (ERG)
+    &is_tapeloaded_filename,
+    &passedeot_awstape,
+    &readblkid_virtual,
+    &locateblk_virtual
+};
+
+/*-------------------------------------------------------------------*/
+
+TAPEMEDIA_HANDLER  tmh_het   =
+{
+    &generic_tmhcall,
+    &open_het,
+    &close_het,
+    &read_het,
+    &write_het,
+    &rewind_het,
+    &bsb_het,
+    &fsb_het,
+    &bsf_het,
+    &fsf_het,
+    &write_hetmark,
+    &sync_het,
+    &no_operation,              // (DSE)    ZZ FIXME: not coded yet
+    &no_operation,              // (ERG)
+    &is_tapeloaded_filename,
+    &passedeot_het,
+    &readblkid_virtual,
+    &locateblk_virtual
+};
+
+/*-------------------------------------------------------------------*/
+
+TAPEMEDIA_HANDLER  tmh_fake  =
+{
+    &generic_tmhcall,
+    &open_faketape,
+    &close_faketape,
+    &read_faketape,
+    &write_faketape,
+    &rewind_faketape,
+    &bsb_faketape,
+    &fsb_faketape,
+    &bsf_faketape,
+    &fsf_faketape,
+    &write_fakemark,
+    &sync_faketape,
+    &no_operation,              // (DSE)    ZZ FIXME: not coded yet
+    &no_operation,              // (ERG)
+    &is_tapeloaded_filename,
+    &passedeot_faketape,
+    &readblkid_virtual,
+    &locateblk_virtual
+};
+
+/*-------------------------------------------------------------------*/
+
+TAPEMEDIA_HANDLER  tmh_oma   =
+{
+    &generic_tmhcall,
+    &open_omatape,
+    &close_omatape,
+    &read_omatape,
+    &write_READONLY5,           // WRITE
+    &rewind_omatape,
+    &bsb_omatape,
+    &fsb_omatape,
+    &bsf_omatape,
+    &fsf_omatape,
+    &write_READONLY,            // WTM
+    &write_READONLY,            // SYNC
+    &write_READONLY,            // DSE
+    &write_READONLY,            // ERG
+    &is_tapeloaded_filename,
+    &return_false1,             // passedeot
+    &readblkid_virtual,
+    &locateblk_virtual
+};
+
+/*-------------------------------------------------------------------*/
+
+#if defined(OPTION_SCSI_TAPE)
+
+TAPEMEDIA_HANDLER  tmh_scsi   =
+{
+    &generic_tmhcall,
+    &open_scsitape,
+    &close_scsitape,
+    &read_scsitape,
+    &write_scsitape,
+    &rewind_scsitape,
+    &bsb_scsitape,
+    &fsb_scsitape,
+    &bsf_scsitape,
+    &fsf_scsitape,
+    &write_scsimark,
+    &sync_scsitape,
+    &dse_scsitape,
+    &erg_scsitape,
+    &is_tape_mounted_scsitape,
+    &passedeot_scsitape,
+    &readblkid_scsitape,
+    &locateblk_scsitape
+};
+
+#endif /* defined(OPTION_SCSI_TAPE) */
+
+/*-------------------------------------------------------------------*/
+/* Device-Type Initialization Table    (DEV/CU MODEL, FEATURES, ETC) */
+/*-------------------------------------------------------------------*/
+/*
+   PROGRAMMING NOTE: the MDR/OBR code (Device Characteristics bytes
+   40-41) are apparently CRITICALLY IMPORTANT for proper tape drive
+   functioning for certain operating systems. If the bytes are not
+   provided (set to zero) or are set incorrectly, certain operating
+   systems end up using unusual/undesirable Mode Set values in their
+   Channel Programs (such as x'20' Write Immediate for example). I
+   only note it here because these two particular bytes are rather
+   innocuous looking based upon their name and sparsely documented
+   and largely unexplained values, thereby possibly misleading one
+   into believing they weren't important and thus could be safely
+   set to zero if their values were unknown. Rest assured they are
+   NOT unimportant! Quite the opposite: the are, for some operating
+   systems, CRITICALLY IMPORTANT and must NOT be returned as zeros.
+
+   The following were obtained from "EREP Release 3.5.0 Reference"
+   (GC35-0152-03):
+
+       Model                        MDR          OBR   
+      -------                      -----        -----  
+
+       3480                         0x41         0x80
+       3490                         0x42         0x81
+
+       3590                         0x46         0x83
+       3590 (3591/3490 EMU)         0x47         0x84
+       3590 (3590/3490 EMU)         0x48         0x85
+
+
+   NOTE: only models 3480, 3490 and 3590 support the RDC (Read
+   Device Characteristics) channel command, and thus they're the
+   only ones we must know the MDR/OBR codes for (since the MDR/OBR
+   codes are only used in the RDC CCW and not anwhere else). That
+   is to say, NONE of the Channel Commands (CCWs) that all the
+   OTHER models happen to support have an MDR/OBR code anywhere
+   in their data. Only models 3480, 3490 and 3590 have MDR/OBR
+   codes buried in their CCW data (specifically the RDC CCW data).
+
+   Also note that, at the moment, we do not support emulating 3590's
+   or 3591's running in 3490 Emulation Mode (i.e. 3591/3490 EMU or
+   3590/3490 EMU). The user is free to use such a device with Herc-
+   ules however, but if they do, it should be specified as a 3490.
+
+---------------------------------------------------------------------*/
+
+typedef struct DEVINITTAB               /* Initialization values     */
+{
+    U16         devtype;                /* Device type               */
+    BYTE        devmodel;               /* Device model number       */
+    U16         cutype;                 /* Control unit type         */
+    BYTE        cumodel;                /* Control unit model number */
+    U32         sctlfeat;               /* Storage control features  */
+    BYTE        devclass;               /* Device class code         */
+    BYTE        devtcode;               /* Device type code          */
+    BYTE        MDR;                    /* Misc. Data Record ID      */
+    BYTE        OBR;                    /* Outboard Recorder ID      */
+    int         numdevid;               /* #of SNSID bytes (see NOTE)*/
+    int         numsense;               /* #of SENSE bytes           */
+    int         haverdc;                /* RDC Supported             */
+    int         displayfeat;            /* Has LCD display           */
+}
+DEVINITTAB;
+DEVINITTAB      DevInitTab[]  =         /* Initialization table      */
+{
+// PROGRAMMING NOTE: we currently do not support a #of Sense-ID bytes
+// value (numdevid) greater than 7 since our current channel-subsystem
+// design does not support the concept of hardware physical attachment
+// "Nodes" (i.e. separate control-unit, device and interface elements).
+// Supporting more than 7 bytes of Sense-ID information would require
+// support for Node Descriptors (ND) and Node Element Descriptors (NED)
+// and the associated commands (CCWs) to query them (Read Configuration
+// Data (0xFA) , Set Interface Identifier (0x73) and associated support
+// in the Read Subsystem Data (0x3E) command), which is vast overkill
+// and a complete waste of time given our current overly-simple channel
+// subsystem design.
+//
+//--------------------------------------------------------------------
+//            3410/3411/3420/3422/3430/8809/9347/9348
+//--------------------------------------------------------------------
+//
+// devtype/mod  cutype/mod    sctlfeat  cls typ MDR OBR sid sns rdc dsp
+ { 0x3410,0x01, 0x3115,0x01, 0x00000000, 0,  0,  0,  0,  0,  9,  0,  0 },
+ { 0x3411,0x01, 0x3115,0x01, 0x00000000, 0,  0,  0,  0,  0,  9,  0,  0 },
+ { 0x3420,0x06, 0x3803,0x02, 0x00000000, 0,  0,  0,  0,  0, 24,  0,  0 }, // (DEFAULT: 3420)
+ { 0x3422,0x01, 0x3422,0x01, 0x00000000, 0,  0,  0,  0,  7, 32,  0,  0 },
+ { 0x3430,0x01, 0x3422,0x01, 0x00000000, 0,  0,  0,  0,  7, 32,  0,  0 },
+ { 0x8809,0x01, 0x8809,0x01, 0x00000000, 0,  0,  0,  0,  0, 32,  0,  0 },
+ { 0x9347,0x01, 0x9347,0x01, 0x00000000, 0,  0,  0,  0,  7, 32,  0,  0 },
+ { 0x9348,0x01, 0x9348,0x01, 0x00000000, 0,  0,  0,  0,  7, 32,  0,  0 },
+
+//--------------------------------------------------------------------
+//                          3480/3490/3590
+//--------------------------------------------------------------------
+//
+// PROGRAMMING NOTE: we currently do not support a #of Sense-ID bytes
+// value (numdevid) greater than 7 since our current channel-subsystem
+// design does not support the concept of hardware physical attachment
+// "Nodes" (i.e. separate control-unit, device and interface elements).
+// Supporting more than 7 bytes of Sense-ID information would require
+// support for Node Descriptors (ND) and Node Element Descriptors (NED)
+// and the associated commands (CCWs) to query them (Read Configuration
+// Data (0xFA) , Set Interface Identifier (0x73) and associated support
+// in the Read Subsystem Data (0x3E) command), which is vast overkill
+// and a complete waste of time given our current overly-simple channel
+// subsystem design.
+//
+// PROGRAMMING NOTE: if you change the below devtype/mod or cutype/mod
+// values, be sure to ALSO change tapeccws.c's READ CONFIGURATION DATA
+// (CCW opcode 0xFA) values as well!
+//
+// PROGRAMMING NOTE: the bit values of the 'sctlfeat' field are:
+//
+//     ....40..   (unknown)
+//     ....08..   Set Special Intercept Condition (SIC) supported
+//     ....04..   Channel Path No-Operation supported (always
+//                on if Library Attachment Facility installed)
+//     ....02..   Logical Write-Protect supported (always on
+//                if Read Device Characteristics is supported)
+//     ....01..   Extended Buffered Log support enabled (if 64
+//                bytes of buffered log data, else 32 bytes)
+//     ......80   Automatic Cartridge Loader installed/enabled
+//     ......40   Improved Data Recording Capability (i.e.
+//                compression support) installed/enabled
+//     ......20   Suppress Volume Fencing
+//     ......10   Library Interface online/enabled
+//     ......08   Library Attachment Facility installed
+//     ......04   (unknown)
+//
+// PROGRAMMING NOTE: the below "0x00004EC4" value for the 'sctlfeat'
+// field for Model 3590 was determined empirically on a real machine.
+//
+// devtype/mod  cutype/mod    sctlfeat   cls  typ   MDR  OBR  sid sns  rdc dsp
+ { 0x3480,0x31, 0x3480,0x31, 0x000002C0, 0x80,0x80, 0x41,0x80,  7, 24,  1,  1 },  // 0x31 = D31
+ { 0x3490,0x50, 0x3490,0x50, 0x000002C0, 0x80,0x80, 0x42,0x81,  7, 32,  1,  1 },  // 0x50 = C10
+ { 0x3590,0x10, 0x3590,0x50, 0x00004EC4, 0x80,0x80, 0x46,0x83,  7, 32,  1,  1 },  // 0x10 = B1A, 0x50 = A50
+ { 0xFFFF,0xFF, 0xFFFF,0xFF, 0xFFFFFFFF, 0xFF,0xFF, 0xFF,0xFF, -1, -1, -1, -1 },  //**** END OF TABLE ****
+ { 0x3420,0x06, 0x3803,0x02, 0x00000000,   0,   0,    0,   0,   0, 24,  0,  0 },  // (DEFAULT: 3420)
+};
+
+/*-------------------------------------------------------------------*/
+/* Initialize the device handler                                     */
+/*-------------------------------------------------------------------*/
+int tapedev_init_handler (DEVBLK *dev, int argc, char *argv[])
+{
+int             rc;
+DEVINITTAB*     pDevInitTab;
+
+    /* Close current tape */
+    if(dev->fd>=0)
+    {
+        dev->tmh->close(dev);
+        dev->fd=-1;
+    }
+
+    autoload_close(dev);
+    dev->tdparms.displayfeat=0;
+
+    /* Determine the control unit type and model number */
+    /* Support for 3490/3422/3430/8809/9347, etc.. */
+    if (!sscanf( dev->typname, "%hx", &dev->devtype ))
+        dev->devtype = 0x3420;
+
+    // PROGAMMING NOTE: we use hard-coded values from our DevInitTab
+    // for virtual (non-SCSI) devices and, for the time being, for non-
+    // virtual (SCSI) devices too. Once we add direct SCSI I/O support
+    // we will need to add code to get this information directly from
+    // the actual SCSI device itself.
+    for
+    (
+        pDevInitTab = &DevInitTab[0];
+        pDevInitTab->devtype != 0xFFFF && pDevInitTab->devtype != dev->devtype;
+        pDevInitTab++
+    );
+
+    if (pDevInitTab->devtype == 0xFFFF)         /* (entry not found?) */
+    {
+        logmsg ( _("Unsupported device type specified %4.4x\n"), dev->devtype );
+
+        pDevInitTab++;                          /* (default entry; s/b same as 0x3420) */
+        pDevInitTab->devtype = dev->devtype;    /* (don't know what else to do really) */
+        pDevInitTab->cutype  = dev->devtype;    /* (don't know what else to do really) */
+    }
+
+    /* Allow SENSE ID for certain specific legacy devices if requested */
+
+    dev->numdevid = pDevInitTab->numdevid;  // (default == from table)
+
+    if (1
+        && sysblk.legacysenseid             // (if option requested, AND is)
+        && (0                               // (for allowable legacy device)
+            || 0x3410 == dev->devtype
+            || 0x3411 == dev->devtype
+            || 0x3420 == dev->devtype
+            || 0x8809 == dev->devtype
+           )
+    )
+    {
+        dev->numdevid = 7;                  // (allow for this legacy device)
+    }
+
+    /* Initialize the Sense-Id bytes if needed... */
+    if (dev->numdevid > 0)
+    {
+        dev->devid[0] = 0xFF;
+
+        dev->devid[1] = (pDevInitTab->cutype >> 8) & 0xFF;
+        dev->devid[2] = (pDevInitTab->cutype >> 0) & 0xFF;
+        dev->devid[3] =  pDevInitTab->cumodel;
+
+        dev->devid[4] = (pDevInitTab->devtype >> 8) & 0xFF;
+        dev->devid[5] = (pDevInitTab->devtype >> 0) & 0xFF;
+        dev->devid[6] =  pDevInitTab->devmodel;
+
+        /* Initialize the CIW information if needed... */
+        if (dev->numdevid > 7)
+        {
+            // PROGRAMMING NOTE: see note near 'DEVINITTAB'
+            // struct definition regarding requirements for
+            // supporting more than 7 bytes of SNSID info.
+
+            memcpy (&dev->devid[8],  "\x40\xFA\x00\xA0", 4);  // CIW Read Configuration Data  (0xFA)
+            memcpy (&dev->devid[12], "\x41\x73\x00\x04", 4);  // CIW Set Interface Identifier (0x73)
+            memcpy (&dev->devid[16], "\x42\x3E\x00\x60", 4);  // CIW Read Subsystem Data      (0x3E)
+        }
+    }
+
+    /* Initialize the Read Device Characteristics (RDC) bytes... */
+    if (pDevInitTab->haverdc)
+    {
+        dev->numdevchar = 64;
+
+        memset (dev->devchar, 0, sizeof(dev->devchar));
+        memcpy (dev->devchar, dev->devid+1, 6);
+
+        // Bytes 6-9: Subsystem Facilities...
+
+        dev->devchar[6] = (pDevInitTab->sctlfeat >> 24) & 0xFF;
+        dev->devchar[7] = (pDevInitTab->sctlfeat >> 16) & 0xFF;
+        dev->devchar[8] = (pDevInitTab->sctlfeat >>  8) & 0xFF;
+        dev->devchar[9] = (pDevInitTab->sctlfeat >>  0) & 0xFF;
+
+        // Bytes 10/11: Device Class/Type ...
+
+        dev->devchar[10] = pDevInitTab->devclass;
+        dev->devchar[11] = pDevInitTab->devtcode;
+
+        // Bytes 24-29: cutype/model & devtype/model ...
+        // (Note: undocumented; determined empirically)
+
+        dev->devchar[24] = (pDevInitTab->cutype >> 8) & 0xFF;
+        dev->devchar[25] = (pDevInitTab->cutype >> 0) & 0xFF;
+        dev->devchar[26] =  pDevInitTab->cumodel;
+
+        dev->devchar[27] = (pDevInitTab->devtype >> 8) & 0xFF;
+        dev->devchar[28] = (pDevInitTab->devtype >> 0) & 0xFF;
+        dev->devchar[29] =  pDevInitTab->devmodel;
+
+        // Bytes 40-41: MDR/OBR code...
+
+        dev->devchar[40] = pDevInitTab->MDR;
+        dev->devchar[41] = pDevInitTab->OBR;
+    }
+
+    /* Initialize other fields */
+//  dev->numdevid            = pDevInitTab->numdevid;   // (handled above)
+    dev->numsense            = pDevInitTab->numsense;
+    dev->tdparms.displayfeat = pDevInitTab->displayfeat;
+
+    dev->fenced              = 0;   // (always, initially)
+    dev->SIC_active          = 0;   // (always, initially)
+    dev->SIC_supported       = 0;   // (until we're sure)
+    dev->forced_logging      = 0;   // (always, initially)
+#if defined( OPTION_TAPE_AUTOMOUNT )
+    dev->noautomount         = 0;   // (always, initially)
+#endif
+
+    /* Initialize SCSI tape control fields */
+#if defined(OPTION_SCSI_TAPE)
+    dev->sstat               = GMT_DR_OPEN(-1);
+    dev->stape_getstat_sstat = GMT_DR_OPEN(-1);
+#endif
+
+    /* Clear the DPA */
+    memset (dev->pgid, 0, sizeof(dev->pgid));
+    /* Clear Drive password - Adrian */
+    memset (dev->drvpwd, 0, sizeof(dev->drvpwd));
+
+    /* Request the channel to merge data chained write CCWs into
+       a single buffer before passing data to the device handler */
+    dev->cdwmerge = 1;
+
+    /* Tape is a syncio type 2 device */
+    dev->syncio = 2;
+
+    /* ISW */
+    /* Build a 'clear' sense */
+    memset (dev->sense, 0, sizeof(dev->sense));
+    dev->sns_pending = 0;
+
+    // Initialize the [non-SCSI] auto-loader...
+
+    // PROGRAMMING NOTE: we don't [yet] know at this early stage
+    // what type of tape device we're dealing with (SCSI (non-virtual)
+    // or non-SCSI (virtual)) since 'mountnewtape' hasn't been called
+    // yet (which is the function that determines which media handler
+    // should be used and is the one that initializes dev->tapedevt)
+
+    // The only thing we know (or WILL know once 'autoload_init'
+    // is called) is whether or not there was a [non-SCSI] auto-
+    // loader defined for the device. That's it and nothing more.
+
+    autoload_init( dev, argc, argv );
+
+    // Was an auto-loader defined for this device?
+    if ( !dev->als )
+    {
+        // No. Just mount whatever tape there is (if any)...
+        rc = mountnewtape( dev, argc, argv );
+    }
+    else
+    {
+        // Yes. Try mounting the FIRST auto-loader slot...
+        if ( (rc = autoload_mount_first( dev )) != 0 )
+        {
+            // If that doesn't work, try subsequent slots...
+            while
+            (
+                dev->als
+                &&
+                (rc = autoload_mount_next( dev )) != 0
+            )
+            {
+                ;  // (nop; just go on to next slot)
+            }
+            rc = dev->als ? rc : -1;
+        }
+    }
+
+    if (dev->devchar[8] & 0x08)     // SIC supported?
+        dev->SIC_supported = 1;     // remember that fact
+
+    return rc;
+
+} /* end function tapedev_init_handler */
+
+
+/*-------------------------------------------------------------------*/
+/* Close the device                                                  */
+/*-------------------------------------------------------------------*/
+int tapedev_close_device ( DEVBLK *dev )
+{
+    autoload_close(dev);
+    dev->tmh->close(dev);
+    ASSERT( dev->fd < 0 );
+
+    dev->curfilen  = 1;
+    dev->nxtblkpos = 0;
+    dev->prvblkpos = -1;
+    dev->curblkrem = 0;
+    dev->curbufoff = 0;
+    dev->blockid   = 0;
+    dev->fenced = 0;
+
+    return 0;
+} /* end function tapedev_close_device */
+
+
+/*-------------------------------------------------------------------*/
+/*  Tape format determination REGEXPS. Used by gettapetype below     */
+/*-------------------------------------------------------------------*/
+
+struct tape_format_entry                    /*   (table layout)      */
+{
+    char*               fmtreg;             /* A regular expression  */
+    int                 fmtcode;            /* the device code       */
+    TAPEMEDIA_HANDLER*  tmh;                /* The media dispatcher  */
+    char*               descr;              /* readable description  */
+    char*               short_descr;        /* (same but shorter)    */
+};
+
+/*-------------------------------------------------------------------*/
+/*  Tape format determination REGEXPS. Used by gettapetype below     */
+/*-------------------------------------------------------------------*/
+
+struct  tape_format_entry   fmttab   [] =   /*    (table itself)     */
+{
+    /* This entry matches a filename ending with .aws    */
+#define  AWSTAPE_FMTENTRY   0
+#define  DEFAULT_FMTENTRY   AWSTAPE_FMTENTRY
+    {
+        "\\.aws$",
+        TAPEDEVT_AWSTAPE,
+        &tmh_aws,
+        "AWS Format tape file",
+        "AWS tape"
+    },
+
+    /* This entry matches a filename ending with .het    */
+#define  HETTAPE_FMTENTRY   1
+    {
+        "\\.het$",
+        TAPEDEVT_HETTAPE,
+        &tmh_het,
+        "Hercules Emulated Tape file",
+        "HET tape"
+    },
+
+    /* This entry matches a filename ending with .tdf    */
+#define  OMATAPE_FMTENTRY   2
+    {
+        "\\.tdf$",
+        TAPEDEVT_OMATAPE,
+        &tmh_oma,
+        "Optical Media Attachment (OMA) tape",
+        "OMA tape"
+    },
+
+    /* This entry matches a filename ending with .fkt    */
+#define  FAKETAPE_FMTENTRY  3
+    {
+        "\\.fkt$",
+        TAPEDEVT_FAKETAPE,
+        &tmh_fake,
+        "Flex FakeTape file",
+        "FakeTape"
+    },
+
+#if defined(OPTION_SCSI_TAPE)
+
+    /* This entry matches a filename starting with /dev/ */
+#define  SCSITAPE_FMTENTRY  4
+    {
+        "^/dev/",
+        TAPEDEVT_SCSITAPE,
+        &tmh_scsi,
+        "SCSI attached tape drive",
+        "SCSI tape"
+    },
+
+#if defined(_MSVC_)
+
+    /* (same idea but for Windows SCSI tape device names) */
+#undef   SCSITAPE_FMTENTRY
+#define  SCSITAPE_FMTENTRY  5
+    {
+        "^\\\\\\\\\\.\\\\Tape[0-9]",
+        TAPEDEVT_SCSITAPE,
+        &tmh_scsi,
+        "SCSI attached tape drive",
+        "SCSI tape"
+    },
+
+#endif // _MSVC_
+#endif // OPTION_SCSI_TAPE
+};
+
+
+/*-------------------------------------------------------------------*/
+/*  gettapetype_byname        determine tape device type by filename */
+/*-------------------------------------------------------------------*/
+/* returns fmttab entry# on success, -1 on error/unable to determine */
+/*-------------------------------------------------------------------*/
+int gettapetype_byname (DEVBLK *dev)
+{
+#if defined(HAVE_REGEX_H) || defined(HAVE_PCRE)
+    regex_t     regwrk;                 /* REGEXP work area          */
+    regmatch_t  regwrk2;                /* REGEXP match area         */
+    char        errbfr[1024];           /* Working storage           */
+    int         i;                      /* Loop control              */
+#endif // HAVE_REGEX_H
+    int         rc;                     /* various rtns return codes */
+
+    /* Use the file name to determine the device type */
+
+#if defined(HAVE_REGEX_H) || defined(HAVE_PCRE)
+
+    for (i=0; i < arraysize( fmttab ); i++)
+    {
+        rc = regcomp (&regwrk, fmttab[i].fmtreg, REG_ICASE);
+        if (rc < 0)
+        {
+            regerror (rc, &regwrk, errbfr, 1024);
+            logmsg (_("HHCTA999E Device %4.4X: Unable to determine tape format type for %s: Internal error: Regcomp error %s on index %d\n"),
+                dev->devnum, dev->filename, errbfr, i);
+            return -1;
+        }
+
+        rc = regexec (&regwrk, dev->filename, 1, &regwrk2, 0);
+        if (rc < 0)
+        {
+            regerror (rc, &regwrk, errbfr, 1024);
+            regfree ( &regwrk );
+            logmsg (_("HHCTA999E Device %4.4X: Unable to determine tape format type for %s: Internal error: Regexec error %s on index %d\n"),
+                dev->devnum, dev->filename, errbfr, i);
+            return -1;
+        }
+
+        regfree (&regwrk);
+
+        if (rc == 0)  /* MATCH? */
+            return i;
+
+        ASSERT( rc == REG_NOMATCH );
+    }
+
+#else // !HAVE_REGEX_H
+
+    if (1
+        && (rc = strlen(dev->filename)) > 4
+        && (rc = strcasecmp( &dev->filename[rc-4], ".aws" )) == 0
+    )
+    {
+        return AWSTAPE_FMTENTRY;
+    }
+
+    if (1
+        && (rc = strlen(dev->filename)) > 4
+        && (rc = strcasecmp( &dev->filename[rc-4], ".het" )) == 0
+    )
+    {
+        return HETTAPE_FMTENTRY;
+    }
+
+    if (1
+        && (rc = strlen(dev->filename)) > 4
+        && (rc = strcasecmp( &dev->filename[rc-4], ".tdf" )) == 0
+    )
+    {
+        return OMATAPE_FMTENTRY;
+    }
+
+    if (1
+        && (rc = strlen(dev->filename)) > 4
+        && (rc = strcasecmp( &dev->filename[rc-4], ".fkt" )) == 0
+    )
+    {
+        return FAKETAPE_FMTENTRY;
+    }
+
+#if defined(OPTION_SCSI_TAPE)
+    if (1
+        && (rc = strlen(dev->filename)) > 5
+        && (rc = strncasecmp( dev->filename, "/dev/", 5 )) == 0
+    )
+    {
+        if (strncasecmp( dev->filename+5, "st", 2 ) == 0)
+            dev->stape_close_rewinds = 1; // (rewind at close)
+        else
+            dev->stape_close_rewinds = 0; // (otherwise don't)
+
+        return SCSITAPE_FMTENTRY;
+    }
+#if defined(_MSVC_)
+    if (1
+        && strncasecmp(dev->filename, "\\\\.\\Tape", 8) == 0
+        && isdigit(*(dev->filename+8))
+        &&  0  ==  *(dev->filename+9)
+    )
+    {
+        return SCSITAPE_FMTENTRY;
+    }
+#endif // _MSVC_
+#endif // OPTION_SCSI_TAPE
+#endif // HAVE_REGEX_H
+
+    return -1;      /* -1 == "unable to determine" */
+
+} /* end function gettapetype_byname */
+
+
+/*-------------------------------------------------------------------*/
+/*  gettapetype_bydata       determine tape device type by file data */
+/*-------------------------------------------------------------------*/
+/* returns fmttab entry# on success, -1 on error/unable to determine */
+/*-------------------------------------------------------------------*/
+int gettapetype_bydata (DEVBLK *dev)
+{
+    char        pathname[MAX_PATH];     /* file path in host format  */
+    int         rc;                     /* various rtns return codes */
+
+    /* Try to determine the type based on actual file contents */
+    hostpath( pathname, dev->filename, sizeof(pathname) );
+    rc = open ( pathname, O_RDONLY | O_BINARY );
+    if (rc >= 0)
+    {
+        BYTE hdr[6];                    /* block header i/o buffer   */
+        int fd = rc;                    /* save file descriptor      */
+
+        /* Read the header. If bytes 0-3 are ASCII "0000", then the
+         * tape is likely a Flex FakeTape. Otherwise if bytes 2-3 are
+         * binary zero (x'0000'), it's likely an AWS type tape. If byte
+         * 4 (first flag byte) has either of the ZLIB or BZIP2 flags on,
+         * then it's a HET tape. Otherwise it's just an ordinary AWS tape.
+         */
+        rc = read (fd, hdr, sizeof(hdr));
+             close(fd);
+        if (rc >= 6)
+        {
+            /* Use the data to make the possible determination */
+            if (memcmp(hdr, "@TDF", 4) == 0)
+                return OMATAPE_FMTENTRY;
+
+            if (hdr[0] == 0x30 && hdr[1] == 0x30 && hdr[2] == 0x30 && hdr[3] == 0x30)
+                return FAKETAPE_FMTENTRY;
+
+            if (hdr[2] == 0 && hdr[3] == 0)
+            {
+                if (hdr[4] & 0x40)  /* TapeMark? */
+                    return -1;      /* Unable to determine */
+                if (hdr[4] & 0x03)  /* ZLIB and/or BZIP2 compressed? */
+                    return HETTAPE_FMTENTRY;
+                else
+                    return AWSTAPE_FMTENTRY;    /* (default) */
+            }
+        }
+    }
+    return -1;      /* -1 == "unable to determine" */
+
+} /* end function gettapetype_bydata */
+
+
+/*-------------------------------------------------------------------*/
+/*  gettapetype              determine tape device type              */
+/*-------------------------------------------------------------------*/
+/* returns fmttab entry# on success, -1 on error/unable to determine */
+/*-------------------------------------------------------------------*/
+int gettapetype (DEVBLK *dev, char **short_descr)
+{
+    char*       descr;                  /* Device descr from fmttab  */
+    int         i = -1;                 /* fmttab entry#             */
+
+    /* Try to determine device type by actual file contents first,
+       but only if this isn't a SCSI tape device. (Thus we need to
+       check by name first to determine if it's a SCSI device) */
+#if defined(OPTION_SCSI_TAPE)
+    i = gettapetype_byname( dev );          // (check if this is a SCSI)
+
+    if (i != SCSITAPE_FMTENTRY)             // (if not, then check by..
+#endif
+    {
+        int i2 = gettapetype_bydata( dev ); // ..reading the file data)
+        if (i2 >= 0)                        // (if that worked..)
+            i = i2;                         // (..then we know the type)
+    }
+
+    /* If we couldn't determine the device type based on the file's
+       contents, then try again but this time based on its filename */
+    if (i < 0)
+        i = gettapetype_byname( dev );
+
+    /* If still unknown, use a reasonable default value */
+    if (i < 0)
+    {
+        i = DEFAULT_FMTENTRY;
+        if (strcmp (dev->filename, TAPE_UNLOADED) != 0)
+            logmsg (_("HHCTA999W Device %4.4X: Unable to determine tape format type for %s; presuming %s.\n"),
+                 dev->devnum, dev->filename, fmttab[i].short_descr );
+    }
+
+    dev->tapedevt = fmttab[i].fmtcode;
+    dev->tmh      = fmttab[i].tmh;
+    descr         = fmttab[i].descr;
+    *short_descr  = fmttab[i].short_descr;
+
+    if (strcmp (dev->filename, TAPE_UNLOADED) != 0)
+        logmsg (_("HHCTA998I Device %4.4X: %s is a %s\n"),
+            dev->devnum, dev->filename, descr);
+
+    return 0;   // (success)
+
+} /* end function gettapetype */
+
+
+/*-------------------------------------------------------------------*/
+/*  The following table goes hand-in-hand with the 'enum' values     */
+/*  that immediately follow.  Used by 'mountnewtape' function.       */
+/*-------------------------------------------------------------------*/
+
+PARSER  ptab  [] =
+{
+    { "awstape",    NULL },
+    { "idrc",       "%d" },
+    { "compress",   "%d" },
+    { "method",     "%d" },
+    { "level",      "%d" },
+    { "chunksize",  "%d" },
+    { "maxsize",    "%d" },
+    { "maxsizeK",   "%d" },
+    { "maxsizeM",   "%d" },
+    { "eotmargin",  "%d" },
+    { "strictsize", "%d" },
+    { "readonly",   "%d" },
+    { "ro",         NULL },
+    { "noring",     NULL },
+    { "rw",         NULL },
+    { "ring",       NULL },
+    { "deonirq",    "%d" },
+#if defined( OPTION_TAPE_AUTOMOUNT )
+    { "noautomount",NULL },
+#endif
+    { "--blkid-22", NULL },
+    { "--blkid-24", NULL },   /* (synonym for --blkid-22) */
+    { "--blkid-32", NULL },
+    { "--no-erg",   NULL },
+    { NULL,         NULL },   /* (end of table) */
+};
+
+/*-------------------------------------------------------------------*/
+/*  The following table goes hand-in-hand with the 'ptab' PARSER     */
+/*  table immediately above. Used by 'mountnewtape' function.        */
+/*-------------------------------------------------------------------*/
+
 enum
 {
     TDPARM_NONE,
@@ -170,2727 +1235,488 @@ enum
     TDPARM_RW,
     TDPARM_RING,
     TDPARM_DEONIRQ,
+#if defined( OPTION_TAPE_AUTOMOUNT )
+    TDPARM_NOAUTOMOUNT,
+#endif
+    TDPARM_BLKID22,
+    TDPARM_BLKID24,
     TDPARM_BLKID32,
     TDPARM_NOERG
 };
 
 /*-------------------------------------------------------------------*/
-/* Ivan Warren 20030224                                              */
-/* Code / Devtype Validity Tables                                    */
-/* SOURCES: GX20-1850-2 (S/370 Reference Summary (3410/3411/3420)    */
-/* SOURCES: GX20-0157-1 (370/XA Reference Summary (3420/3422/3430/   */
-/*                                                  3480)            */
-/* SOURCES: GA33-1510-0 (S/370 Model 115 FC (for 3410/3411)          */
-/* ITEMS MARKED NEED_CHECK Need to be verified                       */
-/*    (especially for a need for a tape to be loaded or not)         */
+/*        mountnewtape     --     mount a tape in the drive          */
 /*-------------------------------------------------------------------*/
-
-// Generic tape sense function type used by below routing table...
-
-typedef void TapeDeviceDepSenseFunction (int,DEVBLK *,BYTE *,BYTE);
-
-// Forward declarations needed by below routing table...
-
-static  TapeDeviceDepSenseFunction  build_sense_3410;
-static  TapeDeviceDepSenseFunction  build_sense_3420;
-#define                             build_sense_3422   build_sense_3420
-#define                             build_sense_3430   build_sense_3420
-static  TapeDeviceDepSenseFunction  build_sense_3480;
-static  TapeDeviceDepSenseFunction  build_sense_Streaming; /* 9347, 9348, 8809 */
-
-// Routing table used by generic tape sense function "build_senseX"...
-
-static  TapeDeviceDepSenseFunction *TapeSenseTable[]={
-    build_sense_3410,
-    build_sense_3420,
-    build_sense_3422,
-    build_sense_3430,
-    build_sense_3480,
-    build_sense_Streaming,
-    NULL};
-
-/*-------------------------------------------------------------------*/
-/* Ivan Warren 20040227                                              */
-/* This table is used by channel.c to determine if a CCW code is an  */
-/* immediate command or not                                          */
-/* The tape is addressed in the DEVHND structure as 'DEVIMM immed'   */
-/* 0: Command is NOT an immediate command                            */
-/* 1: Command is an immediate command                                */
-/* Note: An immediate command is defined as a command which returns  */
-/* CE (channel end) during initialisation (that is, no data is       */
-/* actually transfered. In this case, IL is not indicated for a CCW  */
-/* Format 0 or for a CCW Format 1 when IL Suppression Mode is in     */
-/* effect                                                            */
-/*-------------------------------------------------------------------*/
-static BYTE TapeImmedCommands[256]=
- /* 0 1 2 3 4 5 6 7 8 9 A B C D E F */
-  { 0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,1,  /* 00 */
-    0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,  /* 10 */
-    0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,  /* 20 */
-    0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,  /* 30 */
-    0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,0,  /* 40 */
-    0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,  /* 50 */
-    0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,  /* 60 */
-    0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,  /* 70 */ /* Adrian Trenkwalder - 77 was 1 */
-    0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1,  /* 80 */
-    0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,0,  /* 90 */
-    0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,0,  /* A0 */
-    0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,  /* B0 */
-    0,0,0,1,0,0,0,0,0,0,0,1,0,0,0,1,  /* C0 */
-    0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,1,  /* D0 */
-    0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,1,  /* E0 */
-    0,0,0,1,0,0,0,1,0,0,0,1,0,0,0,1}; /* F0 */
-
-/*-------------------------------------------------------------------*/
-/* Ivan Warren 20030224                                              */
-/* This table is used by TapeCommandIsValid to determine if a CCW    */
-/* code is valid for the device                                      */
-/*  0: Command is NOT valid                                          */
-/*  1: Command is Valid, Tape MUST be loaded                         */
-/*  2: Command is Valid, Tape NEED NOT be loaded                     */
-/*  3: Command is Valid, But is a NO-OP (return CE+DE now)           */
-/*  4: Command is Valid, But is a NO-OP (for virtual tapes)          */
-/*  5: Command is Valid, Tape MUST be loaded (add DE to status)      */
-/*-------------------------------------------------------------------*/
-static BYTE TapeCommands3410[256]=
- /* 0 1 2 3 4 5 6 7 8 9 A B C D E F */
-  { 0,1,1,1,2,0,0,5,0,0,0,0,1,0,0,5,  /* 00 */
-    0,0,0,4,0,0,0,1,0,0,0,1,0,0,0,1,  /* 10 */
-    0,0,0,4,0,0,0,1,0,0,0,4,0,0,0,1,  /* 20 */
-    0,0,0,4,0,0,0,1,0,0,0,4,0,0,0,1,  /* 30 */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 40 */
-    0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,  /* 50 */
-    0,0,0,4,0,0,0,0,0,0,0,4,0,0,0,0,  /* 60 */
-    0,0,0,4,0,0,0,0,0,0,0,4,0,0,0,0,  /* 70 */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 80 */
-    0,0,0,4,0,0,0,1,0,0,0,0,0,0,0,0,  /* 90 */
-    0,0,0,4,0,0,0,0,0,0,0,4,0,0,0,0,  /* A0 */
-    0,0,0,4,0,0,0,0,0,0,0,4,0,0,0,0,  /* B0 */
-    0,0,0,4,0,0,0,0,0,0,0,4,0,0,0,0,  /* C0 */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* D0 */
-    0,0,0,0,0,0,0,0,0,0,0,3,0,0,0,0,  /* E0 */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}; /* F0 */
-
-static BYTE TapeCommands3420[256]=
- /* 0 1 2 3 4 5 6 7 8 9 A B C D E F */
-  { 0,1,1,1,2,0,0,5,0,0,0,2,1,0,0,5,  /* 00 */
-    0,0,0,4,0,0,0,1,0,0,0,1,0,0,0,1,  /* 10 */
-    0,0,0,4,0,0,0,1,0,0,0,4,0,0,0,1,  /* 20 */
-    0,0,0,4,0,0,0,1,0,0,0,4,0,0,0,1,  /* 30 */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 40 */
-    0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,  /* 50 */
-    0,0,0,4,0,0,0,0,0,0,0,4,0,0,0,0,  /* 60 */
-    0,0,0,4,0,0,0,0,0,0,0,4,0,0,0,0,  /* 70 */
-    0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,  /* 80 */
-    0,0,0,4,0,0,0,1,0,0,0,0,0,0,0,0,  /* 90 */
-    0,0,0,4,0,0,0,0,0,0,0,4,0,0,0,0,  /* A0 */
-    0,0,0,4,0,0,0,0,0,0,0,4,0,0,0,0,  /* B0 */
-    0,0,0,4,0,0,0,0,0,0,0,4,0,0,0,0,  /* C0 */
-    0,0,0,4,4,0,0,0,0,0,0,0,0,0,0,0,  /* D0 */
-    0,0,0,0,0,0,0,0,0,0,0,3,0,0,0,0,  /* E0 */
-    0,0,0,2,4,0,0,0,0,0,0,0,0,2,0,0}; /* F0 */
-
-static BYTE TapeCommands3422[256]=
- /* 0 1 2 3 4 5 6 7 8 9 A B C D E F */
-  { 0,1,1,1,2,0,0,5,0,0,0,2,1,0,0,5,  /* 00 */
-    0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,  /* 10 */
-    0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,  /* 20 */
-    0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,  /* 30 */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 40 */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 50 */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 60 */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 70 */
-    0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,  /* 80 */
-    0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,  /* 90 */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* A0 */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* B0 */
-    0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,  /* C0 */
-    0,0,0,4,4,0,0,0,0,0,0,0,0,0,0,0,  /* D0 */
-    0,0,0,0,2,0,0,0,0,0,0,3,0,0,0,0,  /* E0 */
-    0,0,0,2,4,0,0,0,0,0,0,0,0,2,0,0}; /* F0 */
-
-static BYTE TapeCommands3430[256]=
- /* 0 1 2 3 4 5 6 7 8 9 A B C D E F */
-  { 0,1,1,1,2,0,0,5,0,0,0,2,1,0,0,5,  /* 00 */
-    0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,1,  /* 10 */
-    0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,  /* 20 */
-    0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1,  /* 30 */
-    0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,  /* 40 */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 50 */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 60 */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 70 */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 80 */
-    0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,  /* 90 */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* A0 */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* B0 */
-    0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,  /* C0 */
-    0,0,0,4,4,0,0,0,0,0,0,0,0,0,0,0,  /* D0 */
-    0,0,0,0,2,0,0,0,0,0,0,3,0,0,0,0,  /* E0 */
-    0,0,0,2,4,0,0,0,0,0,0,0,0,2,0,0}; /* F0 */
-
-static BYTE TapeCommands3480[256]=
- /* 0 1 2 3 4 5 6 7 8 9 A B C D E F */
-  { 0,1,1,1,2,0,0,5,0,0,0,2,1,0,0,5,  /* 00 */
-    0,0,1,3,2,0,0,1,0,0,0,1,0,0,0,1,  /* 10 */
-    0,0,1,3,2,0,0,1,0,0,0,3,0,0,0,1,  /* 20 */
-    0,0,0,3,2,0,0,1,0,0,0,3,0,0,0,1,  /* 30 */
-    0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,  /* 40 */
-    0,0,0,3,0,0,0,0,0,0,0,3,0,0,0,0,  /* 50 */
-    0,0,0,3,2,0,0,0,0,0,0,3,0,0,0,0,  /* 60 */
-    0,0,0,3,0,0,0,2,0,0,0,3,0,0,0,0,  /* 70 */ /* Allow 77 (was 0) - Adrian Trenkwalder */
-    0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,  /* 80 */
-    0,0,0,3,0,0,0,1,0,0,0,0,0,0,0,2,  /* 90 */
-    0,0,0,3,0,0,0,0,0,0,0,3,0,0,0,2,  /* A0 */
-    0,0,0,3,0,0,0,2,0,0,0,3,0,0,0,0,  /* B0 */
-    0,0,0,2,0,0,0,2,0,0,0,3,0,0,0,0,  /* C0 */
-    0,0,0,3,0,0,0,0,0,0,0,2,0,0,0,0,  /* D0 */
-    0,0,0,2,2,0,0,0,0,0,0,3,0,0,0,0,  /* E0 */
-    0,0,0,2,4,0,0,0,0,0,0,0,0,2,0,0}; /* F0 */
-
-static BYTE TapeCommands3590[256]=
- /* 0 1 2 3 4 5 6 7 8 9 A B C D E F */
-  { 0,1,1,1,2,0,1,5,0,0,1,2,0,0,0,5,  /* 00 */ /* 0x06 == "Read Forward" added, 0x0C == "Read Backward" replaced with 0x0A == "Read Previous" */
-    0,0,1,3,2,0,0,1,0,0,0,1,0,0,0,1,  /* 10 */
-    0,0,1,3,2,0,0,1,0,0,0,3,0,0,0,1,  /* 20 */
-    0,0,0,3,2,0,0,1,0,0,0,3,0,0,2,1,  /* 30 */ /* 0x3E == "Read SS Data" */
-    0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,1,  /* 40 */
-    0,0,0,3,0,0,0,0,0,0,0,3,0,0,0,0,  /* 50 */
-    0,0,2,3,2,0,0,0,0,0,0,3,0,0,0,0,  /* 60 */ /* 0x62 == "Read Media Characteristics" */
-    0,0,0,3,0,0,0,2,0,0,0,3,0,0,0,0,  /* 70 */
-    0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,  /* 80 */
-    0,0,0,3,0,0,0,1,0,0,0,0,0,0,0,2,  /* 90 */
-    0,0,0,3,0,0,0,0,0,0,0,3,0,0,0,2,  /* A0 */
-    0,0,0,3,0,0,0,2,0,0,0,3,0,0,0,0,  /* B0 */
-    0,0,2,2,0,0,0,2,0,0,0,3,0,0,0,2,  /* C0 */ /* 0xC2 == "Medium Sense", 0xCF == "Mode Sense" */
-    0,0,0,3,0,0,0,0,0,0,0,2,0,0,0,0,  /* D0 */
-    0,0,0,2,2,0,0,0,0,0,0,3,0,0,0,0,  /* E0 */
-    0,0,0,2,4,0,0,0,0,0,0,0,0,2,0,0}; /* F0 */
-
-static BYTE TapeCommands9347[256]=
- /* 0 1 2 3 4 5 6 7 8 9 A B C D E F */
-  { 0,1,1,1,2,0,0,5,0,0,0,2,1,0,0,5,  /* 00 */
-    0,0,0,4,0,0,0,1,0,0,0,1,0,0,0,1,  /* 10 */
-    0,0,0,4,0,0,0,1,0,0,0,4,0,0,0,1,  /* 20 */
-    0,0,0,4,0,0,0,1,0,0,0,4,0,0,0,1,  /* 30 */
-    0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* 40 */
-    0,0,0,4,0,0,0,0,0,0,0,0,0,0,0,0,  /* 50 */
-    0,0,0,4,0,0,0,0,0,0,0,4,0,0,0,0,  /* 60 */
-    0,0,0,4,0,0,0,0,0,0,0,4,0,0,0,0,  /* 70 */
-    0,0,0,0,0,0,0,0,0,0,0,2,0,0,0,0,  /* 80 */
-    0,0,0,4,0,0,0,1,0,0,0,0,0,0,0,0,  /* 90 */
-    0,0,0,4,2,0,0,0,0,0,0,4,0,0,0,0,  /* A0 */
-    0,0,0,4,0,0,0,0,0,0,0,4,0,0,0,0,  /* B0 */
-    0,0,0,4,0,0,0,0,0,0,0,4,0,0,0,0,  /* C0 */
-    0,0,0,4,4,0,0,0,0,0,0,0,0,0,0,0,  /* D0 */
-    0,0,0,0,0,0,0,0,0,0,0,3,0,0,0,0,  /* E0 */
-    0,0,0,2,4,0,0,0,0,0,0,0,0,2,0,0}; /* F0 */
-
-static TAPEMEDIA_HANDLER tmh_aws;
-static TAPEMEDIA_HANDLER tmh_oma;
-static TAPEMEDIA_HANDLER tmh_het;
-#if defined(OPTION_SCSI_TAPE)
-static TAPEMEDIA_HANDLER tmh_scsi;
-#endif
-
-/* Specific device supported CCW codes */
-/* index fetched from TapeDevtypeList[n+1] */
-
-static BYTE *TapeCommandTable[]={
-     TapeCommands3410,  /* 3410/3411 Code table */
-     TapeCommands3420,  /* 3420 Code Table */
-     TapeCommands3422,  /* 3422 Code Table */
-     TapeCommands3430,  /* 3430 Code Table */
-     TapeCommands3480,  /* 3480 (Maybe all 38K Tapes) Code Table */
-     TapeCommands9347,  /* 9347 (Maybe all streaming tapes) code table */
-     TapeCommands3590,  /* 3590 Code Table*/
-     NULL};
-
-/* Device type list: */
-/* Format: D/T, Command Table Index in TapeCommandTable,
-   UC on RewUnld, CUE on RewUnld, Sense Build Function Table Index */
-#define TAPEDEVTYPELISTENTRYSIZE  5  /* #of values per devtype */
-static int TapeDevtypeList[]={0x3410,0,1,0,0,
-                              0x3411,0,1,0,0,
-                              0x3420,1,1,1,1,
-                              0x3422,2,0,0,2,
-                              0x3430,3,0,0,3,
-                              0x3480,4,0,0,4,
-                              0x3490,4,0,0,4,
-                              0x3590,6,0,0,4,
-                              0x9347,5,0,0,5,
-                              0x9348,5,0,0,5,
-                              0x8809,5,0,0,5,
-                              0x0000,0,0,0,0}; /* End Marker */
-
-/**************************************/
-/* START OF ORIGINAL AWS FUNCTIONS    */
-/* ISW Additions                      */
-/**************************************/
-/*-------------------------------------------------------------------*/
-/* Close an AWSTAPE format file                                      */
-/* New Function added by ISW for consistency with other medias       */
-/*-------------------------------------------------------------------*/
-static void close_awstape (DEVBLK *dev)
-{
-    if(dev->fd>=0)
-    {
-        logmsg(_("HHCTA996I %4.4x - AWS Tape %s closed\n"),dev->devnum,dev->filename);
-        close(dev->fd);
-    }
-    strcpy(dev->filename, TAPE_UNLOADED);
-    dev->fd=-1;
-    dev->blockid = 0;
-    dev->poserror = 0;
-    return;
-}
-/*-------------------------------------------------------------------*/
-/* Rewinds an AWS Tape format file                                   */
-/* New Function added by ISW for consistency with other medias       */
-/*-------------------------------------------------------------------*/
-static int rewind_awstape (DEVBLK *dev,BYTE *unitstat,BYTE code)
-{
-    off_t rcoff;
-    rcoff=lseek(dev->fd,0,SEEK_SET);
-    if(rcoff<0)
-    {
-        build_senseX(TAPE_BSENSE_REWINDFAILED,dev,unitstat,code);
-        return -1;
-    }
-    dev->nxtblkpos=0;
-    dev->prvblkpos=-1;
-    dev->curfilen=1;
-    dev->blockid=0;
-    return 0;
-}
-/*-------------------------------------------------------------------*/
-/* Determines if a tape has passed a virtual EOT marker              */
-/* New Function added by ISW for consistency with other medias       */
-/*-------------------------------------------------------------------*/
-static int passedeot_awstape (DEVBLK *dev)
-{
-    if(!dev->nxtblkpos)
-    {
-        return 0;
-    }
-    if(!dev->tdparms.maxsize)
-    {
-        return 0;
-    }
-    if(dev->nxtblkpos+dev->tdparms.eotmargin > dev->tdparms.maxsize)
-    {
-        return 1;
-    }
-    return 0;
-}
-/**************************************/
-/* START OF ORIGINAL RB AWS FUNCTIONS */
-/**************************************/
-/*-------------------------------------------------------------------*/
-/* Open an AWSTAPE format file                                       */
 /*                                                                   */
-/* If successful, the file descriptor is stored in the device block  */
-/* and the return value is zero.  Otherwise the return value is -1.  */
+/*  Syntax:       filename [options]                                 */
+/*                                                                   */
+/*  where options are any of the entries in the 'ptab' PARSER        */
+/*  table defined further above. Some commonly used options are:     */
+/*                                                                   */
+/*    awstape          sets the HET parms to be compatible with the  */
+/*                     R|P/390|'s tape file Format (HET files)       */
+/*                                                                   */
+/*    idrc|compress    0|1: Write tape blocks with compression       */
+/*                     (std deviation: Read backward allowed on      */
+/*                     compressed HET tapes while it is not on       */
+/*                     IDRC formated 3480 tapes)                     */
+/*                                                                   */
+/*    --no-erg         for SCSI tape only, means the hardware does   */
+/*                     not support the "Erase Gap" command and all   */
+/*                     such i/o's should return 'success' instead.   */
+/*                                                                   */
+/*    --blkid-32       for SCSI tape only, means the hardware        */
+/*                     only supports full 32-bit block-ids.          */
+/*                                                                   */
 /*-------------------------------------------------------------------*/
-static int open_awstape (DEVBLK *dev, BYTE *unitstat,BYTE code)
+int  mountnewtape ( DEVBLK *dev, int argc, char **argv )
 {
-int             rc = -1;                /* Return code               */
-char            pathname[MAX_PATH];     /* file path in host format  */
-
-    /* Check for no tape in drive */
-    if (!strcmp (dev->filename, TAPE_UNLOADED))
-    {
-        build_senseX(TAPE_BSENSE_TAPEUNLOADED,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Open the AWSTAPE file */
-    hostpath(pathname, dev->filename, sizeof(pathname));
-    if(!dev->tdparms.logical_readonly)
-    {
-        rc = open (pathname, O_RDWR | O_BINARY);
-    }
-
-    /* If file is read-only, attempt to open again */
-    if (dev->tdparms.logical_readonly || (rc < 0 && (EROFS == errno || EACCES == errno)))
-    {
-        dev->readonly = 1;
-        rc = open (pathname, O_RDONLY | O_BINARY);
-    }
-
-    /* Check for successful open */
-    if (rc < 0)
-    {
-        logmsg (_("HHCTA001E Error opening %s: %s\n"),
-                dev->filename, strerror(errno));
-
-        strcpy(dev->filename, TAPE_UNLOADED);
-        build_senseX(TAPE_BSENSE_TAPELOADFAIL,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Store the file descriptor in the device block */
-    dev->fd = rc;
-    rc=rewind_awstape(dev,unitstat,code);
-    return rc;
-
-} /* end function open_awstape */
-
-/*-------------------------------------------------------------------*/
-/* Read an AWSTAPE block header                                      */
-/*                                                                   */
-/* If successful, return value is zero, and buffer contains header.  */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int readhdr_awstape (DEVBLK *dev, off_t blkpos,
-                        AWSTAPE_BLKHDR *buf, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-off_t           rcoff;                  /* Return code from lseek()  */
-
-    /* Reposition file to the requested block header */
-    rcoff = lseek (dev->fd, blkpos, SEEK_SET);
-    if (rcoff < 0)
-    {
-        /* Handle seek error condition */
-        logmsg (_("HHCTA002E Error seeking to offset %8.8lX "
-                "in file %s: %s\n"),
-                blkpos, dev->filename, strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_LOCATEERR,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Read the 6-byte block header */
-    rc = read (dev->fd, buf, sizeof(AWSTAPE_BLKHDR));
-
-    /* Handle read error condition */
-    if (rc < 0)
-    {
-        logmsg (_("HHCTA003E Error reading block header "
-                "at offset %8.8lX in file %s: %s\n"),
-                blkpos, dev->filename, strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_READFAIL,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Handle end of file (uninitialized tape) condition */
-    if (!rc )
-    {
-        logmsg (_("HHCTA004E End of file (uninitialized tape) "
-                "at offset %8.8lX in file %s\n"),
-                blkpos, dev->filename);
-
-        /* Set unit exception with tape indicate (end of tape) */
-        build_senseX(TAPE_BSENSE_EMPTYTAPE,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Handle end of file within block header */
-    if (rc < (int)sizeof(AWSTAPE_BLKHDR))
-    {
-        logmsg (_("HHCTA004E Unexpected end of file in block header "
-                "at offset %8.8lX in file %s\n"),
-                blkpos, dev->filename);
-
-        build_senseX(TAPE_BSENSE_BLOCKSHORT,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Successful return */
-    return 0;
-
-} /* end function readhdr_awstape */
-
-/*-------------------------------------------------------------------*/
-/* Read a block from an AWSTAPE format file                          */
-/*                                                                   */
-/* If successful, return value is block length read.                 */
-/* If a tapemark was read, the return value is zero, and the         */
-/* current file number in the device block is incremented.           */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int read_awstape (DEVBLK *dev, BYTE *buf, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
-off_t           blkpos;                 /* Offset of block header    */
-U16             blklen;                 /* Data length of block      */
-
-    /* Initialize current block position */
-    blkpos = dev->nxtblkpos;
-
-    /* Read the 6-byte block header */
-    rc = readhdr_awstape (dev, blkpos, &awshdr, unitstat,code);
-    if (rc < 0) return -1;
-
-    /* Extract the block length from the block header */
-    blklen = ((U16)(awshdr.curblkl[1]) << 8)
-                | awshdr.curblkl[0];
-
-    /* Calculate the offsets of the next and previous blocks */
-    dev->nxtblkpos = blkpos + sizeof(awshdr) + blklen;
-    dev->prvblkpos = blkpos;
-
-    /* Increment file number and return zero if tapemark was read */
-    if (!blklen)
-    {
-        dev->curfilen++;
-        dev->blockid++;
-        return 0; /* UX will be set by caller */
-    }
-
-    /* Read data block from tape file */
-    rc = read (dev->fd, buf, blklen);
-
-    /* Handle read error condition */
-    if (rc < 0)
-    {
-        logmsg (_("HHCTA003E Error reading data block "
-                "at offset %8.8lX in file %s: %s\n"),
-                blkpos, dev->filename, strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_READFAIL,dev,unitstat,code);
-        return -1;
-    }
-
-    dev->blockid++;
-
-    /* Handle end of file within data block */
-    if (rc < blklen)
-    {
-        logmsg (_("HHCTA004E Unexpected end of file in data block "
-                "at offset %8.8lX in file %s\n"),
-                blkpos, dev->filename);
-
-        /* Set unit check with data check and partial record */
-        build_senseX(TAPE_BSENSE_BLOCKSHORT,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Return block length */
-    return blklen;
-
-} /* end function read_awstape */
-
-/*-------------------------------------------------------------------*/
-/* Write a block to an AWSTAPE format file                           */
-/*                                                                   */
-/* If successful, return value is zero.                              */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int write_awstape (DEVBLK *dev, BYTE *buf, U16 blklen,
-                        BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-off_t           rcoff;                  /* Return code from lseek()  */
-AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
-off_t           blkpos;                 /* Offset of block header    */
-U16             prvblkl;                /* Length of previous block  */
-
-    /* Initialize current block position and previous block length */
-    blkpos = dev->nxtblkpos;
-    prvblkl = 0;
-
-    /* Determine previous block length if not at start of tape */
-    if (dev->nxtblkpos > 0)
-    {
-        /* Reread the previous block header */
-        rc = readhdr_awstape (dev, dev->prvblkpos, &awshdr, unitstat,code);
-        if (rc < 0) return -1;
-
-        /* Extract the block length from the block header */
-        prvblkl = ((U16)(awshdr.curblkl[1]) << 8)
-                    | awshdr.curblkl[0];
-
-        /* Recalculate the offset of the next block */
-        blkpos = dev->prvblkpos + sizeof(awshdr) + prvblkl;
-    }
-
-    /* Reposition file to the new block header */
-    rcoff = lseek (dev->fd, blkpos, SEEK_SET);
-    if (rcoff < 0)
-    {
-        /* Handle seek error condition */
-        logmsg (_("HHCTA002E Error seeking to offset %8.8lX "
-                "in file %s: %s\n"),
-                blkpos, dev->filename, strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_LOCATEERR,dev,unitstat,code);
-        return -1;
-    }
-    /* ISW: Determine if we are passed maxsize */
-    if(dev->tdparms.maxsize>0)
-    {
-        if((off_t)(dev->nxtblkpos+blklen+sizeof(awshdr)) > dev->tdparms.maxsize)
-        {
-            build_senseX(TAPE_BSENSE_ENDOFTAPE,dev,unitstat,code);
-            return -1;
-        }
-    }
-    /* ISW: End of virtual physical EOT determination */
-
-    /* Build the 6-byte block header */
-    awshdr.curblkl[0] = blklen & 0xFF;
-    awshdr.curblkl[1] = (blklen >> 8) & 0xFF;
-    awshdr.prvblkl[0] = prvblkl & 0xFF;
-    awshdr.prvblkl[1] = (prvblkl >>8) & 0xFF;
-    awshdr.flags1 = AWSTAPE_FLAG1_NEWREC | AWSTAPE_FLAG1_ENDREC;
-    awshdr.flags2 = 0;
-
-    /* Write the block header */
-    rc = write (dev->fd, &awshdr, sizeof(awshdr));
-    if (rc < (int)sizeof(awshdr))
-    {
-        if(ENOSPC==errno)
-        {
-            /* Disk FULL */
-            build_senseX(TAPE_BSENSE_ENDOFTAPE,dev,unitstat,code);
-            logmsg (_("HHCTA995E Media full condition reached "
-                    "at offset %8.8lX in file %s\n"),
-                    blkpos, dev->filename);
-            return -1;
-        }
-        /* Handle write error condition */
-        logmsg (_("HHCTA009E Error writing block header "
-                "at offset %8.8lX in file %s: %s\n"),
-                blkpos, dev->filename, strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_WRITEFAIL,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Calculate the offsets of the next and previous blocks */
-    dev->nxtblkpos = blkpos + sizeof(awshdr) + blklen;
-    dev->prvblkpos = blkpos;
-
-    /* Write the data block */
-    rc = write (dev->fd, buf, blklen);
-    if (rc < blklen)
-    {
-        if(ENOSPC==errno)
-        {
-            /* Disk FULL */
-            build_senseX(TAPE_BSENSE_ENDOFTAPE,dev,unitstat,code);
-            logmsg (_("HHCTA995E Media full condition reached "
-                    "at offset %8.8lX in file %s\n"),
-                    blkpos, dev->filename);
-            return -1;
-        }
-        /* Handle write error condition */
-        logmsg (_("HHCTA010E Error writing data block "
-                "at offset %8.8lX in file %s: %s\n"),
-                blkpos, dev->filename, strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_WRITEFAIL,dev,unitstat,code);
-        return -1;
-    }
-
-    dev->blockid++;
-
-    /* Set new physical EOF */
-    do rc = ftruncate( dev->fd, dev->nxtblkpos );
-    while (EINTR == rc);
-
-    if (rc != 0)
-    {
-        /* Handle write error condition */
-        logmsg (_("HHCTA010E Error writing data block "
-                "at offset %8.8lX in file %s: %s\n"),
-                blkpos, dev->filename, strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_WRITEFAIL,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Return normal status */
-    return 0;
-
-} /* end function write_awstape */
-
-/*-------------------------------------------------------------------*/
-/* Write a tapemark to an AWSTAPE format file                        */
-/*                                                                   */
-/* If successful, return value is zero.                              */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int write_awsmark (DEVBLK *dev, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-off_t           rcoff;                  /* Return code from lseek()  */
-AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
-off_t           blkpos;                 /* Offset of block header    */
-U16             prvblkl;                /* Length of previous block  */
-
-    /* Initialize current block position and previous block length */
-    blkpos = dev->nxtblkpos;
-    prvblkl = 0;
-
-    /* Determine previous block length if not at start of tape */
-    if (dev->nxtblkpos > 0)
-    {
-        /* Reread the previous block header */
-        rc = readhdr_awstape (dev, dev->prvblkpos, &awshdr, unitstat,code);
-        if (rc < 0) return -1;
-
-        /* Extract the block length from the block header */
-        prvblkl = ((U16)(awshdr.curblkl[1]) << 8)
-                    | awshdr.curblkl[0];
-
-        /* Recalculate the offset of the next block */
-        blkpos = dev->prvblkpos + sizeof(awshdr) + prvblkl;
-    }
-
-    /* Reposition file to the new block header */
-    rcoff = lseek (dev->fd, blkpos, SEEK_SET);
-    if (rcoff < 0)
-    {
-        /* Handle seek error condition */
-        logmsg (_("HHCTA011E Error seeking to offset %8.8lX "
-                "in file %s: %s\n"),
-                blkpos, dev->filename, strerror(errno));
-
-        build_senseX(TAPE_BSENSE_LOCATEERR,dev,unitstat,code);
-        return -1;
-    }
-    /* ISW: Determine if we are passed maxsize */
-    if(dev->tdparms.maxsize>0)
-    {
-        if((off_t)(dev->nxtblkpos+sizeof(awshdr)) > dev->tdparms.maxsize)
-        {
-            build_senseX(TAPE_BSENSE_ENDOFTAPE,dev,unitstat,code);
-            return -1;
-        }
-    }
-    /* ISW: End of virtual physical EOT determination */
-
-    /* Build the 6-byte block header */
-    awshdr.curblkl[0] = 0;
-    awshdr.curblkl[1] = 0;
-    awshdr.prvblkl[0] = prvblkl & 0xFF;
-    awshdr.prvblkl[1] = (prvblkl >>8) & 0xFF;
-    awshdr.flags1 = AWSTAPE_FLAG1_TAPEMARK;
-    awshdr.flags2 = 0;
-
-    /* Write the block header */
-    rc = write (dev->fd, &awshdr, sizeof(awshdr));
-    if (rc < (int)sizeof(awshdr))
-    {
-        /* Handle write error condition */
-        logmsg (_("HHCTA012E Error writing block header "
-                "at offset %8.8lX in file %s: %s\n"),
-                blkpos, dev->filename, strerror(errno));
-
-        build_senseX(TAPE_BSENSE_WRITEFAIL,dev,unitstat,code);
-        return -1;
-    }
-
-    dev->blockid++;
-
-    /* Calculate the offsets of the next and previous blocks */
-    dev->nxtblkpos = blkpos + sizeof(awshdr);
-    dev->prvblkpos = blkpos;
-
-    /* Set new physical EOF */
-    do rc = ftruncate( dev->fd, dev->nxtblkpos );
-    while (EINTR == rc);
-
-    if (rc != 0)
-    {
-        /* Handle write error condition */
-        logmsg (_("HHCTA017E Error writing tape mark "
-                "at offset %8.8lX in file %s: %s\n"),
-                blkpos, dev->filename, strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_WRITEFAIL,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Return normal status */
-    return 0;
-
-} /* end function write_awsmark */
-
-/*-------------------------------------------------------------------*/
-/* Forward space over next block of AWSTAPE format file              */
-/*                                                                   */
-/* If successful, return value is the length of the block skipped.   */
-/* If the block skipped was a tapemark, the return value is zero,    */
-/* and the current file number in the device block is incremented.   */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int fsb_awstape (DEVBLK *dev, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
-off_t           blkpos;                 /* Offset of block header    */
-U16             blklen;                 /* Data length of block      */
-
-    /* Initialize current block position */
-    blkpos = dev->nxtblkpos;
-
-    /* Read the 6-byte block header */
-    rc = readhdr_awstape (dev, blkpos, &awshdr, unitstat,code);
-    if (rc < 0) return -1;
-
-    /* Extract the block length from the block header */
-    blklen = ((U16)(awshdr.curblkl[1]) << 8)
-                | awshdr.curblkl[0];
-
-    /* Calculate the offsets of the next and previous blocks */
-    dev->nxtblkpos = blkpos + sizeof(awshdr) + blklen;
-    dev->prvblkpos = blkpos;
-
-    /* Increment current file number if tapemark was skipped */
-    if (!blklen)
-        dev->curfilen++;
-
-    dev->blockid++;
-
-    /* Return block length or zero if tapemark */
-    return blklen;
-
-} /* end function fsb_awstape */
-
-/*-------------------------------------------------------------------*/
-/* Backspace to previous block of AWSTAPE format file                */
-/*                                                                   */
-/* If successful, return value is the length of the block.           */
-/* If the block is a tapemark, the return value is zero,             */
-/* and the current file number in the device block is decremented.   */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int bsb_awstape (DEVBLK *dev, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-AWSTAPE_BLKHDR  awshdr;                 /* AWSTAPE block header      */
-U16             curblkl;                /* Length of current block   */
-U16             prvblkl;                /* Length of previous block  */
-off_t           blkpos;                 /* Offset of block header    */
-
-    /* Unit check if already at start of tape */
-    if (!dev->nxtblkpos)
-    {
-        build_senseX(TAPE_BSENSE_LOADPTERR,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Backspace to previous block position */
-    blkpos = dev->prvblkpos;
-
-    /* Read the 6-byte block header */
-    rc = readhdr_awstape (dev, blkpos, &awshdr, unitstat,code);
-    if (rc < 0) return -1;
-
-    /* Extract the block lengths from the block header */
-    curblkl = ((U16)(awshdr.curblkl[1]) << 8)
-                | awshdr.curblkl[0];
-    prvblkl = ((U16)(awshdr.prvblkl[1]) << 8)
-                | awshdr.prvblkl[0];
-
-    /* Calculate the offset of the previous block */
-    dev->prvblkpos = blkpos - sizeof(awshdr) - prvblkl;
-    dev->nxtblkpos = blkpos;
-
-    /* Decrement current file number if backspaced over tapemark */
-    if (!curblkl)
-        dev->curfilen--;
-
-    dev->blockid--;
-
-    /* Return block length or zero if tapemark */
-    return curblkl;
-
-} /* end function bsb_awstape */
-
-/*-------------------------------------------------------------------*/
-/* Forward space to next logical file of AWSTAPE format file         */
-/*                                                                   */
-/* For AWSTAPE files, the forward space file operation is achieved   */
-/* by forward spacing blocks until positioned just after a tapemark. */
-/*                                                                   */
-/* If successful, return value is zero, and the current file number  */
-/* in the device block is incremented by fsb_awstape.                */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int fsf_awstape (DEVBLK *dev, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-
-    while (1)
-    {
-        /* Forward space over next block */
-        rc = fsb_awstape (dev, unitstat,code);
-        if (rc < 0) return -1;
-
-        /* Exit loop if spaced over a tapemark */
-        if (!rc) break;
-
-    } /* end while */
-
-    /* Return normal status */
-    return 0;
-
-} /* end function fsf_awstape */
-
-/*-------------------------------------------------------------------*/
-/* Backspace to previous logical file of AWSTAPE format file         */
-/*                                                                   */
-/* For AWSTAPE files, the backspace file operation is achieved       */
-/* by backspacing blocks until positioned just before a tapemark     */
-/* or until positioned at start of tape.                             */
-/*                                                                   */
-/* If successful, return value is zero, and the current file number  */
-/* in the device block is decremented by bsb_awstape.                */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int bsf_awstape (DEVBLK *dev, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-
-    while (1)
-    {
-        /* Exit if now at start of tape */
-        if (!dev->nxtblkpos)
-        {
-            build_senseX(TAPE_BSENSE_LOADPTERR,dev,unitstat,code);
-            return -1;
-        }
-
-        /* Backspace to previous block position */
-        rc = bsb_awstape (dev, unitstat,code);
-        if (rc < 0) return -1;
-
-        /* Exit loop if backspaced over a tapemark */
-        if (!rc) break;
-
-    } /* end while */
-
-    /* Return normal status */
-    return 0;
-
-} /* end function bsf_awstape */
-
-/************************************/
-/* END OF ORIGINAL RB AWS FUNCTIONS */
-/************************************/
-
-/*-------------------------------------------------------------------*/
-/* Open an HET format file                                           */
-/*                                                                   */
-/* If successful, the het control blk is stored in the device block  */
-/* and the return value is zero.  Otherwise the return value is -1.  */
-/*-------------------------------------------------------------------*/
-static int open_het (DEVBLK *dev, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-
-    /* Check for no tape in drive */
-    if (!strcmp (dev->filename, TAPE_UNLOADED))
-    {
-        build_senseX(TAPE_BSENSE_TAPEUNLOADED,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Open the HET file */
-    rc = het_open (&dev->hetb, dev->filename, dev->tdparms.logical_readonly ? HETOPEN_READONLY : HETOPEN_CREATE );
-    if (rc >= 0)
-    {
-        if(dev->hetb->writeprotect)
-        {
-            dev->readonly=1;
-        }
-        rc = het_cntl (dev->hetb,
-                    HETCNTL_SET | HETCNTL_COMPRESS,
-                    dev->tdparms.compress);
-        if (rc >= 0)
-        {
-            rc = het_cntl (dev->hetb,
-                        HETCNTL_SET | HETCNTL_METHOD,
-                        dev->tdparms.method);
-            if (rc >= 0)
-            {
-                rc = het_cntl (dev->hetb,
-                            HETCNTL_SET | HETCNTL_LEVEL,
-                            dev->tdparms.level);
-                if (rc >= 0)
-                {
-                    rc = het_cntl (dev->hetb,
-                                HETCNTL_SET | HETCNTL_CHUNKSIZE,
-                                dev->tdparms.chksize);
-                }
-            }
-        }
-    }
-
-    /* Check for successful open */
-    if (rc < 0)
-    {
-        int save_errno = errno;
-        het_close (&dev->hetb);
-        errno = save_errno;
-
-        logmsg (_("HHCTA013E Error opening %s: %s(%s)\n"),
-                dev->filename, het_error(rc), strerror(errno));
-
-        strcpy(dev->filename, TAPE_UNLOADED);
-        build_senseX(TAPE_BSENSE_TAPELOADFAIL,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Indicate file opened */
-    dev->fd = 1;
-
-    return 0;
-
-} /* end function open_het */
-
-/*-------------------------------------------------------------------*/
-/* Close an HET format file                                          */
-/*                                                                   */
-/* The HET file is close and all device block fields reinitialized.  */
-/*-------------------------------------------------------------------*/
-static void close_het (DEVBLK *dev)
-{
-
-    /* Close the HET file */
-    het_close (&dev->hetb);
-
-    /* Reinitialize the DEV fields */
-    dev->fd = -1;
-    strcpy (dev->filename, TAPE_UNLOADED);
-    dev->blockid = 0;
-    dev->poserror = 0;
-
-    return;
-
-} /* end function close_het */
-
-/*-------------------------------------------------------------------*/
-/* Rewind HET format file                                            */
-/*                                                                   */
-/* The HET file is close and all device block fields reinitialized.  */
-/*-------------------------------------------------------------------*/
-static int rewind_het(DEVBLK *dev,BYTE *unitstat,BYTE code)
-{
-int rc;
-    rc = het_rewind (dev->hetb);
-    if (rc < 0)
-    {
-        /* Handle seek error condition */
-        logmsg (_("HHCTA075E Error seeking to start of %s: %s(%s)\n"),
-                dev->filename, het_error(rc), strerror(errno));
-
-        build_senseX(TAPE_BSENSE_REWINDFAILED,dev,unitstat,code);
-        return -1;
-    }
-    dev->nxtblkpos=0;
-    dev->prvblkpos=-1;
-    dev->curfilen=1;
-    dev->blockid=0;
-    return 0;
-}
-/*-------------------------------------------------------------------*/
-/* Read a block from an HET format file                              */
-/*                                                                   */
-/* If successful, return value is block length read.                 */
-/* If a tapemark was read, the return value is zero, and the         */
-/* current file number in the device block is incremented.           */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int read_het (DEVBLK *dev, BYTE *buf, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-
-    rc = het_read (dev->hetb, buf);
-    if (rc < 0)
-    {
-        /* Increment file number and return zero if tapemark was read */
-        if (HETE_TAPEMARK == rc)
-        {
-            dev->curfilen++;
-            dev->blockid++;
-            return 0;
-        }
-
-        /* Handle end of file (uninitialized tape) condition */
-        if (HETE_EOT == rc)
-        {
-            logmsg (_("HHCTA014E End of file (uninitialized tape) "
-                    "at block %8.8X in file %s\n"),
-                    dev->hetb->cblk, dev->filename);
-
-            /* Set unit exception with tape indicate (end of tape) */
-            build_senseX(TAPE_BSENSE_ENDOFTAPE,dev,unitstat,code);
-            return -1;
-        }
-
-        logmsg (_("HHCTA015E Error reading data block "
-                "at block %8.8X in file %s: %s(%s)\n"),
-                dev->hetb->cblk, dev->filename,
-                het_error(rc), strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_READFAIL,dev,unitstat,code);
-        return -1;
-    }
-    dev->blockid++;
-    /* Return block length */
-    return rc;
-
-} /* end function read_het */
-
-/*-------------------------------------------------------------------*/
-/* Write a block to an HET format file                               */
-/*                                                                   */
-/* If successful, return value is zero.                              */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int write_het (DEVBLK *dev, BYTE *buf, U16 blklen,
-                      BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-off_t           cursize;                /* Current size for size chk */
-
-    /* Check if we have already violated the size limit */
-    if(dev->tdparms.maxsize>0)
-    {
-        cursize=het_tell(dev->hetb);
-        if(cursize>=dev->tdparms.maxsize)
-        {
-            build_senseX(TAPE_BSENSE_ENDOFTAPE,dev,unitstat,code);
-            return -1;
-        }
-    }
-    /* Write the data block */
-    rc = het_write (dev->hetb, buf, blklen);
-    if (rc < 0)
-    {
-        /* Handle write error condition */
-        logmsg (_("HHCTA016E Error writing data block "
-                "at block %8.8X in file %s: %s(%s)\n"),
-                dev->hetb->cblk, dev->filename,
-                het_error(rc), strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_WRITEFAIL,dev,unitstat,code);
-        return -1;
-    }
-    /* Check if we have violated the maxsize limit */
-    /* Also check if we are passed EOT marker */
-    if(dev->tdparms.maxsize>0)
-    {
-        cursize=het_tell(dev->hetb);
-        if(cursize>dev->tdparms.maxsize)
-        {
-            logmsg(_("TAPE EOT Handling: max capacity exceeded\n"));
-            if(dev->tdparms.strictsize)
-            {
-                logmsg(_("TAPE EOT Handling: max capacity enforced\n"));
-                het_bsb(dev->hetb);
-                cursize=het_tell(dev->hetb);
-                ftruncate( fileno(dev->hetb->fd),cursize);
-                dev->hetb->truncated=TRUE; /* SHOULD BE IN HETLIB */
-            }
-            build_senseX(TAPE_BSENSE_ENDOFTAPE,dev,unitstat,code);
-            return -1;
-        }
-    }
-
-    /* Return normal status */
-    dev->blockid++;
-
-    return 0;
-
-} /* end function write_het */
-
-/*-------------------------------------------------------------------*/
-/* Write a tapemark to an HET format file                            */
-/*                                                                   */
-/* If successful, return value is zero.                              */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int write_hetmark (DEVBLK *dev, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-
-    /* Write the tape mark */
-    rc = het_tapemark (dev->hetb);
-    if (rc < 0)
-    {
-        /* Handle error condition */
-        logmsg (_("HHCTA017E Error writing tape mark "
-                "at block %8.8X in file %s: %s(%s)\n"),
-                dev->hetb->cblk, dev->filename,
-                het_error(rc), strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_WRITEFAIL,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Return normal status */
-    dev->blockid++;
-
-    return 0;
-
-} /* end function write_hetmark */
-
-/*-------------------------------------------------------------------*/
-/* Forward space over next block of an HET format file               */
-/*                                                                   */
-/* If successful, return value +1.                                   */
-/* If the block skipped was a tapemark, the return value is zero,    */
-/* and the current file number in the device block is incremented.   */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int fsb_het (DEVBLK *dev, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-
-    /* Forward space one block */
-    rc = het_fsb (dev->hetb);
-
-    if (rc < 0)
-    {
-        /* Increment file number and return zero if tapemark was read */
-        if (HETE_TAPEMARK == rc)
-        {
-            dev->blockid++;
-            dev->curfilen++;
-            return 0;
-        }
-
-        logmsg (_("HHCTA018E Error forward spacing "
-                "at block %8.8X in file %s: %s(%s)\n"),
-                dev->hetb->cblk, dev->filename,
-                het_error(rc), strerror(errno));
-
-        /* Set unit check with equipment check */
-        if(HETE_EOT==rc)
-        {
-            build_senseX(TAPE_BSENSE_ENDOFTAPE,dev,unitstat,code);
-        }
-        else
-        {
-            build_senseX(TAPE_BSENSE_READFAIL,dev,unitstat,code);
-        }
-        return -1;
-    }
-
-    dev->blockid++;
-
-    /* Return +1 to indicate forward space successful */
-    return +1;
-
-} /* end function fsb_het */
-
-/*-------------------------------------------------------------------*/
-/* Backspace to previous block of an HET format file                 */
-/*                                                                   */
-/* If successful, return value will be +1.                           */
-/* If the block is a tapemark, the return value is zero,             */
-/* and the current file number in the device block is decremented.   */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int bsb_het (DEVBLK *dev, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-
-    /* Back space one block */
-    rc = het_bsb (dev->hetb);
-    if (rc < 0)
-    {
-        /* Increment file number and return zero if tapemark was read */
-        if (HETE_TAPEMARK == rc)
-        {
-            dev->blockid--;
-            dev->curfilen--;
-            return 0;
-        }
-
-        /* Unit check if already at start of tape */
-        if (HETE_BOT == rc)
-        {
-            build_senseX(TAPE_BSENSE_LOADPTERR,dev,unitstat,code);
-            return -1;
-        }
-
-        logmsg (_("HHCTA019E Error reading data block "
-                "at block %8.8X in file %s: %s(%s)\n"),
-                dev->hetb->cblk, dev->filename,
-                het_error(rc), strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_READFAIL,dev,unitstat,code);
-        return -1;
-    }
-
-    dev->blockid--;
-
-    /* Return +1 to indicate back space successful */
-    return +1;
-
-} /* end function bsb_het */
-
-/*-------------------------------------------------------------------*/
-/* Forward space to next logical file of HET format file             */
-/*                                                                   */
-/* If successful, return value is zero, and the current file number  */
-/* in the device block is incremented.                               */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int fsf_het (DEVBLK *dev, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-
-    /* Forward space to start of next file */
-    rc = het_fsf (dev->hetb);
-    if (rc < 0)
-    {
-        logmsg (_("HHCTA020E Error forward spacing to next file "
-                "at block %8.8X in file %s: %s(%s)\n"),
-                dev->hetb->cblk, dev->filename,
-                het_error(rc), strerror(errno));
-
-        if(HETE_EOT==rc)
-        {
-            build_senseX(TAPE_BSENSE_ENDOFTAPE,dev,unitstat,code);
-        }
-        else
-        {
-            build_senseX(TAPE_BSENSE_READFAIL,dev,unitstat,code);
-        }
-        return -1;
-    }
-
-    /* Maintain position */
-    dev->blockid = rc;
-    dev->curfilen++;
-
-    /* Return success */
-    return 0;
-
-} /* end function fsf_het */
-/*-------------------------------------------------------------------*/
-/* Check HET file is passed the allowed EOT margin                   */
-/*-------------------------------------------------------------------*/
-static int passedeot_het (DEVBLK *dev)
-{
-off_t cursize;
-    if(dev->fd>0)
-    {
-        if(dev->tdparms.maxsize>0)
-        {
-            cursize=het_tell(dev->hetb);
-            if(cursize+dev->tdparms.eotmargin>dev->tdparms.maxsize)
-            {
-                return 1;
-            }
-        }
-     }
-     return 0;
-}
-
-/*-------------------------------------------------------------------*/
-/* Backspace to previous logical file of HET format file             */
-/*                                                                   */
-/* If successful, return value is zero, and the current file number  */
-/* in the device block is decremented.                               */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int bsf_het (DEVBLK *dev, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-
-    /* Exit if already at BOT */
-    if (1==dev->curfilen && !dev->nxtblkpos)
-    {
-        build_senseX(TAPE_BSENSE_LOADPTERR,dev,unitstat,code);
-        return -1;
-    }
-
-    rc = het_bsf (dev->hetb);
-    if (rc < 0)
-    {
-        logmsg (_("HHCTA021E Error back spacing to previous file "
-                "at block %8.8X in file %s:\n %s(%s)\n"),
-                dev->hetb->cblk, dev->filename,
-                het_error(rc), strerror(errno));
-
-        build_senseX(TAPE_BSENSE_LOCATEERR,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Maintain position */
-    dev->blockid = rc;
-    dev->curfilen--;
-
-    /* Return success */
-    return 0;
-
-} /* end function bsf_het */
-
-/*-------------------------------------------------------------------*/
-/* Read the OMA tape descriptor file                                 */
-/*-------------------------------------------------------------------*/
-static int read_omadesc (DEVBLK *dev)
-{
-int             rc;                     /* Return code               */
-int             i;                      /* Array subscript           */
-int             pathlen;                /* Length of TDF path name   */
-int             tdfsize;                /* Size of TDF file in bytes */
-int             filecount;              /* Number of files           */
-int             stmt;                   /* TDF file statement number */
-int             fd;                     /* TDF file descriptor       */
-struct stat     statbuf;                /* TDF file information      */
-U32             blklen;                 /* Fixed block length        */
-int             tdfpos;                 /* Position in TDF buffer    */
-char           *tdfbuf;                 /* -> TDF file buffer        */
-char           *tdfrec;                 /* -> TDF record             */
-char           *tdffilenm;              /* -> Filename in TDF record */
-char           *tdfformat;              /* -> Format in TDF record   */
-char           *tdfreckwd;              /* -> Keyword in TDF record  */
-char           *tdfblklen;              /* -> Length in TDF record   */
-OMATAPE_DESC   *tdftab;                 /* -> Tape descriptor array  */
-BYTE            c;                      /* Work area for sscanf      */
-char            pathname[MAX_PATH];     /* file path in host format  */
-
-    /* Isolate the base path name of the TDF file */
-    for (pathlen = strlen(dev->filename); pathlen > 0; )
-    {
-        pathlen--;
-        if ('/' == dev->filename[pathlen-1]) break;
-    }
-#if 0
-    // JCS thinks this is bad
-    if (pathlen < 7
-        || strncasecmp(dev->filename+pathlen-7, "/tapes/", 7) != 0)
-    {
-        logmsg (_("HHC232I Invalid filename %s: "
-                "TDF files must be in the TAPES subdirectory\n"),
-                dev->filename+pathlen);
-        return -1;
-    }
-    pathlen -= 7;
-#endif
-
-    /* Open the tape descriptor file */
-    hostpath(pathname, dev->filename, sizeof(pathname));
-    fd = open (pathname, O_RDONLY | O_BINARY);
-    if (fd < 0)
-    {
-        logmsg (_("HHCTA039E Error opening TDF file %s: %s\n"),
-                dev->filename, strerror(errno));
-        return -1;
-    }
-
-    /* Determine the size of the tape descriptor file */
-    rc = fstat (fd, &statbuf);
-    if (rc < 0)
-    {
-        logmsg (_("HHCTA040E %s fstat error: %s\n"),
-                dev->filename, strerror(errno));
-        close (fd);
-        return -1;
-    }
-    tdfsize = statbuf.st_size;
-
-    /* Obtain a buffer for the tape descriptor file */
-    tdfbuf = malloc (tdfsize);
-    if (!tdfbuf)
-    {
-        logmsg (_("HHCTA041E Cannot obtain buffer for TDF file %s: %s\n"),
-                dev->filename, strerror(errno));
-        close (fd);
-        return -1;
-    }
-
-    /* Read the tape descriptor file into the buffer */
-    rc = read (fd, tdfbuf, tdfsize);
-    if (rc < tdfsize)
-    {
-        logmsg (_("HHCTA042E Error reading TDF file %s: %s\n"),
-                dev->filename, strerror(errno));
-        free (tdfbuf);
-        close (fd);
-        return -1;
-    }
-
-    /* Close the tape descriptor file */
-    close (fd); fd = -1;
-
-    /* Check that the first record is a TDF header */
-    if (memcmp(tdfbuf, "@TDF", 4) != 0)
-    {
-        logmsg (_("HHCTA043E %s is not a valid TDF file\n"),
-                dev->filename);
-        free (tdfbuf);
-        return -1;
-    }
-
-    /* Count the number of linefeeds in the tape descriptor file
-       to determine the size of the descriptor array required */
-    for (i = 0, filecount = 0; i < tdfsize; i++)
-    {
-        if ('\n' == tdfbuf[i]) filecount++;
-    } /* end for(i) */
-    /* ISW Add 1 to filecount to add an extra EOT marker */
-    filecount++;
-
-    /* Obtain storage for the tape descriptor array */
-    tdftab = (OMATAPE_DESC*)malloc (filecount * sizeof(OMATAPE_DESC));
-    if (!tdftab)
-    {
-        logmsg (_("HHCTA044E Cannot obtain buffer for TDF array: %s\n"),
-                strerror(errno));
-        free (tdfbuf);
-        return -1;
-    }
-
-    /* Build the tape descriptor array */
-    for (filecount = 0, tdfpos = 0, stmt = 1; ; filecount++)
-    {
-        /* Clear the tape descriptor array entry */
-        memset (&(tdftab[filecount]), 0, sizeof(OMATAPE_DESC));
-
-        /* Point past the next linefeed in the TDF file */
-        while (tdfpos < tdfsize && tdfbuf[tdfpos++] != '\n');
-        stmt++;
-
-        /* Exit at end of TDF file */
-        if (tdfpos >= tdfsize) break;
-
-        /* Mark the end of the TDF record with a null terminator */
-        tdfrec = tdfbuf + tdfpos;
-        while (tdfpos < tdfsize && tdfbuf[tdfpos]!='\r'
-            && tdfbuf[tdfpos]!='\n') tdfpos++;
-        c = tdfbuf[tdfpos];
-        if (tdfpos >= tdfsize) break;
-        tdfbuf[tdfpos] = '\0';
-
-        /* Exit if TM or EOT record */
-        if (strcasecmp(tdfrec, "TM") == 0)
-        {
-            tdftab[filecount].format='X';
-            tdfbuf[tdfpos] = c;
-            continue;
-        }
-        if(strcasecmp(tdfrec, "EOT") == 0)
-        {
-            tdftab[filecount].format='E';
-            break;
-        }
-
-        /* Parse the TDF record */
-        tdffilenm = strtok (tdfrec, " \t");
-        tdfformat = strtok (NULL, " \t");
-        tdfreckwd = strtok (NULL, " \t");
-        tdfblklen = strtok (NULL, " \t");
-
-        /* Check for missing fields */
-        if (!tdffilenm || !tdfformat)
-        {
-            logmsg (_("HHCTA045E Filename or format missing in "
-                    "line %d of file %s\n"),
-                    stmt, dev->filename);
-            free (tdftab);
-            free (tdfbuf);
-            return -1;
-        }
-
-        /* Check that the file name is not too long */
-        if (pathlen + 1 + strlen(tdffilenm)
-                > sizeof(tdftab[filecount].filename) - 1)
-        {
-            logmsg (_("HHCTA046E Filename %s too long in "
-                    "line %d of file %s\n"),
-                    tdffilenm, stmt, dev->filename);
-            free (tdftab);
-            free (tdfbuf);
-            return -1;
-        }
-
-        /* Convert the file name to Unix format */
-        for (i = 0; i < (int)strlen(tdffilenm); i++)
-        {
-            if ('\\' == tdffilenm[i])
-                tdffilenm[i] = '/';
-/* JCS */
-//            else
-//                tdffilenm[i] = tolower(tdffilenm[i]);
-        } /* end for(i) */
-
-        /* Prefix the file name with the base path name and
-           save it in the tape descriptor array */
-        /* but only if the filename lacks a leading slash - JCS  */
-/*
-        strncpy (tdftab[filecount].filename, dev->filename, pathlen);
-        if (tdffilenm[0] != '/')
-            stlrcat ( tdftab[filecount].filename, "/", sizeof(tdftab[filecount].filename) );
-        strlcat ( tdftab[filecount].filename, tdffilenm, sizeof(tdftab[filecount].filename) );
-*/
-        tdftab[filecount].filename[0] = 0;
-
-        if ((tdffilenm[0] != '/') && (tdffilenm[1] != ':'))
-        {
-            strncpy (tdftab[filecount].filename, dev->filename, pathlen);
-            strlcat (tdftab[filecount].filename, "/", sizeof(tdftab[filecount].filename) );
-        }
-
-        strlcat (tdftab[filecount].filename, tdffilenm, sizeof(tdftab[filecount].filename) );
-
-        /* Check for valid file format code */
-        if (strcasecmp(tdfformat, "HEADERS") == 0)
-        {
-            tdftab[filecount].format = 'H';
-        }
-        else if (strcasecmp(tdfformat, "TEXT") == 0)
-        {
-            tdftab[filecount].format = 'T';
-        }
-        else if (strcasecmp(tdfformat, "FIXED") == 0)
-        {
-            /* Check for RECSIZE keyword */
-            if (!tdfreckwd ||
-                strcasecmp(tdfreckwd, "RECSIZE") != 0)
-            {
-                logmsg (_("HHCTA047E RECSIZE keyword missing in "
-                        "line %d of file %s\n"),
-                        stmt, dev->filename);
-                free (tdftab);
-                free (tdfbuf);
-                return -1;
-            }
-
-            /* Check for valid fixed block length */
-            if (!tdfblklen
-                || sscanf(tdfblklen, "%u%c", &blklen, &c) != 1
-                || blklen < 1 || blklen > MAX_BLKLEN)
-            {
-                logmsg (_("HHCTA048E Invalid record size %s in "
-                        "line %d of file %s\n"),
-                        tdfblklen, stmt, dev->filename);
-                free (tdftab);
-                free (tdfbuf);
-                return -1;
-            }
-
-            /* Set format and block length in descriptor array */
-            tdftab[filecount].format = 'F';
-            tdftab[filecount].blklen = blklen;
-        }
-        else
-        {
-            logmsg (_("HHCTA049E Invalid record format %s in "
-                    "line %d of file %s\n"),
-                    tdfformat, stmt, dev->filename);
-            free (tdftab);
-            free (tdfbuf);
-            return -1;
-        }
-        tdfbuf[tdfpos] = c;
-    } /* end for(filecount) */
-    /* Force an EOT as last entry (filecount is correctly adjusted here) */
-    tdftab[filecount].format='E';
-
-    /* Save the file count and TDF array pointer in the device block */
-    dev->omafiles = filecount+1;
-    dev->omadesc = tdftab;
-
-    /* Release the TDF file buffer and exit */
-    free (tdfbuf);
-    return 0;
-
-} /* end function read_omadesc */
-
-/*-------------------------------------------------------------------*/
-/* Open the OMATAPE file defined by the current file number          */
-/*                                                                   */
-/* The OMA tape descriptor file is read if necessary.                */
-/* If successful, the file descriptor is stored in the device block  */
-/* and the return value is zero.  Otherwise the return value is -1.  */
-/*-------------------------------------------------------------------*/
-static int open_omatape (DEVBLK *dev, BYTE *unitstat,BYTE code)
-{
-int             fd;                     /* File descriptor integer   */
-int             rc;                     /* Return code               */
-OMATAPE_DESC   *omadesc;                /* -> OMA descriptor entry   */
-char            pathname[MAX_PATH];     /* file path in host format  */
-
-    /* Read the OMA descriptor file if necessary */
-    if (!dev->omadesc)
-    {
-        rc = read_omadesc (dev);
-        if (rc < 0)
-        {
-            build_senseX(TAPE_BSENSE_TAPELOADFAIL,dev,unitstat,code);
-            return -1;
-        }
-        dev->blockid = 0;
-        dev->poserror = 0;
-    }
-
-    /* Unit exception if beyond end of tape */
-    /* ISW: CHANGED PROCESSING - RETURN UNDEFINITE Tape Marks  */
-    /*       NOTE: The last entry in the TDF table is ALWAYS   */
-    /*              an EOT Condition                           */
-    /*              This is ensured by the TDF reading routine */
-#if 0
-    if (dev->curfilen >= dev->omafiles)
-    {
-        logmsg (_("HHCTA050E Attempt to access beyond end of tape %s\n"),
-                dev->filename);
-
-        build_senseX(TAPE_BSENSE_ENDOFTAPE,dev,unitstat,code);
-        return -1;
-    }
-#else
-    if(dev->curfilen>dev->omafiles)
-    {
-        dev->curfilen=dev->omafiles;
-        return(0);
-    }
-#endif
-
-    /* Point to the current file entry in the OMA descriptor table */
-    omadesc = (OMATAPE_DESC*)(dev->omadesc);
-    omadesc += (dev->curfilen-1);
-    if('X' == omadesc->format)
-    {
-        return 0;
-    }
-    if('E'==omadesc->format)
-    {
-        return 0;
-    }
-
-    /* Open the OMATAPE file */
-    hostpath(pathname, omadesc->filename, sizeof(pathname));
-    fd = open (pathname, O_RDONLY | O_BINARY);
-
-    /* Check for successful open */
-    if (fd < 0 || lseek (fd, 0, SEEK_END) > LONG_MAX)
-    {
-        if (fd >= 0)            /* (if open was successful, then it) */
-            errno = EOVERFLOW;  /* (must have been a lseek overflow) */
-
-        logmsg (_("HHCTA051E Error opening %s: %s\n"),
-                omadesc->filename, strerror(errno));
-
-        if (fd >= 0)
-            close(fd);          /* (close the file if it was opened) */
-
-        build_senseX(TAPE_BSENSE_TAPELOADFAIL,dev,unitstat,code);
-        return -1;
-    }
-
-    /* OMA tapes are always read-only */
-    dev->readonly = 1;
-
-    /* Store the file descriptor in the device block */
-    dev->fd = fd;
-    return 0;
-
-} /* end function open_omatape */
-
-/*-------------------------------------------------------------------*/
-/* Read a block header from an OMA tape file in OMA headers format   */
-/*                                                                   */
-/* If successful, return value is zero, and the current block        */
-/* length and previous and next header offsets are returned.         */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int readhdr_omaheaders (DEVBLK *dev, OMATAPE_DESC *omadesc,
-                        long blkpos, S32 *pcurblkl, S32 *pprvhdro,
-                        S32 *pnxthdro, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-off_t           rcoff;                  /* Return code from lseek()  */
-int             padding;                /* Number of padding bytes   */
-OMATAPE_BLKHDR  omahdr;                 /* OMATAPE block header      */
-S32             curblkl;                /* Length of current block   */
-S32             prvhdro;                /* Offset of previous header */
-S32             nxthdro;                /* Offset of next header     */
-
-    /* Seek to start of block header */
-    rcoff = lseek (dev->fd, blkpos, SEEK_SET);
-    if (rcoff < 0)
-    {
-        /* Handle seek error condition */
-        logmsg (_("HHCTA052E Error seeking to offset %8.8lX "
-                "in file %s: %s\n"),
-                blkpos, omadesc->filename, strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_LOCATEERR,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Read the 16-byte block header */
-    rc = read (dev->fd, &omahdr, sizeof(omahdr));
-
-    /* Handle read error condition */
-    if (rc < 0)
-    {
-        logmsg (_("HHCTA053E Error reading block header "
-                "at offset %8.8lX in file %s: %s\n"),
-                blkpos, omadesc->filename,
-                strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_READFAIL,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Handle end of file within block header */
-    if (rc < (int)sizeof(omahdr))
-    {
-        logmsg (_("HHCTA054E Unexpected end of file in block header "
-                "at offset %8.8lX in file %s\n"),
-                blkpos, omadesc->filename);
-
-        /* Set unit check with data check and partial record */
-        build_senseX(TAPE_BSENSE_BLOCKSHORT,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Extract the current block length and previous header offset */
-    curblkl = (S32)(((U32)(omahdr.curblkl[3]) << 24)
-                    | ((U32)(omahdr.curblkl[2]) << 16)
-                    | ((U32)(omahdr.curblkl[1]) << 8)
-                    | omahdr.curblkl[0]);
-    prvhdro = (S32)((U32)(omahdr.prvhdro[3]) << 24)
-                    | ((U32)(omahdr.prvhdro[2]) << 16)
-                    | ((U32)(omahdr.prvhdro[1]) << 8)
-                    | omahdr.prvhdro[0];
-
-    /* Check for valid block header */
-    if (curblkl < -1 || !curblkl || curblkl > MAX_BLKLEN
-        || memcmp(omahdr.omaid, "@HDF", 4) != 0)
-    {
-        logmsg (_("HHCTA055E Invalid block header "
-                "at offset %8.8lX in file %s\n"),
-                blkpos, omadesc->filename);
-
-        build_senseX(TAPE_BSENSE_READFAIL,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Calculate the number of padding bytes which follow the data */
-    padding = (16 - (curblkl & 15)) & 15;
-
-    /* Calculate the offset of the next block header */
-    nxthdro = blkpos + sizeof(OMATAPE_BLKHDR) + curblkl + padding;
-
-    /* Return current block length and previous/next header offsets */
-    *pcurblkl = curblkl;
-    *pprvhdro = prvhdro;
-    *pnxthdro = nxthdro;
-    return 0;
-
-} /* end function readhdr_omaheaders */
-
-/*-------------------------------------------------------------------*/
-/* Read a block from an OMA tape file in OMA headers format          */
-/*                                                                   */
-/* If successful, return value is block length read.                 */
-/* If a tapemark was read, the file is closed, the current file      */
-/* number in the device block is incremented so that the next file   */
-/* will be opened by the next CCW, and the return value is zero.     */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int read_omaheaders (DEVBLK *dev, OMATAPE_DESC *omadesc,
-                        BYTE *buf, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-long            blkpos;                 /* Offset to block header    */
-S32             curblkl;                /* Length of current block   */
-S32             prvhdro;                /* Offset of previous header */
-S32             nxthdro;                /* Offset of next header     */
-
-    /* Read the 16-byte block header */
-    blkpos = dev->nxtblkpos;
-    rc = readhdr_omaheaders (dev, omadesc, blkpos, &curblkl,
-                            &prvhdro, &nxthdro, unitstat,code);
-    if (rc < 0) return -1;
-
-    /* Update the offsets of the next and previous blocks */
-    dev->nxtblkpos = nxthdro;
-    dev->prvblkpos = blkpos;
-
-    /* Increment file number and return zero if tapemark */
-    if (-1 == curblkl)
-    {
-        close (dev->fd);
-        dev->fd = -1;
-        dev->curfilen++;
-        dev->nxtblkpos = 0;
-        dev->prvblkpos = -1;
-        return 0;
-    }
-
-    /* Read data block from tape file */
-    rc = read (dev->fd, buf, curblkl);
-
-    /* Handle read error condition */
-    if (rc < 0)
-    {
-        logmsg (_("HHCTA056E Error reading data block "
-                "at offset %8.8lX in file %s: %s\n"),
-                blkpos, omadesc->filename,
-                strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_READFAIL,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Handle end of file within data block */
-    if (rc < curblkl)
-    {
-        logmsg (_("HHCTA057E Unexpected end of file in data block "
-                "at offset %8.8lX in file %s\n"),
-                blkpos, omadesc->filename);
-
-        /* Set unit check with data check and partial record */
-        build_senseX(TAPE_BSENSE_BLOCKSHORT,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Return block length */
-    return curblkl;
-
-} /* end function read_omaheaders */
-
-/*-------------------------------------------------------------------*/
-/* Read a block from an OMA tape file in fixed block format          */
-/*                                                                   */
-/* If successful, return value is block length read.                 */
-/* If a tapemark was read, the file is closed, the current file      */
-/* number in the device block is incremented so that the next file   */
-/* will be opened by the next CCW, and the return value is zero.     */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int read_omafixed (DEVBLK *dev, OMATAPE_DESC *omadesc,
-                        BYTE *buf, BYTE *unitstat,BYTE code)
-{
-off_t           rcoff;                  /* Return code from lseek()  */
-int             blklen;                 /* Block length              */
-long            blkpos;                 /* Offset of block in file   */
-
-    /* Initialize current block position */
-    blkpos = dev->nxtblkpos;
-
-    /* Seek to new current block position */
-    rcoff = lseek (dev->fd, blkpos, SEEK_SET);
-    if (rcoff < 0)
-    {
-        /* Handle seek error condition */
-        logmsg (_("HHCTA058E Error seeking to offset %8.8lX "
-                "in file %s: %s\n"),
-                blkpos, omadesc->filename, strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_LOCATEERR,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Read fixed length block or short final block */
-    blklen = read (dev->fd, buf, omadesc->blklen);
-
-    /* Handle read error condition */
-    if (blklen < 0)
-    {
-        logmsg (_("HHCTA059E Error reading data block "
-                "at offset %8.8lX in file %s: %s\n"),
-                blkpos, omadesc->filename,
-                strerror(errno));
-
-        build_senseX(TAPE_BSENSE_READFAIL,dev,unitstat,code);
-        return -1;
-    }
-
-    /* At end of file return zero to indicate tapemark */
-    if (!blklen)
-    {
-        close (dev->fd);
-        dev->fd = -1;
-        dev->curfilen++;
-        dev->nxtblkpos = 0;
-        dev->prvblkpos = -1;
-        return 0;
-    }
-
-    /* Calculate the offsets of the next and previous blocks */
-    dev->nxtblkpos = blkpos + blklen;
-    dev->prvblkpos = blkpos;
-
-    /* Return block length, or zero to indicate tapemark */
-    return blklen;
-
-} /* end function read_omafixed */
-
-/*-------------------------------------------------------------------*/
-/* Read a block from an OMA tape file in ASCII text format           */
-/*                                                                   */
-/* If successful, return value is block length read.                 */
-/* If a tapemark was read, the file is closed, the current file      */
-/* number in the device block is incremented so that the next file   */
-/* will be opened by the next CCW, and the return value is zero.     */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*                                                                   */
-/* The buf parameter points to the I/O buffer during a read          */
-/* operation, or is NULL for a forward space block operation.        */
-/*-------------------------------------------------------------------*/
-static int read_omatext (DEVBLK *dev, OMATAPE_DESC *omadesc,
-                        BYTE *buf, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-off_t           rcoff;                  /* Return code from lseek()  */
-int             num;                    /* Number of characters read */
-int             pos;                    /* Position in I/O buffer    */
-long            blkpos;                 /* Offset of block in file   */
-BYTE            c;                      /* Character work area       */
-
-    /* Initialize current block position */
-    blkpos = dev->nxtblkpos;
-
-    /* Seek to new current block position */
-    rcoff = lseek (dev->fd, blkpos, SEEK_SET);
-    if (rcoff < 0)
-    {
-        /* Handle seek error condition */
-        logmsg (_("HHCTA060E Error seeking to offset %8.8lX "
-                "in file %s: %s\n"),
-                blkpos, omadesc->filename, strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_LOCATEERR,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Read data from tape file until end of line */
-    for (num = 0, pos = 0; ; )
-    {
-        rc = read (dev->fd, &c, 1);
-        if (rc < 1) break;
-
-        /* Treat X'1A' as end of file */
-        if ('\x1A' == c)
-        {
-            rc = 0;
-            break;
-        }
-
-        /* Count characters read */
-        num++;
-
-        /* Ignore carriage return character */
-        if ('\r' == c) continue;
-
-        /* Exit if newline character */
-        if ('\n' == c) break;
-
-        /* Ignore characters in excess of I/O buffer length */
-        if (pos >= MAX_BLKLEN) continue;
-
-        /* Translate character to EBCDIC and copy to I/O buffer */
-        if (buf)
-            buf[pos] = host_to_guest(c);
-
-        /* Count characters copied or skipped */
-        pos++;
-
-    } /* end for(num) */
-
-    /* At end of file return zero to indicate tapemark */
-    if (!rc && !num)
-    {
-        close (dev->fd);
-        dev->fd = -1;
-        dev->curfilen++;
-        dev->nxtblkpos = 0;
-        dev->prvblkpos = -1;
-        return 0;
-    }
-
-    /* Handle read error condition */
-    if (rc < 0)
-    {
-        logmsg (_("HHCTA061E Error reading data block "
-                "at offset %8.8lX in file %s: %s\n"),
-                blkpos, omadesc->filename,
-                strerror(errno));
-
-        build_senseX(TAPE_BSENSE_READFAIL,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Check for block not terminated by newline */
-    if (rc < 1)
-    {
-        logmsg (_("HHCTA062E Unexpected end of file in data block "
-                "at offset %8.8lX in file %s\n"),
-                blkpos, omadesc->filename);
-
-        /* Set unit check with data check and partial record */
-        build_senseX(TAPE_BSENSE_BLOCKSHORT,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Check for invalid zero length block */
-    if (!pos)
-    {
-        logmsg (_("HHCTA063E Invalid zero length block "
-                "at offset %8.8lX in file %s\n"),
-                blkpos, omadesc->filename);
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_BLOCKSHORT,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Calculate the offsets of the next and previous blocks */
-    dev->nxtblkpos = blkpos + num;
-    dev->prvblkpos = blkpos;
-
-    /* Return block length */
-    return pos;
-
-} /* end function read_omatext */
-
-/*-------------------------------------------------------------------*/
-/* Read a block from an OMA - Selection of format done here          */
-/*                                                                   */
-/* If successful, return value is block length read.                 */
-/* If a tapemark was read, the file is closed, the current file      */
-/* number in the device block is incremented so that the next file   */
-/* will be opened by the next CCW, and the return value is zero.     */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*                                                                   */
-/* The buf parameter points to the I/O buffer during a read          */
-/* operation, or is NULL for a forward space block operation.        */
-/*-------------------------------------------------------------------*/
-static int read_omatape (DEVBLK *dev,
-                        BYTE *buf, BYTE *unitstat,BYTE code)
-{
-int len;
-OMATAPE_DESC *omadesc;
-    omadesc = (OMATAPE_DESC*)(dev->omadesc);
-    omadesc += (dev->curfilen-1);
-
-    switch (omadesc->format)
-    {
-    default:
-    case 'H':
-        len = read_omaheaders (dev, omadesc, buf, unitstat,code);
-        break;
-    case 'F':
-        len = read_omafixed (dev, omadesc, buf, unitstat,code);
-        break;
-    case 'T':
-        len = read_omatext (dev, omadesc, buf, unitstat,code);
-        break;
-    case 'X':
-        len=0;
-        dev->curfilen++;
-        break;
-    case 'E':
-        len=0;
-        break;
-    } /* end switch(omadesc->format) */
-
-    if (len >= 0)
-        dev->blockid++;
-
-    return len;
-}
-
-/*-------------------------------------------------------------------*/
-/* Forward space to next file of OMA tape device                     */
-/*                                                                   */
-/* For OMA tape devices, the forward space file operation is         */
-/* achieved by closing the current file, and incrementing the        */
-/* current file number in the device block, which causes the         */
-/* next file will be opened when the next CCW is processed.          */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int fsf_omatape (DEVBLK *dev, BYTE *unitstat,BYTE code)
-{
-    UNREFERENCED(unitstat);
-    UNREFERENCED(code);
-
-    /* Close the current OMA file */
-    if (dev->fd >= 0)
-        close (dev->fd);
-    dev->fd = -1;
-    dev->nxtblkpos = 0;
-    dev->prvblkpos = -1;
-
-    /* Increment the current file number */
-    dev->curfilen++;
-
-    /* Return normal status */
-    return 0;
-
-} /* end function fsf_omatape */
-
-/*-------------------------------------------------------------------*/
-/* Forward space over next block of OMA file in OMA headers format   */
-/*                                                                   */
-/* If successful, return value is the length of the block skipped.   */
-/* If the block skipped was a tapemark, the return value is zero,    */
-/* the file is closed, and the current file number in the device     */
-/* block is incremented so that the next file belonging to the OMA   */
-/* tape will be opened when the next CCW is executed.                */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int fsb_omaheaders (DEVBLK *dev, OMATAPE_DESC *omadesc,
-                        BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-long            blkpos;                 /* Offset of block header    */
-S32             curblkl;                /* Length of current block   */
-S32             prvhdro;                /* Offset of previous header */
-S32             nxthdro;                /* Offset of next header     */
-
-    /* Initialize current block position */
-    blkpos = dev->nxtblkpos;
-
-    /* Read the 16-byte block header */
-    rc = readhdr_omaheaders (dev, omadesc, blkpos, &curblkl,
-                            &prvhdro, &nxthdro, unitstat,code);
-    if (rc < 0) return -1;
-
-    /* Check if tapemark was skipped */
-    if (-1 == curblkl)
-    {
-        /* Close the current OMA file */
-        if (dev->fd >= 0)
-            close (dev->fd);
-        dev->fd = -1;
-        dev->nxtblkpos = 0;
-        dev->prvblkpos = -1;
-
-        /* Increment the file number */
-        dev->curfilen++;
-
-        /* Return zero to indicate tapemark */
-        return 0;
-    }
-
-    /* Update the offsets of the next and previous blocks */
-    dev->nxtblkpos = nxthdro;
-    dev->prvblkpos = blkpos;
-
-    /* Return block length */
-    return curblkl;
-
-} /* end function fsb_omaheaders */
-
-/*-------------------------------------------------------------------*/
-/* Forward space over next block of OMA file in fixed block format   */
-/*                                                                   */
-/* If successful, return value is the length of the block skipped.   */
-/* If already at end of file, the return value is zero,              */
-/* the file is closed, and the current file number in the device     */
-/* block is incremented so that the next file belonging to the OMA   */
-/* tape will be opened when the next CCW is executed.                */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int fsb_omafixed (DEVBLK *dev, OMATAPE_DESC *omadesc,
-                        BYTE *unitstat,BYTE code)
-{
-off_t           eofpos;                 /* Offset of end of file     */
-off_t           blkpos;                 /* Offset of current block   */
-int             curblkl;                /* Length of current block   */
-
-    /* Initialize current block position */
-    blkpos = dev->nxtblkpos;
-
-    /* Seek to end of file to determine file size */
-    eofpos = lseek (dev->fd, 0, SEEK_END);
-    if (eofpos < 0 || eofpos >= LONG_MAX)
-    {
-        /* Handle seek error condition */
-        if ( eofpos >= LONG_MAX) errno = EOVERFLOW;
-        logmsg (_("HHCTA064E Error seeking to end of file %s: %s\n"),
-                omadesc->filename, strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_LOCATEERR,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Check if already at end of file */
-    if (blkpos >= eofpos)
-    {
-        /* Close the current OMA file */
-        if (dev->fd >= 0)
-            close (dev->fd);
-        dev->fd = -1;
-        dev->nxtblkpos = 0;
-        dev->prvblkpos = -1;
-
-        /* Increment the file number */
-        dev->curfilen++;
-
-        /* Return zero to indicate tapemark */
-        return 0;
-    }
-
-    /* Calculate current block length */
-    curblkl = (int)(eofpos - blkpos);
-    if (curblkl > omadesc->blklen)
-        curblkl = omadesc->blklen;
-
-    /* Update the offsets of the next and previous blocks */
-    dev->nxtblkpos = (long)(blkpos + curblkl);
-    dev->prvblkpos = (long)(blkpos);
-
-    /* Return block length */
-    return curblkl;
-
-} /* end function fsb_omafixed */
-
-/*-------------------------------------------------------------------*/
-/* Forward space to next block of OMA file                           */
-/*                                                                   */
-/* If successful, return value is the length of the block skipped.   */
-/* If forward spaced over end of file, return value is 0.            */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int fsb_omatape (DEVBLK *dev, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-OMATAPE_DESC   *omadesc;                /* -> OMA descriptor entry   */
-
-    /* Point to the current file entry in the OMA descriptor table */
-    omadesc = (OMATAPE_DESC*)(dev->omadesc);
-    omadesc += (dev->curfilen-1);
-
-    /* Forward space block depending on OMA file type */
-    switch (omadesc->format)
-    {
-    default:
-    case 'H':
-        rc = fsb_omaheaders (dev, omadesc, unitstat,code);
-        break;
-    case 'F':
-        rc = fsb_omafixed (dev, omadesc, unitstat,code);
-        break;
-    case 'T':
-        rc = read_omatext (dev, omadesc, NULL, unitstat,code);
-        break;
-    } /* end switch(omadesc->format) */
-
-    if (rc >= 0) dev->blockid++;
-
-    return rc;
-
-} /* end function fsb_omatape */
-
-/*-------------------------------------------------------------------*/
-/* Backspace to previous file of OMA tape device                     */
-/*                                                                   */
-/* If the current file number is 1, then backspace file simply       */
-/* closes the file, setting the current position to start of tape.   */
-/* Otherwise, the current file is closed, the current file number    */
-/* is decremented, the new file is opened, and the new file is       */
-/* repositioned to just before the tape mark at the end of the file. */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*-------------------------------------------------------------------*/
-static int bsf_omatape (DEVBLK *dev, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-off_t           pos;                    /* File position             */
-OMATAPE_DESC   *omadesc;                /* -> OMA descriptor entry   */
-S32             curblkl;                /* Length of current block   */
-S32             prvhdro;                /* Offset of previous header */
-S32             nxthdro;                /* Offset of next header     */
-
-    /* Close the current OMA file */
-    if (dev->fd >= 0)
-        close (dev->fd);
-    dev->fd = -1;
-    dev->nxtblkpos = 0;
-    dev->prvblkpos = -1;
-
-    /* Exit with tape at load point if currently on first file */
-    if (dev->curfilen <= 1)
-    {
-        build_senseX(TAPE_BSENSE_LOADPTERR,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Decrement current file number */
-    dev->curfilen--;
-
-    /* Point to the current file entry in the OMA descriptor table */
-    omadesc = (OMATAPE_DESC*)(dev->omadesc);
-    omadesc += (dev->curfilen-1);
-
-    /* Open the new current file */
-    rc = open_omatape (dev, unitstat,code);
-    if (rc < 0) return rc;
-
-    /* Reposition before tapemark header at end of file, or
-       to end of file for fixed block or ASCII text files */
-    pos = 0;
-    if ( 'H' == omadesc->format )
-        pos -= sizeof(OMATAPE_BLKHDR);
-
-    pos = lseek (dev->fd, pos, SEEK_END);
-    if (pos < 0)
-    {
-        /* Handle seek error condition */
-        logmsg (_("HHCTA065E Error seeking to end of file %s: %s\n"),
-                omadesc->filename, strerror(errno));
-
-        /* Set unit check with equipment check */
-        build_senseX(TAPE_BSENSE_LOCATEERR,dev,unitstat,code);
-        dev->sense[0] = SENSE_EC;
-        *unitstat = CSW_CE | CSW_DE | CSW_UC;
-        return -1;
-    }
-    dev->nxtblkpos = pos;
-    dev->prvblkpos = -1;
-
-    /* Determine the offset of the previous block */
-    switch (omadesc->format)
-    {
-    case 'H':
-        /* For OMA headers files, read the tapemark header
-           and extract the previous block offset */
-        rc = readhdr_omaheaders (dev, omadesc, pos, &curblkl,
-                                &prvhdro, &nxthdro, unitstat,code);
-        if (rc < 0) return -1;
-        dev->prvblkpos = prvhdro;
-        break;
-    case 'F':
-        /* For OMA fixed block files, calculate the previous block
-           offset allowing for a possible short final block */
-        pos = (pos + omadesc->blklen - 1) / omadesc->blklen;
-        dev->prvblkpos = (pos > 0 ? (pos - 1) * omadesc->blklen : -1);
-        break;
-    case 'T':
-        /* For OMA ASCII text files, the previous block is unknown */
-        dev->prvblkpos = -1;
-        break;
-    } /* end switch(omadesc->format) */
-
-    /* Return normal status */
-    return 0;
-
-} /* end function bsf_omatape */
-
-/*-------------------------------------------------------------------*/
-/* Backspace to previous block of OMA file                           */
-/*                                                                   */
-/* If successful, return value is +1.                                */
-/* If current position is at start of a file, then a backspace file  */
-/* operation is performed to reset the position to the end of the    */
-/* previous file, and the return value is zero.                      */
-/* If error, return value is -1 and unitstat is set to CE+DE+UC      */
-/*                                                                   */
-/* Note that for ASCII text files, the previous block position is    */
-/* known only if the previous CCW was a read or a write, so any      */
-/* attempt to issue more than one consecutive backspace block on     */
-/* an ASCII text file will fail with unit check status.              */
-/*-------------------------------------------------------------------*/
-static int bsb_omatape (DEVBLK *dev, BYTE *unitstat,BYTE code)
-{
-int             rc;                     /* Return code               */
-OMATAPE_DESC   *omadesc;                /* -> OMA descriptor entry   */
-long            blkpos;                 /* Offset of block header    */
-S32             curblkl;                /* Length of current block   */
-S32             prvhdro;                /* Offset of previous header */
-S32             nxthdro;                /* Offset of next header     */
-
-    /* Point to the current file entry in the OMA descriptor table */
-    omadesc = (OMATAPE_DESC*)(dev->omadesc);
-    omadesc += (dev->curfilen-1);
-
-    /* Backspace file if current position is at start of file */
-    if (!dev->nxtblkpos)
-    {
-        /* Unit check if already at start of tape */
-        if (dev->curfilen <= 1)
-        {
-            build_senseX(TAPE_BSENSE_LOADPTERR,dev,unitstat,code);
-            return -1;
-        }
-
-        /* Perform backspace file operation */
-        rc = bsf_omatape (dev, unitstat,code);
-        if (rc < 0) return -1;
-
-        dev->blockid--;
-
-        /* Return zero to indicate tapemark detected */
-        return 0;
-    }
-
-    /* Unit check if previous block position is unknown */
-    if (dev->prvblkpos < 0)
-    {
-        build_senseX(TAPE_BSENSE_LOADPTERR,dev,unitstat,code);
-        return -1;
-    }
-
-    /* Backspace to previous block position */
-    blkpos = dev->prvblkpos;
-
-    /* Determine new previous block position */
-    switch (omadesc->format)
-    {
-    case 'H':
-        /* For OMA headers files, read the previous block header to
-           extract the block length and new previous block offset */
-        rc = readhdr_omaheaders (dev, omadesc, blkpos, &curblkl,
-                                &prvhdro, &nxthdro, unitstat,code);
-        if (rc < 0) return -1;
-        break;
-    case 'F':
-        /* For OMA fixed block files, calculate the new previous
-           block offset by subtracting the fixed block length */
-        if (blkpos >= omadesc->blklen)
-            prvhdro = blkpos - omadesc->blklen;
-        else
-            prvhdro = -1;
-        break;
-    case 'T':
-        /* For OMA ASCII text files, new previous block is unknown */
-        prvhdro = -1;
-        break;
-    } /* end switch(omadesc->format) */
-
-    /* Update the offsets of the next and previous blocks */
-    dev->nxtblkpos = blkpos;
-    dev->prvblkpos = prvhdro;
-
-    dev->blockid--;
-
-    /* Return +1 to indicate backspace successful */
-    return +1;
-
-} /* end function bsb_omatape */
-
-
-/*-------------------------------------------------------------------*/
-/* Close an OMA tape file set                                        */
-/*                                                                   */
-/* All errors are ignored                                            */
-/*-------------------------------------------------------------------*/
-static void close_omatape2(DEVBLK *dev)
-{
-    if (dev->fd >= 0)
-        close (dev->fd);
-    dev->fd=-1;
-    if (dev->omadesc)
+    char*       short_descr;            /* Short descr from fmttab   */
+    int         i;                      /* Loop control              */
+    int         rc, optrc;              /* various rtns return codes */
+    union {                             /* Parser results            */
+        U32     num;                    /* Parser results            */
+        BYTE    str[ 80 ];              /* Parser results            */
+    } res;                              /* Parser results            */
+
+    /* Release the previous OMA descriptor array if allocated */
+    if (dev->omadesc != NULL)
     {
         free (dev->omadesc);
         dev->omadesc = NULL;
     }
 
-    /* Reset the device dependent fields */
-    dev->nxtblkpos=0;
-    dev->prvblkpos=-1;
-    dev->curfilen=1;
-    dev->blockid=0;
-    dev->poserror = 0;
-    dev->omafiles = 0;
-    return;
-}
-/*-------------------------------------------------------------------*/
-/* Close an OMA tape file set                                        */
-/*                                                                   */
-/* All errors are ignored                                            */
-/* Change the filename to '*' - unloaded                             */
-/* TAPE REALLY UNLOADED                                              */
-/*-------------------------------------------------------------------*/
-static void close_omatape(DEVBLK *dev)
-{
-    close_omatape2(dev);
-    strcpy(dev->filename,TAPE_UNLOADED);
-    dev->blockid = 0;
-    dev->poserror = 0;
-    return;
-}
-/*-------------------------------------------------------------------*/
-/* Rewind an OMA tape file set                                       */
-/*                                                                   */
-/* All errors are ignored                                            */
-/*-------------------------------------------------------------------*/
-static int rewind_omatape(DEVBLK *dev,BYTE *unitstat,BYTE code)
-{
-    UNREFERENCED(unitstat);
-    UNREFERENCED(code);
-    close_omatape2(dev);
-    return 0;
-}
-/*-------------------------------------------------------------------*/
-/*      Get 3480/3490/3590 Display text in 'human' form              */
-/* If not a 3480/3490/3590, then just update status if a SCSI tape   */
-/*-------------------------------------------------------------------*/
-static void GetDisplayMsg( DEVBLK *dev, char *msgbfr, size_t  lenbfr )
-{
-    msgbfr[0]=0;
+    /* The first argument is the file name */
+    if (argc == 0 || strlen(argv[0]) > sizeof(dev->filename)-1)
+        strcpy (dev->filename, TAPE_UNLOADED);
+    else
+        /* Save the file name in the device block */
+        strcpy (dev->filename, argv[0]);
 
-    if ( !dev->tdparms.displayfeat )
-    {
-        // (drive doesn't have a display)
+    /* Determine tape device type... */
+    VERIFY( gettapetype( dev, &short_descr ) == 0 );
+
+    /* (sanity check) */
+    ASSERT(dev->tapedevt != TAPEDEVT_UNKNOWN);
+    ASSERT(dev->tmh != NULL);
+    ASSERT(short_descr != NULL);
+
+    /* Initialize device dependent fields */
+    dev->fd                = -1;
 #if defined(OPTION_SCSI_TAPE)
-        if (TAPEDEVT_SCSITAPE == dev->tapedevt)
-            update_status_scsitape( dev, 1 );
+    dev->sstat               = GMT_DR_OPEN(-1);
+    dev->stape_getstat_sstat = GMT_DR_OPEN(-1);
 #endif
-        return;
-    }
+    dev->omadesc           = NULL;
+    dev->omafiles          = 0;
+    dev->curfilen          = 1;
+    dev->nxtblkpos         = 0;
+    dev->prvblkpos         = -1;
+    dev->curblkrem         = 0;
+    dev->curbufoff         = 0;
+    dev->readonly          = 0;
+    dev->hetb              = NULL;
+    dev->tdparms.compress  = HETDFLT_COMPRESS;
+    dev->tdparms.method    = HETDFLT_METHOD;
+    dev->tdparms.level     = HETDFLT_LEVEL;
+    dev->tdparms.chksize   = HETDFLT_CHKSIZE;
+    dev->tdparms.maxsize   = 0;        // no max size     (default)
+    dev->eotmargin         = 128*1024; // 128K EOT margin (default)
+    dev->tdparms.logical_readonly = 0; // read/write      (default)
+#if defined( OPTION_TAPE_AUTOMOUNT )
+    dev->noautomount       = 0;
+#endif
 
-    if ( !IS_TAPEDISPTYP_SYSMSG( dev ) )
+#if defined(OPTION_SCSI_TAPE)
+    // Real 3590's support Erase Gap and use 32-bit blockids.
+
+    if (TAPEDEVT_SCSITAPE == dev->tapedevt
+        &&     0x3590     == dev->devtype)
     {
-        // -------------------------
-        //   Display Host message
-        // -------------------------
+        dev->stape_no_erg   = 0;        // (default for 3590 SCSI)
+        dev->stape_blkid_32 = 1;        // (default for 3590 SCSI)
+    }
+#endif
 
-        // "When bit 3 (alternate) is set to 1, then
-        //  bits 4 (blink) and 5 (low/high) are ignored."
+#define  HHCTA078E()  logmsg (_("HHCTA078E Device %4.4X: option '%s' not valid for %s\n"), \
+                              dev->devnum, argv[i], short_descr)
 
-        strlcpy( msgbfr, "\"", lenbfr );
-
-        if ( dev->tapedispflags & TAPEDISPFLG_ALTERNATE )
+    /* Process remaining options */
+    rc = 0;
+    for (i = 1; i < argc; i++)
+    {
+        optrc = 0;
+        switch (parser (&ptab[0], argv[i], &res))
         {
-            char  msg1[9];
-            char  msg2[9];
+        case TDPARM_NONE:
+            logmsg (_("HHCTA067E Device %4.4X: option '%s' unrecognized\n"),
+                dev->devnum, argv[i]);
+            optrc = -1;
+            break;
 
-            strlcpy ( msg1,   dev->tapemsg1, sizeof(msg1) );
-            strlcat ( msg1,   "        ",    sizeof(msg1) );
-            strlcpy ( msg2,   dev->tapemsg2, sizeof(msg2) );
-            strlcat ( msg2,   "        ",    sizeof(msg2) );
+        case TDPARM_AWSTAPE:
+            if (0
+                || TAPEDEVT_SCSITAPE == dev->tapedevt
+                || TAPEDEVT_FAKETAPE == dev->tapedevt
+            )
+            {
+                HHCTA078E(); optrc = -1; break;
+            }
+            dev->tdparms.compress = FALSE;
+            dev->tdparms.chksize = 4096;
+            break;
 
-            strlcat ( msgbfr, msg1,             lenbfr );
-            strlcat ( msgbfr, "\" / \"",        lenbfr );
-            strlcat ( msgbfr, msg2,             lenbfr );
-            strlcat ( msgbfr, "\"",             lenbfr );
-            strlcat ( msgbfr, " (alternating)", lenbfr );
+        case TDPARM_IDRC:
+        case TDPARM_COMPRESS:
+            if (0
+                || TAPEDEVT_SCSITAPE == dev->tapedevt
+                || TAPEDEVT_FAKETAPE == dev->tapedevt
+            )
+            {
+                HHCTA078E(); optrc = -1; break;
+            }
+            dev->tdparms.compress = (res.num ? TRUE : FALSE);
+            break;
+
+        case TDPARM_METHOD:
+            if (0
+                || TAPEDEVT_SCSITAPE == dev->tapedevt
+                || TAPEDEVT_FAKETAPE == dev->tapedevt
+            )
+            {
+                HHCTA078E(); optrc = -1; break;
+            }
+            if (res.num < HETMIN_METHOD || res.num > HETMAX_METHOD)
+            {
+                logmsg(_("HHCTA068E Device %4.4X: option '%s': method must be within %u-%u\n"),
+                    dev->devnum, argv[i], HETMIN_METHOD, HETMAX_METHOD);
+                optrc = -1;
+                break;
+            }
+            dev->tdparms.method = res.num;
+            break;
+
+        case TDPARM_LEVEL:
+            if (0
+                || TAPEDEVT_SCSITAPE == dev->tapedevt
+                || TAPEDEVT_FAKETAPE == dev->tapedevt
+            )
+            {
+                HHCTA078E(); optrc = -1; break;
+            }
+            if (res.num < HETMIN_LEVEL || res.num > HETMAX_LEVEL)
+            {
+                logmsg(_("HHCTA069E Device %4.4X: option '%s': level must be within %u-%u\n"),
+                    dev->devnum, argv[i], HETMIN_LEVEL, HETMAX_LEVEL);
+                optrc = -1;
+                break;
+            }
+            dev->tdparms.level = res.num;
+            break;
+
+        case TDPARM_CHKSIZE:
+            if (0
+                || TAPEDEVT_SCSITAPE == dev->tapedevt
+                || TAPEDEVT_FAKETAPE == dev->tapedevt
+            )
+            {
+                HHCTA078E(); optrc = -1; break;
+            }
+            if (res.num < HETMIN_CHUNKSIZE || res.num > HETMAX_CHUNKSIZE)
+            {
+                logmsg (_("HHCTA070E Device %4.4X: option '%s': chunksize must be within %u-%u\n"),
+                    dev->devnum, argv[i], HETMIN_CHUNKSIZE, HETMAX_CHUNKSIZE);
+                optrc = -1;
+                break;
+            }
+            dev->tdparms.chksize = res.num;
+            break;
+
+        case TDPARM_MAXSIZE:
+            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
+            {
+                HHCTA078E(); optrc = -1; break;
+            }
+            dev->tdparms.maxsize=res.num;
+            break;
+
+        case TDPARM_MAXSIZEK:
+            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
+            {
+                HHCTA078E(); optrc = -1; break;
+            }
+            dev->tdparms.maxsize=res.num*1024;
+            break;
+
+        case TDPARM_MAXSIZEM:
+            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
+            {
+                HHCTA078E(); optrc = -1; break;
+            }
+            dev->tdparms.maxsize=res.num*1024*1024;
+            break;
+
+        case TDPARM_EOTMARGIN:
+            dev->eotmargin=res.num;
+            break;
+
+        case TDPARM_STRICTSIZE:
+            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
+            {
+                HHCTA078E(); optrc = -1; break;
+            }
+            dev->tdparms.strictsize=res.num;
+            break;
+
+        case TDPARM_READONLY:
+            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
+            {
+                HHCTA078E(); optrc = -1; break;
+            }
+            dev->tdparms.logical_readonly=(res.num ? 1 : 0 );
+            break;
+
+        case TDPARM_RO:
+        case TDPARM_NORING:
+            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
+            {
+                HHCTA078E(); optrc = -1; break;
+            }
+            dev->tdparms.logical_readonly=1;
+            break;
+
+        case TDPARM_RW:
+        case TDPARM_RING:
+            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
+            {
+                HHCTA078E(); optrc = -1; break;
+            }
+            dev->tdparms.logical_readonly=0;
+            break;
+
+        case TDPARM_DEONIRQ:
+            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
+            {
+                HHCTA078E(); optrc = -1; break;
+            }
+            dev->tdparms.deonirq=(res.num ? 1 : 0 );
+            break;
+
+#if defined( OPTION_TAPE_AUTOMOUNT )
+
+        case TDPARM_NOAUTOMOUNT:
+            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
+            {
+                HHCTA078E(); optrc = -1; break;
+            }
+            dev->noautomount = 1;
+            break;
+
+#endif /* OPTION_TAPE_AUTOMOUNT */
+
+#if defined(OPTION_SCSI_TAPE)
+        case TDPARM_BLKID22:
+        case TDPARM_BLKID24:
+            if (TAPEDEVT_SCSITAPE != dev->tapedevt)
+            {
+                HHCTA078E(); optrc = -1; break;
+            }
+            dev->stape_blkid_32 = 0;
+            break;
+
+        case TDPARM_BLKID32:
+            if (TAPEDEVT_SCSITAPE != dev->tapedevt)
+            {
+                HHCTA078E(); optrc = -1; break;
+            }
+            dev->stape_blkid_32 = 1;
+            break;
+
+        case TDPARM_NOERG:
+            if (TAPEDEVT_SCSITAPE != dev->tapedevt)
+            {
+                HHCTA078E(); optrc = -1; break;
+            }
+            dev->stape_no_erg = 1;
+            break;
+#endif /* defined(OPTION_SCSI_TAPE) */
+
+        default:
+            logmsg(_("HHCTA071E Device %4.4X: option '%s': parse error\n"),
+                dev->devnum, argv[i]);
+            optrc = -1;
+            break;
+
+        } // end switch (parser (&ptab[0], argv[i], &res))
+
+        if (optrc < 0)
+            rc = -1;
+        else
+            logmsg (_("HHCTA066I Device %4.4X: option '%s' accepted.\n"),
+                dev->devnum, argv[i]);
+
+    } // end for (i = 1; i < argc; i++)
+
+    if (0 != rc)
+        return -1;
+
+    /* Adjust the display if necessary */
+    if(dev->tdparms.displayfeat)
+    {
+        if(strcmp(dev->filename,TAPE_UNLOADED)==0)
+        {
+            /* NO tape is loaded */
+            if(TAPEDISPTYP_UMOUNTMOUNT == dev->tapedisptype)
+            {
+                /* A new tape SHOULD be mounted */
+                dev->tapedisptype   = TAPEDISPTYP_MOUNT;
+                dev->tapedispflags |= TAPEDISPFLG_REQAUTOMNT;
+                strlcpy( dev->tapemsg1, dev->tapemsg2, sizeof(dev->tapemsg1) );
+            }
+            else if(TAPEDISPTYP_UNMOUNT == dev->tapedisptype)
+            {
+                dev->tapedisptype = TAPEDISPTYP_IDLE;
+            }
         }
         else
         {
-            if ( dev->tapedispflags & TAPEDISPFLG_MESSAGE2 )
-                strlcat( msgbfr, dev->tapemsg2, lenbfr );
-            else
-                strlcat( msgbfr, dev->tapemsg1, lenbfr );
-
-            strlcat ( msgbfr, "\"",          lenbfr );
-
-            if ( dev->tapedispflags & TAPEDISPFLG_BLINKING )
-                strlcat ( msgbfr, " (blinking)", lenbfr );
+            /* A tape IS already loaded */
+            dev->tapedisptype = TAPEDISPTYP_IDLE;
         }
-
-        if ( dev->tapedispflags & TAPEDISPFLG_AUTOLOADER )
-            strlcat( msgbfr, " (AUTOLOADER)", lenbfr );
-
-        return;
     }
+    UpdateDisplay(dev);
+    ReqAutoMount(dev);
+    return 0;
 
-    // ----------------------------------------------
-    //   Display SYS message (Unit/Device message)
-    // ----------------------------------------------
+} /* end function mountnewtape */
 
-    // First, build the system message, then move it into
-    // the caller's buffer...
 
-    strlcpy( dev->tapesysmsg, "\"", sizeof(dev->tapesysmsg) );
+/*-------------------------------------------------------------------*/
+/* Query the device definition                                       */
+/*-------------------------------------------------------------------*/
+void tapedev_query_device ( DEVBLK *dev, char **class,
+                int buflen, char *buffer )
+{
+    char devparms[ MAX_PATH+1 + 128 ];
+    char dispmsg [ 256 ];
 
-    switch ( dev->tapedisptype )
+    BEGIN_DEVICE_CLASS_QUERY( "TAPE", dev, class, buflen, buffer );
+
+    *buffer = 0;
+    devparms[0]=0;
+    dispmsg [0]=0;
+
+    GetDisplayMsg( dev, dispmsg, sizeof(dispmsg) );
+
+    if (strchr(dev->filename,' ')) strlcat( devparms, "\"",          sizeof(devparms));
+                                   strlcat( devparms, dev->filename, sizeof(devparms));
+    if (strchr(dev->filename,' ')) strlcat( devparms, "\"",          sizeof(devparms));
+
+#if defined( OPTION_TAPE_AUTOMOUNT )
+
+    if (dev->noautomount)
+        strlcat( devparms, " noautomount", sizeof(devparms));
+
+#endif /* OPTION_TAPE_AUTOMOUNT */
+
+    if ( strcmp( dev->filename, TAPE_UNLOADED ) == 0 )
     {
-    case TAPEDISPTYP_IDLE:
-    case TAPEDISPTYP_WAITACT:
-    default:
-        // Blank display if no tape loaded...
-        if ( !dev->tmh->tapeloaded( dev, NULL, 0 ) )
-        {
-            strlcat( dev->tapesysmsg, "        ", sizeof(dev->tapesysmsg) );
-            break;
-        }
-
-        // " NT RDY " if tape IS loaded, but not ready...
-        // (IBM docs say " NT RDY " means "Loaded but not ready")
-
-        ASSERT( dev->tmh->tapeloaded( dev, NULL, 0 ) );
-
-        if (0
-            || dev->fd < 0
 #if defined(OPTION_SCSI_TAPE)
-            || (1
-                && TAPEDEVT_SCSITAPE == dev->tapedevt
-                && !STS_ONLINE( dev )
-               )
+        if ( TAPEDEVT_SCSITAPE == dev->tapedevt )
+        {
+            if (0x3590 == dev->devtype) // emulating 3590
+            {
+                if (!dev->stape_blkid_32 ) strlcat( devparms, " --blkid-22", sizeof(devparms) );
+            }
+            else // emulating 3480, 3490
+            {
+                if ( dev->stape_blkid_32 ) strlcat( devparms, " --blkid-32", sizeof(devparms) );
+            }
+            if ( dev->stape_no_erg ) strlcat( devparms, " --no-erg", sizeof(devparms) );
+        }
+#endif
+        snprintf(buffer, buflen, "%s%s%s",
+            devparms,
+            dev->tdparms.displayfeat ? ", Display: " : "",
+            dev->tdparms.displayfeat ?    dispmsg    : "");
+    }
+    else // (filename was specified)
+    {
+        char tapepos[64]; tapepos[0]=0;
+
+        if ( TAPEDEVT_SCSITAPE != dev->tapedevt )
+        {
+            snprintf( tapepos, sizeof(tapepos), "[%d:%08"I64_FMT"X] ",
+                dev->curfilen, dev->nxtblkpos );
+            tapepos[sizeof(tapepos)-1] = 0;
+        }
+#if defined(OPTION_SCSI_TAPE)
+        else // (this is a SCSI tape drive)
+        {
+            if (STS_BOT( dev ))
+            {
+                dev->eotwarning = 0;
+                strlcat(tapepos,"*BOT* ",sizeof(tapepos));
+            }
+
+            // If tape has a display, then GetDisplayMsg already
+            // appended *FP* for us. Otherwise we need to do it.
+
+            if ( !dev->tdparms.displayfeat )
+                if (STS_WR_PROT( dev ))
+                    strlcat(tapepos,"*FP* ",sizeof(tapepos));
+
+            if (0x3590 == dev->devtype) // emulating 3590
+            {
+                if (!dev->stape_blkid_32 ) strlcat( devparms, " --blkid-22", sizeof(devparms) );
+            }
+            else // emulating 3480, 3490
+            {
+                if ( dev->stape_blkid_32 ) strlcat( devparms, " --blkid-32", sizeof(devparms) );
+            }
+            if ( dev->stape_no_erg ) strlcat( devparms, " --no-erg", sizeof(devparms) );
+        }
+#endif
+
+        if ( TAPEDEVT_SCSITAPE != dev->tapedevt
+#if defined(OPTION_SCSI_TAPE)
+            || !STS_NOT_MOUNTED(dev)
 #endif
         )
         {
-            strlcat( dev->tapesysmsg, " NT RDY ", sizeof(dev->tapesysmsg) );
-            break;
+            // Not a SCSI tape,  -or-  mounted SCSI tape...
+
+            snprintf (buffer, buflen, "%s%s %s%s%s",
+
+                devparms, (dev->readonly ? " ro" : ""),
+
+                tapepos,
+                dev->tdparms.displayfeat ? "Display: " : "",
+                dev->tdparms.displayfeat ?  dispmsg    : "");
         }
+        else /* ( TAPEDEVT_SCSITAPE == dev->tapedevt && STS_NOT_MOUNTED(dev) ) */
+        {
+            // UNmounted SCSI tape...
 
-        // Otherwise tape is loaded and ready  -->  "READY"
+            snprintf (buffer, buflen, "%s%s (%sNOTAPE)%s%s",
 
-        ASSERT( dev->tmh->tapeloaded( dev, NULL, 0 ) );
+                devparms, (dev->readonly ? " ro" : ""),
 
-        strlcat ( dev->tapesysmsg, " READY  ", sizeof(dev->tapesysmsg) );
-        strlcat( dev->tapesysmsg, "\"", sizeof(dev->tapesysmsg) );
-
-        if (0
-            || dev->readonly
-#if defined(OPTION_SCSI_TAPE)
-            || (1
-                &&  TAPEDEVT_SCSITAPE == dev->tapedevt
-                &&  STS_WR_PROT( dev )
-               )
-#endif
-        )
-            // (append "file protect" indicator)
-            strlcat ( dev->tapesysmsg, " *FP*", sizeof(dev->tapesysmsg) );
-
-        // Copy system message to caller's buffer
-        strlcpy( msgbfr, dev->tapesysmsg, lenbfr );
-        return;
-
-    case TAPEDISPTYP_ERASING:
-        strlcat ( dev->tapesysmsg, " ERASING", sizeof(dev->tapesysmsg) );
-        break;
-
-    case TAPEDISPTYP_REWINDING:
-        strlcat ( dev->tapesysmsg, "REWINDNG", sizeof(dev->tapesysmsg) );
-        break;
-
-    case TAPEDISPTYP_UNLOADING:
-        strlcat ( dev->tapesysmsg, "UNLOADNG", sizeof(dev->tapesysmsg) );
-        break;
-
-    case TAPEDISPTYP_CLEAN:
-        strlcat ( dev->tapesysmsg, "*CLEAN  ", sizeof(dev->tapesysmsg) );
-        break;
+                dev->fd < 0              ?   "closed; "  : "",
+                dev->tdparms.displayfeat ? ", Display: " : "",
+                dev->tdparms.displayfeat ?    dispmsg    : ""  );
+        }
     }
 
-    strlcat( dev->tapesysmsg, "\"", sizeof(dev->tapesysmsg) );
+    buffer[buflen-1] = 0;
 
-    // Copy system message to caller's buffer
-    strlcpy( msgbfr, dev->tapesysmsg, lenbfr );
-}
+} /* end function tapedev_query_device */
+
+
 /*-------------------------------------------------------------------*/
 /* Issue a message on the console indicating the display status      */
 /*-------------------------------------------------------------------*/
-static void UpdateDisplay( DEVBLK *dev )
+void UpdateDisplay( DEVBLK *dev )
 {
     if ( dev->tdparms.displayfeat )
     {
@@ -2914,13 +1740,15 @@ static void UpdateDisplay( DEVBLK *dev )
 #if defined(OPTION_SCSI_TAPE)
     else
         if (TAPEDEVT_SCSITAPE == dev->tapedevt)
-            update_status_scsitape( dev, 1 );
+            int_scsi_status_update( dev, 1 );
 #endif
 }
+
+
 /*-------------------------------------------------------------------*/
 /* Issue Automatic Mount Requests as defined by the display          */
 /*-------------------------------------------------------------------*/
-static void ReqAutoMount( DEVBLK *dev )
+void ReqAutoMount( DEVBLK *dev )
 {
     char   volser[7];
     BYTE   tapeloaded, autoload, mountreq, unmountreq, stdlbled, ascii, scratch;
@@ -2997,12 +1825,28 @@ static void ReqAutoMount( DEVBLK *dev )
     if (dev->fd < 0)
     {
         BYTE unitstat = 0, code = 0;
+
         dev->tmh->open( dev, &unitstat, code );
-        // PROGRAMMING NOTE: it's important to do TWO refreshes here
-        // to cause the auto-mount thread to get created. Doing only
-        // one doesn't work and doing two shouldn't cause any harm.
-        dev->tmh->passedeot( dev ); // (refresh potential stale status)
-        dev->tmh->passedeot( dev ); // (force auto-mount thread creation)
+
+#if defined(OPTION_SCSI_TAPE)
+        if (TAPEDEVT_SCSITAPE == dev->tapedevt)
+        {
+            // PROGRAMMING NOTE: it's important to do TWO refreshes here
+            // to cause the auto-mount thread to get created. Doing only
+            // one doesn't work and doing two shouldn't cause any harm.
+
+            GENTMH_PARMS  gen_parms;
+
+            gen_parms.action  = GENTMH_SCSI_ACTION_UPDATE_STATUS;
+            gen_parms.dev     = dev;
+
+            // (refresh potentially stale status)
+            VERIFY( dev->tmh->generic( &gen_parms ) == 0 );
+
+            // (force auto-mount thread creation)
+            VERIFY( dev->tmh->generic( &gen_parms ) == 0 );
+        }
+#endif /* defined(OPTION_SCSI_TAPE) */
     }
 
     /* Disabled when [non-SCSI] ACL in use */
@@ -3185,233 +2029,167 @@ static void ReqAutoMount( DEVBLK *dev )
 
 } /* end function ReqAutoMount */
 
+
 /*-------------------------------------------------------------------*/
-/* Load Display channel command processing...                        */
+/*      Get 3480/3490/3590 Display text in 'human' form              */
+/* If not a 3480/3490/3590, then just update status if a SCSI tape   */
 /*-------------------------------------------------------------------*/
-static void load_display (DEVBLK *dev, BYTE *buf, U16 count)
+void GetDisplayMsg( DEVBLK *dev, char *msgbfr, size_t  lenbfr )
 {
-U16             i;                      /* Array subscript           */
-char            msg1[9], msg2[9];       /* Message areas (ASCIIZ)    */
-BYTE            fcb;                    /* Format Control Byte       */
-BYTE            tapeloaded;             /* (boolean true/false)      */
-BYTE*           msg;                    /* (work buf ptr)            */
+    msgbfr[0]=0;
 
-    if ( !count )
-        return;
-
-    /* Pick up format control byte */
-    fcb = *buf;
-
-    /* Copy and translate messages... */
-
-    memset( msg1, 0, sizeof(msg1) );
-    memset( msg2, 0, sizeof(msg2) );
-
-    msg = buf+1;
-
-    for (i=0; *msg && i < 8 && ((i+1)+0) < count; i++)
-        msg1[i] = guest_to_host(*msg++);
-
-    msg = buf+1+8;
-
-    for (i=0; *msg && i < 8 && ((i+1)+8) < count; i++)
-        msg2[i] = guest_to_host(*msg++);
-
-    msg1[ sizeof(msg1) - 1 ] = 0;
-    msg2[ sizeof(msg2) - 1 ] = 0;
-
-    tapeloaded = dev->tmh->tapeloaded( dev, NULL, 0 );
-
-    switch ( fcb & FCB_FS )  // (high-order 3 bits)
+    if ( !dev->tdparms.displayfeat )
     {
-    case FCB_FS_READYGO:     // 0x00
-
-        /*
-        || 000b: "The message specified in bytes 1-8 and 9-16 is
-        ||       maintained until the tape drive next starts tape
-        ||       motion, or until the message is updated."
-        */
-
-        dev->tapedispflags = 0;
-
-        strlcpy( dev->tapemsg1, msg1, sizeof(dev->tapemsg1) );
-        strlcpy( dev->tapemsg2, msg2, sizeof(dev->tapemsg2) );
-
-        dev->tapedisptype  = TAPEDISPTYP_WAITACT;
-
-        break;
-
-    case FCB_FS_UNMOUNT:     // 0x20
-
-        /*
-        || 001b: "The message specified in bytes 1-8 is maintained
-        ||       until the tape cartridge is physically removed from
-        ||       the tape drive, or until the next unload/load cycle.
-        ||       If the drive does not contain a cartridge when the
-        ||       Load Display command is received, the display will
-        ||       contain the message that existed prior to the receipt
-        ||       of the command."
-        */
-
-        dev->tapedispflags = 0;
-
-        if ( tapeloaded )
-        {
-            dev->tapedisptype  = TAPEDISPTYP_UNMOUNT;
-            dev->tapedispflags = TAPEDISPFLG_REQAUTOMNT;
-
-            strlcpy( dev->tapemsg1, msg1, sizeof(dev->tapemsg1) );
-
-            if ( dev->ccwtrace || dev->ccwstep )
-                logmsg(_("HHCTA099I %4.4X: Tape Display \"%s\" Until Unmounted\n"),
-                    dev->devnum, dev->tapemsg1 );
-        }
-
-        break;
-
-    case FCB_FS_MOUNT:       // 0x40
-
-        /*
-        || 010b: "The message specified in bytes 1-8 is maintained
-        ||       until the drive is next loaded. If the drive is
-        ||       loaded when the Load Display command is received,
-        ||       the display will contain the message that existed
-        ||       prior to the receipt of the command."
-        */
-
-        dev->tapedispflags = 0;
-
-        if ( !tapeloaded )
-        {
-            dev->tapedisptype  = TAPEDISPTYP_MOUNT;
-            dev->tapedispflags = TAPEDISPFLG_REQAUTOMNT;
-
-            strlcpy( dev->tapemsg1, msg1, sizeof(dev->tapemsg1) );
-
-            if ( dev->ccwtrace || dev->ccwstep )
-                logmsg(_("HHCTA099I %4.4X: Tape Display \"%s\" Until Mounted\n"),
-                    dev->devnum, dev->tapemsg1 );
-        }
-
-        break;
-
-    case FCB_FS_NOP:         // 0x60
-    default:
-
-        /*
-        || 011b: "This value is used to physically access a drive
-        ||       without changing the message display. This option
-        ||       can be used to test whether a control unit can
-        ||       physically communicate with a drive."
-        */
-
+        // (drive doesn't have a display)
+#if defined(OPTION_SCSI_TAPE)
+        if (TAPEDEVT_SCSITAPE == dev->tapedevt)
+            int_scsi_status_update( dev, 1 );
+#endif
         return;
+    }
 
-    case FCB_FS_RESET_DISPLAY: // 0x80
+    if ( !IS_TAPEDISPTYP_SYSMSG( dev ) )
+    {
+        // -------------------------
+        //   Display Host message
+        // -------------------------
 
-        /*
-        || 100b: "The host message being displayed is cancelled and
-        ||       a unit message is displayed instead."
-        */
+        // "When bit 3 (alternate) is set to 1, then
+        //  bits 4 (blink) and 5 (low/high) are ignored."
 
-        dev->tapedispflags = 0;
-        dev->tapedisptype  = TAPEDISPTYP_IDLE;
+        strlcpy( msgbfr, "\"", lenbfr );
 
-        break;
-
-    case FCB_FS_UMOUNTMOUNT: // 0xE0
-
-        /*
-        || 111b: "The message in bytes 1-8 is displayed until a tape
-        ||       cartridge is physically removed from the tape drive,
-        ||       or until the drive is next loaded. The message in
-        ||       bytes 9-16 is displayed until the drive is next loaded.
-        ||       If no cartridge is present in the drive, the first
-        ||       message is ignored and only the second message is
-        ||       displayed until the drive is next loaded."
-        */
-
-        dev->tapedispflags = 0;
-
-        strlcpy( dev->tapemsg1, msg1, sizeof(dev->tapemsg1) );
-        strlcpy( dev->tapemsg2, msg2, sizeof(dev->tapemsg2) );
-
-        if ( tapeloaded )
+        if ( dev->tapedispflags & TAPEDISPFLG_ALTERNATE )
         {
-            dev->tapedisptype  = TAPEDISPTYP_UMOUNTMOUNT;
-            dev->tapedispflags = TAPEDISPFLG_REQAUTOMNT;
+            char  msg1[9];
+            char  msg2[9];
 
-            if ( dev->ccwtrace || dev->ccwstep )
-                logmsg(_("HHCTA099I %4.4X: Tape Display \"%s\" Until Unmounted, then \"%s\" Until Mounted\n"),
-                    dev->devnum, dev->tapemsg1, dev->tapemsg2 );
+            strlcpy ( msg1,   dev->tapemsg1, sizeof(msg1) );
+            strlcat ( msg1,   "        ",    sizeof(msg1) );
+            strlcpy ( msg2,   dev->tapemsg2, sizeof(msg2) );
+            strlcat ( msg2,   "        ",    sizeof(msg2) );
+
+            strlcat ( msgbfr, msg1,             lenbfr );
+            strlcat ( msgbfr, "\" / \"",        lenbfr );
+            strlcat ( msgbfr, msg2,             lenbfr );
+            strlcat ( msgbfr, "\"",             lenbfr );
+            strlcat ( msgbfr, " (alternating)", lenbfr );
         }
         else
         {
-            dev->tapedisptype  = TAPEDISPTYP_MOUNT;
-            dev->tapedispflags = TAPEDISPFLG_MESSAGE2 | TAPEDISPFLG_REQAUTOMNT;
+            if ( dev->tapedispflags & TAPEDISPFLG_MESSAGE2 )
+                strlcat( msgbfr, dev->tapemsg2, lenbfr );
+            else
+                strlcat( msgbfr, dev->tapemsg1, lenbfr );
 
-            if ( dev->ccwtrace || dev->ccwstep )
-                logmsg(_("HHCTA099I %4.4X: Tape \"%s\" Until Mounted\n"),
-                    dev->devnum, dev->tapemsg2 );
+            strlcat ( msgbfr, "\"",          lenbfr );
+
+            if ( dev->tapedispflags & TAPEDISPFLG_BLINKING )
+                strlcat ( msgbfr, " (blinking)", lenbfr );
         }
 
+        if ( dev->tapedispflags & TAPEDISPFLG_AUTOLOADER )
+            strlcat( msgbfr, " (AUTOLOADER)", lenbfr );
+
+        return;
+    }
+
+    // ----------------------------------------------
+    //   Display SYS message (Unit/Device message)
+    // ----------------------------------------------
+
+    // First, build the system message, then move it into
+    // the caller's buffer...
+
+    strlcpy( dev->tapesysmsg, "\"", sizeof(dev->tapesysmsg) );
+
+    switch ( dev->tapedisptype )
+    {
+    case TAPEDISPTYP_IDLE:
+    case TAPEDISPTYP_WAITACT:
+    default:
+        // Blank display if no tape loaded...
+        if ( !dev->tmh->tapeloaded( dev, NULL, 0 ) )
+        {
+            strlcat( dev->tapesysmsg, "        ", sizeof(dev->tapesysmsg) );
+            break;
+        }
+
+        // " NT RDY " if tape IS loaded, but not ready...
+        // (IBM docs say " NT RDY " means "Loaded but not ready")
+
+        ASSERT( dev->tmh->tapeloaded( dev, NULL, 0 ) );
+
+        if (0
+            || dev->fd < 0
+#if defined(OPTION_SCSI_TAPE)
+            || (1
+                && TAPEDEVT_SCSITAPE == dev->tapedevt
+                && !STS_ONLINE( dev )
+               )
+#endif
+        )
+        {
+            strlcat( dev->tapesysmsg, " NT RDY ", sizeof(dev->tapesysmsg) );
+            break;
+        }
+
+        // Otherwise tape is loaded and ready  -->  "READY"
+
+        ASSERT( dev->tmh->tapeloaded( dev, NULL, 0 ) );
+
+        strlcat ( dev->tapesysmsg, " READY  ", sizeof(dev->tapesysmsg) );
+        strlcat( dev->tapesysmsg, "\"", sizeof(dev->tapesysmsg) );
+
+        if (0
+            || dev->readonly
+#if defined(OPTION_SCSI_TAPE)
+            || (1
+                &&  TAPEDEVT_SCSITAPE == dev->tapedevt
+                &&  STS_WR_PROT( dev )
+               )
+#endif
+        )
+            // (append "file protect" indicator)
+            strlcat ( dev->tapesysmsg, " *FP*", sizeof(dev->tapesysmsg) );
+
+        // Copy system message to caller's buffer
+        strlcpy( msgbfr, dev->tapesysmsg, lenbfr );
+        return;
+
+    case TAPEDISPTYP_ERASING:
+        strlcat ( dev->tapesysmsg, " ERASING", sizeof(dev->tapesysmsg) );
+        break;
+
+    case TAPEDISPTYP_REWINDING:
+        strlcat ( dev->tapesysmsg, "REWINDNG", sizeof(dev->tapesysmsg) );
+        break;
+
+    case TAPEDISPTYP_UNLOADING:
+        strlcat ( dev->tapesysmsg, "UNLOADNG", sizeof(dev->tapesysmsg) );
+        break;
+
+    case TAPEDISPTYP_CLEAN:
+        strlcat ( dev->tapesysmsg, "*CLEAN  ", sizeof(dev->tapesysmsg) );
         break;
     }
 
-    /* Set the flags... */
+    strlcat( dev->tapesysmsg, "\"", sizeof(dev->tapesysmsg) );
 
-    /*
-        "When bit 7 (FCB_AL) is active and bits 0-2 (FCB_FS) specify
-        a Mount Message, then only the first eight characters of the
-        message are displayed and bits 3-5 (FCB_AM, FCB_BM, FCB_M2)
-        are ignored."
-    */
-    if (1
-        &&   ( fcb & FCB_AL )
-        && ( ( fcb & FCB_FS ) == FCB_FS_MOUNT )
-    )
-    {
-        fcb  &=  ~( FCB_AM | FCB_BM | FCB_M2 );
-        dev->tapedispflags &= ~TAPEDISPFLG_MESSAGE2;
-    }
+    // Copy system message to caller's buffer
+    strlcpy( msgbfr, dev->tapesysmsg, lenbfr );
 
-    /*
-        "When bit 7 (FCB_AL) is active and bits 0-2 (FCB_FS) specify
-        a Demount/Mount message, then only the last eight characters
-        of the message are displayed. Bits 3-5 (FCB_AM, FCB_BM, FCB_M2)
-        are ignored."
-    */
-    if (1
-        &&   ( fcb & FCB_AL )
-        && ( ( fcb & FCB_FS ) == FCB_FS_UMOUNTMOUNT )
-    )
-    {
-        fcb  &=  ~( FCB_AM | FCB_BM | FCB_M2 );
-        dev->tapedispflags |= TAPEDISPFLG_MESSAGE2;
-    }
+} /* end function GetDisplayMsg */
 
-    /*
-        "When bit 3 (FCB_AM) is set to 1, then bits 4 (FCB_BM) and 5
-        (FCB_M2) are ignored."
-    */
-    if ( fcb & FCB_AM )
-        fcb  &=  ~( FCB_BM | FCB_M2 );
-
-    dev->tapedispflags |= (((fcb & FCB_AM) ? TAPEDISPFLG_ALTERNATE  : 0 ) |
-                          ( (fcb & FCB_BM) ? TAPEDISPFLG_BLINKING   : 0 ) |
-                          ( (fcb & FCB_M2) ? TAPEDISPFLG_MESSAGE2   : 0 ) |
-                          ( (fcb & FCB_AL) ? TAPEDISPFLG_AUTOLOADER : 0 ));
-
-    UpdateDisplay( dev );
-    ReqAutoMount( dev );
-
-} /* end function load_display */
 
 /*-------------------------------------------------------------------*/
-/* ISW: START Of New SENSE handling */
-
-/* ISW: Extracted from original build_sense routine */
-int IsAtLoadPoint(DEVBLK *dev)
+/*                         IsAtLoadPoint                             */
+/*-------------------------------------------------------------------*/
+/* Called by the device-type-specific 'build_sense_xxxx' functions   */
+/* (indirectly via the 'build_senseX' function) when building sense  */
+/* for any i/o error (non-"TAPE_BSENSE_STATUSONLY" type call)       */
+/*-------------------------------------------------------------------*/
+int IsAtLoadPoint (DEVBLK *dev)
 {
 int ldpt=0;
     if ( dev->fd >= 0 )
@@ -3421,14 +2199,14 @@ int ldpt=0;
         {
         default:
         case TAPEDEVT_AWSTAPE:
-            if (!dev->nxtblkpos)
+            if (dev->nxtblkpos==0)
             {
                 ldpt=1;
             }
             break;
 
-        case TAPEDEVT_HET:
-            if (!dev->hetb->cblk)
+        case TAPEDEVT_HETTAPE:
+            if (dev->hetb->cblk == 0)
             {
                 ldpt=1;
             }
@@ -3436,16 +2214,17 @@ int ldpt=0;
 
 #if defined(OPTION_SCSI_TAPE)
         case TAPEDEVT_SCSITAPE:
-            update_status_scsitape( dev, 0 );
+            int_scsi_status_update( dev, 0 );   // (internal call)
             if ( STS_BOT( dev ) )
             {
+                dev->eotwarning = 0;
                 ldpt=1;
             }
             break;
 #endif /* defined(OPTION_SCSI_TAPE) */
 
         case TAPEDEVT_OMATAPE:
-            if (!dev->nxtblkpos && 1 == dev->curfilen)
+            if (dev->nxtblkpos == 0 && dev->curfilen == 1)
             {
                 ldpt=1;
             }
@@ -3465,1010 +2244,24 @@ int ldpt=0;
         }
     }
     return ldpt;
-}
+
+} /* end function IsAtLoadPoint */
+
+
+/*********************************************************************/
+/*********************************************************************/
+/**                                                                 **/
+/**                   AUTOLOADER FUNCTIONS                          **/
+/**                                                                 **/
+/*********************************************************************/
+/*********************************************************************/
 
 /*-------------------------------------------------------------------*/
-
-static void build_sense_3480(int ERCode,DEVBLK *dev,BYTE *unitstat,BYTE ccwcode)
-{
-int sns4mat;
-    UNREFERENCED(ccwcode);
-    sns4mat=0x20;
-    switch(ERCode)
-    {
-    case TAPE_BSENSE_TAPEUNLOADED:
-        switch(ccwcode)
-        {
-        case 0x01: // write
-        case 0x02: // read
-        case 0x0C: // read backward
-            *unitstat=CSW_CE | CSW_UC;
-            break;
-        case 0x03: // nop
-            *unitstat=CSW_UC;
-            break;
-        case 0x0f: // rewind unload
-            *unitstat=CSW_CE | CSW_UC | CSW_DE | CSW_CUE;
-            break;
-        default:
-            *unitstat=CSW_CE | CSW_UC | CSW_DE;
-            break;
-        } // end switch(ccwcode)
-        dev->sense[0]=SENSE_IR;
-        dev->sense[3]=0x43; /* ERA 43 = Int Req */
-        break;
-    case TAPE_BSENSE_TAPEUNLOADED2:        /* Not an error */
-        *unitstat=CSW_CE|CSW_DE;
-        dev->sense[0]=SENSE_IR;
-        dev->sense[3]=0x2B;
-        sns4mat=0x21;
-        break;
-    case TAPE_BSENSE_TAPELOADFAIL:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_IR|0x02;
-        dev->sense[3]=0x33; /* ERA 33 = Load Failed */
-        break;
-    case TAPE_BSENSE_READFAIL:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_DC;
-        dev->sense[3]=0x23;
-        break;
-    case TAPE_BSENSE_WRITEFAIL:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_DC;
-        dev->sense[3]=0x25;
-        break;
-    case TAPE_BSENSE_BADCOMMAND:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_CR;
-        dev->sense[3]=0x27;
-        break;
-    case TAPE_BSENSE_INCOMPAT:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_CR;
-        dev->sense[3]=0x29;
-        break;
-    case TAPE_BSENSE_WRITEPROTECT:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_CR;
-        dev->sense[3]=0x30;
-        break;
-    case TAPE_BSENSE_EMPTYTAPE:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_DC;
-        dev->sense[3]=0x31;
-        break;
-    case TAPE_BSENSE_ENDOFTAPE:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_EC;
-        dev->sense[3]=0x38;
-        break;
-    case TAPE_BSENSE_LOADPTERR:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=0;
-        dev->sense[3]=0x39;
-        break;
-    case TAPE_BSENSE_FENCED:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_EC|0x02; /* Deffered UC */
-        dev->sense[3]=0x47;
-        break;
-    case TAPE_BSENSE_BADALGORITHM:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_EC;
-        if(0x3490==dev->devtype)
-        {
-            dev->sense[3]=0x5E;
-        }
-        else
-        {
-            dev->sense[3]=0x47;
-        }
-        break;
-    case TAPE_BSENSE_LOCATEERR:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_EC;
-        dev->sense[3]=0x44;
-        break;
-    case TAPE_BSENSE_BLOCKSHORT:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_EC;
-        dev->sense[3]=0x36;
-        break;
-    case TAPE_BSENSE_ITFERROR:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_EC;
-        dev->sense[3]=0x22;
-        break;
-    case TAPE_BSENSE_REWINDFAILED:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_EC;
-        dev->sense[3]=0x2C; /* Generic Equipment Malfunction ERP code */
-        break;
-    case TAPE_BSENSE_READTM:
-        *unitstat=CSW_CE|CSW_DE|CSW_UX;
-        break;
-    case TAPE_BSENSE_UNSOLICITED:
-        *unitstat=CSW_CE|CSW_DE;
-        dev->sense[3]=0x00;
-        break;
-    case TAPE_BSENSE_STATUSONLY:
-    default:
-        *unitstat=CSW_CE|CSW_DE;
-        break;
-    } // end switch(ERCode)
-    /* Fill in the common information */
-    switch(sns4mat)
-    {
-    default:
-    case 0x20:
-    case 0x21:
-        dev->sense[7]=sns4mat;
-        memset(&dev->sense[8],0,31-8);
-        break;
-    } // end switch(sns4mat)
-    if(strcmp(dev->filename,TAPE_UNLOADED)==0 || !dev->tmh->tapeloaded(dev,NULL,0))
-    {
-        dev->sense[0]|=SENSE_IR;
-        dev->sense[1]|=SENSE1_TAPE_FP;
-    }
-    else
-    {
-        dev->sense[0]&=~SENSE_IR;
-        dev->sense[1]&=~(SENSE1_TAPE_LOADPT|SENSE1_TAPE_FP);
-        dev->sense[1]|=IsAtLoadPoint(dev)?SENSE1_TAPE_LOADPT:0;
-        dev->sense[1]|=dev->readonly?SENSE1_TAPE_FP:0; /* FP bit set when tape not ready too */
-    }
-    dev->sense[1]|=SENSE1_TAPE_TUA;
-}
-
+/*                         autoload_init                             */
 /*-------------------------------------------------------------------*/
-/* Build a sense code for streaming tapes */
-
-static void build_sense_Streaming(int ERCode,DEVBLK *dev,BYTE *unitstat,BYTE ccwcode)
-{
-    memset(dev->sense,0,sizeof(dev->sense));
-    switch(ERCode)
-    {
-    case TAPE_BSENSE_TAPEUNLOADED:
-        switch(ccwcode)
-        {
-        case 0x01: // write
-        case 0x02: // read
-        case 0x0C: // read backward
-            *unitstat=CSW_CE | CSW_UC | (dev->tdparms.deonirq?CSW_DE:0);
-            break;
-        case 0x03: // nop
-            *unitstat=CSW_UC;
-            break;
-        case 0x0f: // rewind unload
-            /*
-            *unitstat=CSW_CE | CSW_UC | CSW_DE | CSW_CUE;
-            */
-            *unitstat=CSW_UC | CSW_DE | CSW_CUE;
-            break;
-        default:
-            *unitstat=CSW_CE | CSW_UC | CSW_DE;
-            break;
-        } // end switch(ccwcode)
-        dev->sense[0]=SENSE_IR;
-        dev->sense[3]=6;        /* Int Req ERAC */
-        break;
-    case TAPE_BSENSE_TAPEUNLOADED2: /* RewUnld op */
-        *unitstat=CSW_UC | CSW_DE | CSW_CUE;
-        /*
-        *unitstat=CSW_CE | CSW_UC | CSW_DE | CSW_CUE;
-        */
-        dev->sense[0]=SENSE_IR;
-        dev->sense[3]=6;        /* Int Req ERAC */
-        break;
-    case TAPE_BSENSE_REWINDFAILED:
-    case TAPE_BSENSE_ITFERROR:
-        dev->sense[0]=SENSE_EC;
-        dev->sense[3]=0x03;     /* Perm Equip Check */
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        break;
-    case TAPE_BSENSE_TAPELOADFAIL:
-    case TAPE_BSENSE_LOCATEERR:
-    case TAPE_BSENSE_ENDOFTAPE:
-    case TAPE_BSENSE_EMPTYTAPE:
-    case TAPE_BSENSE_FENCED:
-    case TAPE_BSENSE_BLOCKSHORT:
-    case TAPE_BSENSE_INCOMPAT:
-        dev->sense[0]=SENSE_EC;
-        dev->sense[3]=0x10; /* PE-ID Burst Check */
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        break;
-
-    case TAPE_BSENSE_BADALGORITHM:
-    case TAPE_BSENSE_READFAIL:
-        dev->sense[0]=SENSE_DC;
-        dev->sense[3]=0x09;     /* Read Data Check */
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        break;
-    case TAPE_BSENSE_WRITEFAIL:
-        dev->sense[0]=SENSE_DC;
-        dev->sense[3]=0x07;     /* Write Data Check (Media Error) */
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        break;
-    case TAPE_BSENSE_BADCOMMAND:
-        dev->sense[0]=SENSE_CR;
-        dev->sense[3]=0x0C;     /* Bad Command */
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        break;
-    case TAPE_BSENSE_WRITEPROTECT:
-        dev->sense[0]=SENSE_CR;
-        dev->sense[3]=0x0B;     /* File Protect */
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        break;
-    case TAPE_BSENSE_LOADPTERR:
-        dev->sense[0]=SENSE_CR;
-        dev->sense[3]=0x0D;     /* Backspace at Load Point */
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        break;
-    case TAPE_BSENSE_READTM:
-        *unitstat=CSW_CE|CSW_DE|CSW_UX;
-        break;
-    case TAPE_BSENSE_UNSOLICITED:
-        *unitstat=CSW_CE|CSW_DE;
-        break;
-    case TAPE_BSENSE_STATUSONLY:
-        *unitstat=CSW_CE|CSW_DE;
-        break;
-    } // end switch(ERCode)
-    if(strcmp(dev->filename,TAPE_UNLOADED)==0 || !dev->tmh->tapeloaded(dev,NULL,0))
-    {
-        dev->sense[0]|=SENSE_IR;
-        dev->sense[1]|=SENSE1_TAPE_FP;
-        dev->sense[1]&=~SENSE1_TAPE_TUA;
-        dev->sense[1]|=SENSE1_TAPE_TUB;
-    }
-    else
-    {
-        dev->sense[0]&=~SENSE_IR;
-        dev->sense[1]|=IsAtLoadPoint(dev)?SENSE1_TAPE_LOADPT:0;
-        dev->sense[1]|=dev->readonly?SENSE1_TAPE_FP:0; /* FP bit set when tape not ready too */
-        dev->sense[1]|=SENSE1_TAPE_TUA;
-        dev->sense[1]&=~SENSE1_TAPE_TUB;
-    }
-    if(dev->tmh->passedeot(dev))
-    {
-        dev->sense[4]|=0x40;
-    }
-}
-
+/*  initialise the Autoloader feature                                */
 /*-------------------------------------------------------------------*/
-/* Common routine for 3410/3420 magtape devices */
-
-static void build_sense_3410_3420(int ERCode,DEVBLK *dev,BYTE *unitstat,BYTE ccwcode)
-{
-    memset(dev->sense,0,sizeof(dev->sense));
-    switch(ERCode)
-    {
-    case TAPE_BSENSE_TAPEUNLOADED:
-        switch(ccwcode)
-        {
-        case 0x01: // write
-        case 0x02: // read
-        case 0x0C: // read backward
-            *unitstat=CSW_CE | CSW_UC | (dev->tdparms.deonirq?CSW_DE:0);
-            break;
-        case 0x03: // nop
-            *unitstat=CSW_UC;
-            break;
-        case 0x0f: // rewind unload
-            /*
-            *unitstat=CSW_CE | CSW_UC | CSW_DE | CSW_CUE;
-            */
-            *unitstat=CSW_UC | CSW_DE | CSW_CUE;
-            break;
-        default:
-            *unitstat=CSW_CE | CSW_UC | CSW_DE;
-            break;
-        } // end switch(ccwcode)
-        dev->sense[0]=SENSE_IR;
-        dev->sense[1]=SENSE1_TAPE_TUB;
-        break;
-    case TAPE_BSENSE_TAPEUNLOADED2: /* RewUnld op */
-        *unitstat=CSW_UC | CSW_DE | CSW_CUE;
-        /*
-        *unitstat=CSW_CE | CSW_UC | CSW_DE | CSW_CUE;
-        */
-        dev->sense[0]=SENSE_IR;
-        dev->sense[1]=SENSE1_TAPE_TUB;
-        break;
-    case TAPE_BSENSE_REWINDFAILED:
-    case TAPE_BSENSE_FENCED:
-    case TAPE_BSENSE_EMPTYTAPE:
-    case TAPE_BSENSE_ENDOFTAPE:
-    case TAPE_BSENSE_BLOCKSHORT:
-        /* On 3411/3420 the tape runs off the reel in that case */
-        /* this will cause pressure loss in both columns */
-    case TAPE_BSENSE_LOCATEERR:
-        /* Locate error: This is more like improperly formatted tape */
-        /* i.e. the tape broke inside the drive                       */
-        /* So EC instead of DC                                        */
-    case TAPE_BSENSE_TAPELOADFAIL:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_EC;
-        dev->sense[1]=SENSE1_TAPE_TUB;
-        dev->sense[7]=0x60;
-        break;
-    case TAPE_BSENSE_ITFERROR:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_EC;
-        dev->sense[1]=SENSE1_TAPE_TUB;
-        dev->sense[4]=0x80; /* Tape Unit Reject */
-        break;
-    case TAPE_BSENSE_READFAIL:
-    case TAPE_BSENSE_BADALGORITHM:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_DC;
-        dev->sense[3]=0xC0; /* Vertical CRC check & Multitrack error */
-        break;
-    case TAPE_BSENSE_WRITEFAIL:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_DC;
-        dev->sense[3]=0x60; /* Longitudinal CRC check & Multitrack error */
-        break;
-    case TAPE_BSENSE_BADCOMMAND:
-    case TAPE_BSENSE_INCOMPAT:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_CR;
-        dev->sense[4]=0x01;
-        break;
-    case TAPE_BSENSE_WRITEPROTECT:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_CR;
-        break;
-    case TAPE_BSENSE_LOADPTERR:
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=0;
-        break;
-    case TAPE_BSENSE_READTM:
-        *unitstat=CSW_CE|CSW_DE|CSW_UX;
-        break;
-    case TAPE_BSENSE_UNSOLICITED:
-        *unitstat=CSW_CE|CSW_DE;
-        break;
-    case TAPE_BSENSE_STATUSONLY:
-        *unitstat=CSW_CE|CSW_DE;
-        break;
-    } // end switch(ERCode)
-    if(strcmp(dev->filename,TAPE_UNLOADED)==0 || !dev->tmh->tapeloaded(dev,NULL,0))
-    {
-        dev->sense[0]|=SENSE_IR;
-        dev->sense[1]|=SENSE1_TAPE_FP;
-    }
-    else
-    {
-        dev->sense[0]&=~SENSE_IR;
-        dev->sense[1]|=IsAtLoadPoint(dev)?SENSE1_TAPE_LOADPT:0;
-        dev->sense[1]|=dev->readonly?SENSE1_TAPE_FP:0; /* FP bit set when tape not ready too */
-    }
-    if(dev->tmh->passedeot(dev))
-    {
-        dev->sense[4]|=0x40;
-    }
-}
-
-/*-------------------------------------------------------------------*/
-
-static void build_sense_3410(int ERCode,DEVBLK *dev,BYTE *unitstat,BYTE ccwcode)
-{
-    build_sense_3410_3420(ERCode,dev,unitstat,ccwcode);
-    dev->sense[5]&=0x80;
-    dev->sense[5]|=0x40;
-    dev->sense[6]=0x22; /* Dual Dens - 3410/3411 Model 2 */
-    dev->numsense=9;
-}
-
-/*-------------------------------------------------------------------*/
-
-static void build_sense_3420(int ERCode,DEVBLK *dev,BYTE *unitstat,BYTE ccwcode)
-{
-    build_sense_3410_3420(ERCode,dev,unitstat,ccwcode);
-    /* Following stripped from original 'build_sense' */
-    dev->sense[5] |= 0xC0;
-    dev->sense[6] |= 0x03;
-    dev->sense[13] = 0x80;
-    dev->sense[14] = 0x01;
-    dev->sense[15] = 0x00;
-    dev->sense[16] = 0x01;
-    dev->sense[19] = 0xFF;
-    dev->sense[20] = 0xFF;
-    dev->numsense=24;
-}
-/*-------------------------------------------------------------------*/
-/* Construct sense bytes and unit status                             */
-/* note  name changed because semantic changed                       */
-/* ERCode is the internal Error Recovery code                        */
-/*-------------------------------------------------------------------*/
-void build_senseX (int ERCode,DEVBLK *dev,BYTE *unitstat,BYTE code)
-{
-int i;
-BYTE usr;
-int sense_built;
-    sense_built=0;
-    if(!unitstat)
-    {
-        unitstat=&usr;
-    }
-    for(i=0;TapeDevtypeList[i]!=0;i+=TAPEDEVTYPELISTENTRYSIZE)
-    {
-        if(TapeDevtypeList[i]==dev->devtype)
-        {
-            TapeSenseTable[TapeDevtypeList[i+4]](ERCode,dev,unitstat,code);
-            sense_built=1;
-            /* Set FP &  LOADPOINT bit */
-            if(dev->tmh->passedeot(dev))
-            {
-                if (TAPE_BSENSE_STATUSONLY==ERCode &&
-                   ( code==0x01 || // write
-                     code==0x17 || // erase gap
-                     code==0x1F    // write tapemark
-                   )
-                )
-                {
-                    *unitstat|=CSW_UX;
-                }
-            }
-            break;
-        }
-    }
-    if(!sense_built)
-    {
-        *unitstat=CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0]=SENSE_EC;
-    }
-    if(*unitstat & CSW_UC)
-    {
-        dev->sns_pending=1;
-    }
-    return;
-} /* end function build_sense */
-
-/*-------------------------------------------------------------------*/
-/* Tape format determination REGEXPS */
-
-struct tape_format_entry {
-    char *fmtreg;                       /* A regular expression */
-    int  fmtcode;                       /* the device code      */
-    TAPEMEDIA_HANDLER *tmh;             /* The media dispatcher */
-    char *descr;                        /* readable description */
-    char *short_descr;                  /* (same but shorter)   */
-};
-static struct tape_format_entry fmttab[]={
-    /* This entry matches a filename ending with .tdf    */
-    {"\\.tdf$",    TAPEDEVT_OMATAPE,  &tmh_oma,  "Optical Media Attachment (OMA) tape", "OMA tape" },
-#if defined(OPTION_SCSI_TAPE)
-    /* This entry matches a filename starting with /dev/ */
-    {"^/dev/",    TAPEDEVT_SCSITAPE,  &tmh_scsi, "SCSI attached tape drive", "SCSI tape" },
-#if defined(_MSVC_)
-    {"^\\\\\\\\\\.\\\\Tape[0-9]", TAPEDEVT_SCSITAPE, &tmh_scsi, "SCSI attached tape drive", "SCSI tape" },
-#endif // _MSVC_
-#endif
-    /* This entry matches a filename ending with .het    */
-    {"\\.het$",   TAPEDEVT_HET,       &tmh_het,  "Hercules Emulated Tape file", "HET tape" },
-    /* This entry matches any other entry                */
-    {NULL,        TAPEDEVT_AWSTAPE,   &tmh_aws,  "AWS Format tape file", "AWS tape" } /* Anything goes */
-};
-
-/*-------------------------------------------------------------------*/
-/* mountnewtape: mount a tape in the drive  */
-/* Syntax:                                  */
-/* filename [parms]                         */
-/*    where parms are:                      */
-/*          awstape:                        */
-/*                    set the HET parms     */
-/*                    be compatible with the*/
-/*                    R|P/390|IS tape file  */
-/*                    Format (HET files)    */
-/*          idrc|compress = 0|1:            */
-/*                    Write tape blocks     */
-/*                    with compression      */
-/*            (std deviation: Read backwrd  */
-/*            allowed on compressed HET     */
-/*            tapes while it is not on IDRC */
-/*            formated 3480 tapes)          */
-/*  --no-erg: for SCSI tape only, means to  */
-/*            ignore Erase Gap i/o's and to */
-/*            return 'success' instead.     */
-/*  --blkid-32: for SCSI tape only, means   */
-/*            the hardware only supports    */
-/*            full 32-bit block-ids.        */
-static int mountnewtape(DEVBLK *dev,int argc,char **argv)
-{
-#if defined(HAVE_REGEX_H) || defined(HAVE_PCRE)
-regex_t    regwrk;                      /* REGEXP work area          */
-regmatch_t regwrk2;                     /* REGEXP match area         */
-char       errbfr[1024];                /* Working storage           */
-#endif // HAVE_REGEX_H
-char*      descr;                       /* Device descr from fmttab  */
-char*      short_descr;                 /* Short descr from fmttab   */
-int        i;                           /* Loop control              */
-int        rc;                          /* various rtns return codes */
-union
-{
-    U32         num;
-    BYTE        str[ 80 ];
-}               res;                    /* Parser results            */
-    /* Release the previous OMA descriptor array if allocated */
-    if (dev->omadesc)
-    {
-        free (dev->omadesc);
-        dev->omadesc = NULL;
-    }
-
-    /* The first argument is the file name */
-    if (!argc || strlen(argv[0]) > sizeof(dev->filename)-1)
-        strcpy (dev->filename, TAPE_UNLOADED);
-    else
-        /* Save the file name in the device block */
-        strcpy (dev->filename, argv[0]);
-
-    /* Use the file name to determine the device type */
-    for(i=0;;i++)
-    {
-        dev->tapedevt=fmttab[i].fmtcode;
-        dev->tmh=fmttab[i].tmh;
-        if(!fmttab[i].fmtreg)
-        {
-            break;
-        }
-#if defined(HAVE_REGEX_H) || defined(HAVE_PCRE)
-        rc=regcomp(&regwrk,fmttab[i].fmtreg,REG_ICASE);
-        if(rc<0)
-        {
-            regerror(rc,&regwrk,errbfr,1024);
-            logmsg (_("HHCTA999E Device %4.4X: Unable to determine tape format type for %s: Internal error: Regcomp error %s on index %d\n"),dev->devnum,dev->filename,errbfr,i);
-                return -1;
-        }
-        rc=regexec(&regwrk,dev->filename,1,&regwrk2,0);
-        if(REG_NOMATCH==rc)
-        {
-            regfree(&regwrk);
-            continue;
-        }
-        if(!rc)
-        {
-            regfree(&regwrk);
-            break;
-        }
-        regerror(rc,&regwrk,errbfr,1024);
-        logmsg (_("HHCTA999E Device %4.4X: Unable to determine tape format type for %s: Internal error: Regexec error %s on index %d\n"),dev->devnum,dev->filename,errbfr,i);
-        regfree(&regwrk);
-        return -1;
-#else // !HAVE_REGEX_H
-        switch ( dev->tapedevt )
-        {
-        case TAPEDEVT_OMATAPE: // filename ends with ".tdf"
-            if ( (rc = strlen(dev->filename)) <= 4 )
-                rc = -1;
-            else
-                rc = strcasecmp( &dev->filename[rc-4], ".tdf" );
-            break;
-#if defined(OPTION_SCSI_TAPE)
-        case TAPEDEVT_SCSITAPE: // filename starts with "\\.\Tape" or "/dev/"
-#if defined(_MSVC_)
-            if (1
-                && strncasecmp(dev->filename, "\\\\.\\Tape", 8) == 0
-                && isdigit(*(dev->filename+8))
-                &&  0  ==  *(dev->filename+9)
-            )
-                rc = 0;
-            else
-#endif // _MSVC_
-            {
-                if ( (rc = strlen(dev->filename)) <= 5 )
-                    rc = -1;
-                else
-                    rc = strncasecmp( dev->filename, "/dev/", 5 );
-                if (0 == rc)
-                {
-                    if (strncasecmp( dev->filename+5, "st", 2 ) == 0)
-                        dev->stape_close_rewinds = 1; // (rewind at close)
-                    else
-                        dev->stape_close_rewinds = 0; // (otherwise don't)
-                }
-            }
-            break;
-#endif // OPTION_SCSI_TAPE
-        case TAPEDEVT_HET:      // filename ends with ".het"
-            if ( (rc = strlen(dev->filename)) <= 4 )
-                rc = -1;
-            else
-                rc = strcasecmp( &dev->filename[rc-4], ".het" );
-            break;
-        default:                // (should not occur)
-            ASSERT(0);
-            logmsg (_("HHCTA999E Device %4.4X: Unable to determine tape format type for %s\n"),dev->devnum,dev->filename);
-            return -1;
-        }
-        if (!rc) break;
-#endif // HAVE_REGEX_H
-    }
-    descr       = fmttab[i].descr;       // (save device description)
-    short_descr = fmttab[i].short_descr; // (save device description)
-    if (strcmp (dev->filename, TAPE_UNLOADED)!=0)
-    {
-        logmsg (_("HHCTA998I Device %4.4X: %s is a %s\n"),dev->devnum,dev->filename,descr);
-    }
-
-    /* Initialize device dependent fields */
-    dev->fd                = -1;
-#if defined(OPTION_SCSI_TAPE)
-    dev->sstat               = GMT_DR_OPEN(-1);
-    dev->stape_getstat_sstat = GMT_DR_OPEN(-1);
-#endif
-    dev->omadesc           = NULL;
-    dev->omafiles          = 0;
-    dev->curfilen          = 1;
-    dev->nxtblkpos         = 0;
-    dev->prvblkpos         = -1;
-    dev->curblkrem         = 0;
-    dev->curbufoff         = 0;
-    dev->readonly          = 0;
-    dev->hetb              = NULL;
-    dev->tdparms.compress  = HETDFLT_COMPRESS;
-    dev->tdparms.method    = HETDFLT_METHOD;
-    dev->tdparms.level     = HETDFLT_LEVEL;
-    dev->tdparms.chksize   = HETDFLT_CHKSIZE;
-    dev->tdparms.maxsize   = 0;        // no max size     (default)
-    dev->tdparms.eotmargin = 128*1024; // 128K EOT margin (default)
-
-    /* Process remaining parameters */
-    rc = 0;
-    for (i = 1; i < argc; i++)
-    {
-        logmsg (_("HHCTA066I %s device %4.4X parameter: '%s'\n"), short_descr, dev->devnum, argv[i]);
-        switch (parser (&ptab[0], argv[i], &res))
-        {
-        case TDPARM_NONE:
-            logmsg (_("HHCTA067E Device %4.4X: %s - Unrecognized parameter: '%s'\n"),
-                dev->devnum,dev->filename,argv[i]);
-            rc = -1;
-            break;
-
-        case TDPARM_AWSTAPE:
-            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
-            {
-                logmsg (_("HHCTA078E Option '%s' not valid for SCSI tape\n"), argv[i]);
-                rc = -1;
-                break;
-            }
-            dev->tdparms.compress = FALSE;
-            dev->tdparms.chksize = 4096;
-            break;
-
-        case TDPARM_IDRC:
-        case TDPARM_COMPRESS:
-            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
-            {
-                logmsg (_("HHCTA078E Option '%s' not valid for SCSI tape\n"), argv[i]);
-                rc = -1;
-                break;
-            }
-            dev->tdparms.compress = (res.num ? TRUE : FALSE);
-            break;
-
-        case TDPARM_METHOD:
-            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
-            {
-                logmsg (_("HHCTA078E Option '%s' not valid for SCSI tape\n"), argv[i]);
-                rc = -1;
-                break;
-            }
-            if (res.num < HETMIN_METHOD || res.num > HETMAX_METHOD)
-            {
-                logmsg(_("HHCTA068E Method must be within %u-%u\n"),
-                    HETMIN_METHOD, HETMAX_METHOD);
-                rc = -1;
-                break;
-            }
-            dev->tdparms.method = res.num;
-            break;
-
-        case TDPARM_LEVEL:
-            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
-            {
-                logmsg (_("HHCTA078E Option '%s' not valid for SCSI tape\n"), argv[i]);
-                rc = -1;
-                break;
-            }
-            if (res.num < HETMIN_LEVEL || res.num > HETMAX_LEVEL)
-            {
-                logmsg(_("HHCTA069E Level must be within %u-%u\n"),
-                    HETMIN_LEVEL, HETMAX_LEVEL);
-                rc = -1;
-                break;
-            }
-            dev->tdparms.level = res.num;
-            break;
-
-        case TDPARM_CHKSIZE:
-            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
-            {
-                logmsg (_("HHCTA078E Option '%s' not valid for SCSI tape\n"), argv[i]);
-                rc = -1;
-                break;
-            }
-            if (res.num < HETMIN_CHUNKSIZE || res.num > HETMAX_CHUNKSIZE)
-            {
-                logmsg (_("HHCTA070E Chunksize must be within %u-%u\n"),
-                    HETMIN_CHUNKSIZE, HETMAX_CHUNKSIZE);
-                rc = -1;
-                break;
-            }
-            dev->tdparms.chksize = res.num;
-            break;
-
-        case TDPARM_MAXSIZE:
-            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
-            {
-                logmsg (_("HHCTA078E Option '%s' not valid for SCSI tape\n"), argv[i]);
-                rc = -1;
-                break;
-            }
-            dev->tdparms.maxsize=res.num;
-            break;
-
-        case TDPARM_MAXSIZEK:
-            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
-            {
-                logmsg (_("HHCTA078E Option '%s' not valid for SCSI tape\n"), argv[i]);
-                rc = -1;
-                break;
-            }
-            dev->tdparms.maxsize=res.num*1024;
-            break;
-
-        case TDPARM_MAXSIZEM:
-            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
-            {
-                logmsg (_("HHCTA078E Option '%s' not valid for SCSI tape\n"), argv[i]);
-                rc = -1;
-                break;
-            }
-            dev->tdparms.maxsize=res.num*1024*1024;
-            break;
-
-        case TDPARM_EOTMARGIN:
-            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
-            {
-                logmsg (_("HHCTA078E Option '%s' not valid for SCSI tape\n"), argv[i]);
-                rc = -1;
-                break;
-            }
-            dev->tdparms.eotmargin=res.num;
-            break;
-
-        case TDPARM_STRICTSIZE:
-            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
-            {
-                logmsg (_("HHCTA078E Option '%s' not valid for SCSI tape\n"), argv[i]);
-                rc = -1;
-                break;
-            }
-            dev->tdparms.strictsize=res.num;
-            break;
-
-        case TDPARM_READONLY:
-            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
-            {
-                logmsg (_("HHCTA078E Option '%s' not valid for SCSI tape\n"), argv[i]);
-                rc = -1;
-                break;
-            }
-            dev->tdparms.logical_readonly=(res.num ? 1 : 0 );
-            break;
-
-        case TDPARM_RO:
-        case TDPARM_NORING:
-            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
-            {
-                logmsg (_("HHCTA078E Option '%s' not valid for SCSI tape\n"), argv[i]);
-                rc = -1;
-                break;
-            }
-            dev->tdparms.logical_readonly=1;
-            break;
-
-        case TDPARM_RW:
-        case TDPARM_RING:
-            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
-            {
-                logmsg (_("HHCTA078E Option '%s' not valid for SCSI tape\n"), argv[i]);
-                rc = -1;
-                break;
-            }
-            dev->tdparms.logical_readonly=0;
-            break;
-
-        case TDPARM_DEONIRQ:
-            if (TAPEDEVT_SCSITAPE == dev->tapedevt)
-            {
-                logmsg (_("HHCTA078E Option '%s' not valid for SCSI tape\n"), argv[i]);
-                rc = -1;
-                break;
-            }
-            dev->tdparms.deonirq=(res.num ? 1 : 0 );
-            break;
-
-#if defined(OPTION_SCSI_TAPE)
-        case TDPARM_BLKID32:
-            if (TAPEDEVT_SCSITAPE != dev->tapedevt)
-            {
-                logmsg (_("HHCTA078E Option '%s' not valid for %s\n"),
-                    argv[i], short_descr );
-                rc = -1;
-                break;
-            }
-            dev->stape_blkid_32 = 1;
-            break;
-
-        case TDPARM_NOERG:
-            if (TAPEDEVT_SCSITAPE != dev->tapedevt)
-            {
-                logmsg (_("HHCTA078E Option '%s' not valid for %s\n"),
-                    argv[i], short_descr );
-                rc = -1;
-                break;
-            }
-            dev->stape_no_erg = 1;
-            break;
-#endif /* defined(OPTION_SCSI_TAPE) */
-
-        default:
-            logmsg(_("HHCTA071E Error in '%s' parameter\n"), argv[i]);
-            rc = -1;
-            break;
-        } // end switch (parser (&ptab[0], argv[i], &res))
-    } // end for (i = 1; i < argc; i++)
-
-    if (0 != rc)
-        return -1;
-
-    /* Adjust the display if necessary */
-    if(dev->tdparms.displayfeat)
-    {
-        if(strcmp(dev->filename,TAPE_UNLOADED)==0)
-        {
-            /* NO tape is loaded */
-            if(TAPEDISPTYP_UMOUNTMOUNT == dev->tapedisptype)
-            {
-                /* A new tape SHOULD be mounted */
-                dev->tapedisptype   = TAPEDISPTYP_MOUNT;
-                dev->tapedispflags |= TAPEDISPFLG_REQAUTOMNT;
-                strlcpy( dev->tapemsg1, dev->tapemsg2, sizeof(dev->tapemsg1) );
-            }
-            else if(TAPEDISPTYP_UNMOUNT == dev->tapedisptype)
-            {
-                dev->tapedisptype = TAPEDISPTYP_IDLE;
-            }
-        }
-        else
-        {
-            /* A tape IS already loaded */
-            dev->tapedisptype = TAPEDISPTYP_IDLE;
-        }
-    }
-    UpdateDisplay(dev);
-    ReqAutoMount(dev);
-    return 0;
-
-} /* end function mountnewtape */
-
-/*-------------------------------------------------------------------*/
-/* AUTOLOADER Feature */
-
-/* autoload_global_parms: Appends a blank delimited word  */
-/* to the list of parameters that will be passed          */
-/* for every tape mounted by the autoloader               */
-
-static void autoload_global_parms(DEVBLK *dev,char *par)
-{
-    logmsg(_("TAPE Autoloader - Adding global parm %s\n"),par);
-    if(!dev->al_argv)
-    {
-        dev->al_argv=malloc(sizeof(char *)*256);
-        dev->al_argc=0;
-    }
-    dev->al_argv[dev->al_argc]=(char *)malloc(strlen(par)+sizeof(char));
-    strcpy(dev->al_argv[dev->al_argc],par);
-    dev->al_argc++;
-}
-
-/*-------------------------------------------------------------------*/
-/* autoload_clean_entry: release storage allocated  */
-/* for an autoloader slot (except the slot itself   */
-
-static void autoload_clean_entry(DEVBLK *dev,int ix)
-{
-    int i;
-    for(i=0;i<dev->als[ix].argc;i++)
-    {
-        free(dev->als[ix].argv[i]);
-        dev->als[ix].argv[i]=NULL;
-    }
-    dev->als[ix].argc=0;
-    if(dev->als[ix].filename)
-    {
-        free(dev->als[ix].filename);
-        dev->als[ix].filename=NULL;
-    }
-}
-
-/*-------------------------------------------------------------------*/
-/* autoload_close: terminate autoloader operations  */
-/* release all storage allocated by the autoloader  */
-/* facility                                         */
-static void autoload_close(DEVBLK *dev)
-{
-    int        i;
-    if(dev->al_argv)
-    {
-        for(i=0;i<dev->al_argc;i++)
-        {
-            free(dev->al_argv[i]);
-            dev->al_argv[i]=NULL;
-        }
-        free(dev->al_argv);
-        dev->al_argv=NULL;
-        dev->al_argc=0;
-    }
-    dev->al_argc=0;
-    if(dev->als)
-    {
-        for(i=0;i<dev->alss;i++)
-        {
-            autoload_clean_entry(dev,i);
-        }
-        free(dev->als);
-        dev->als=NULL;
-        dev->alss=0;
-    }
-}
-
-/*-------------------------------------------------------------------*/
-/* autoload_tape_entry: populate an autoloader slot  */
-/*           also expands the size of the autoloader */
-
-static void autoload_tape_entry(DEVBLK *dev,char *fn,char **strtokw)
-{
-    char *p;
-    TAPEAUTOLOADENTRY tae;
-    logmsg(_("TAPE Autoloader: Adding tape entry %s\n"),fn);
-    memset(&tae,0,sizeof(tae));
-    tae.filename=malloc(strlen(fn)+sizeof(char)+1);
-    strcpy(tae.filename,fn);
-    while((p=strtok_r(NULL," \t",strtokw)))
-    {
-        if(!tae.argv)
-        {
-            tae.argv=malloc(sizeof(char *)*256);
-        }
-        tae.argv[tae.argc]=malloc(strlen(p)+sizeof(char)+1);
-        strcpy(tae.argv[tae.argc],p);
-        tae.argc++;
-    }
-    if(!dev->als)
-    {
-        dev->als=malloc(sizeof(tae));
-        dev->alss=0;
-    }
-    else
-    {
-        dev->als=realloc(dev->als,sizeof(tae)*(dev->alss+1));
-    }
-    memcpy(&dev->als[dev->alss],&tae,sizeof(tae));
-    dev->alss++;
-}
-
-/*-------------------------------------------------------------------*/
-/* autoload_init: initialise the Autoloader feature */
-
-static void autoload_init(DEVBLK *dev,int ac,char **av)
+void autoload_init(DEVBLK *dev,int ac,char **av)
 {
     char        bfr[4096];
     char    *rec;
@@ -4503,20 +2296,20 @@ static void autoload_init(DEVBLK *dev,int ac,char **av)
         {
             rec[i]=0;
         }
-        if(!strlen(rec))
+        if(strlen(rec)==0)
         {
             continue;
         }
         verb=strtok_r(rec," \t",&strtokw);
-        if(!verb)
+        if(verb==NULL)
         {
             continue;
         }
-        if(!verb[0])
+        if(verb[0]==0)
         {
             continue;
         }
-        if('#'==verb[0])
+        if(verb[0]=='#')
         {
             continue;
         }
@@ -4532,13 +2325,195 @@ static void autoload_init(DEVBLK *dev,int ac,char **av)
     } // end while((rec=fgets(bfr,4096,aldf)))
     fclose(aldf);
     return;
-}
+
+} /* end function autoload_init */
+
 
 /*-------------------------------------------------------------------*/
-/* autoload_mount_tape: mount in the drive the tape */
-/*       positionned in the autoloader slot #alix    */
+/*                      autoload_close                               */
+/*-------------------------------------------------------------------*/
+/*  terminate autoloader operations: release all storage that        */
+/*  was allocated by the autoloader facility                         */
+/*-------------------------------------------------------------------*/
+void autoload_close(DEVBLK *dev)
+{
+    int        i;
+    if(dev->al_argv!=NULL)
+    {
+        for(i=0;i<dev->al_argc;i++)
+        {
+            free(dev->al_argv[i]);
+            dev->al_argv[i]=NULL;
+        }
+        free(dev->al_argv);
+        dev->al_argv=NULL;
+        dev->al_argc=0;
+    }
+    dev->al_argc=0;
+    if(dev->als!=NULL)
+    {
+        for(i=0;i<dev->alss;i++)
+        {
+            autoload_clean_entry(dev,i);
+        }
+        free(dev->als);
+        dev->als=NULL;
+        dev->alss=0;
+    }
+} /* end function autoload_close */
 
-static int autoload_mount_tape(DEVBLK *dev,int alix)
+
+/*-------------------------------------------------------------------*/
+/*                    autoload_clean_entry                           */
+/*-------------------------------------------------------------------*/
+/*  release storage allocated for an autoloader slot                 */
+/*  (except the slot itself)                                         */
+/*-------------------------------------------------------------------*/
+void autoload_clean_entry(DEVBLK *dev,int ix)
+{
+    int i;
+    for(i=0;i<dev->als[ix].argc;i++)
+    {
+        free(dev->als[ix].argv[i]);
+        dev->als[ix].argv[i]=NULL;
+    }
+    dev->als[ix].argc=0;
+    if(dev->als[ix].filename!=NULL)
+    {
+        free(dev->als[ix].filename);
+        dev->als[ix].filename=NULL;
+    }
+} /* end function autoload_clean_entry */
+
+
+/*-------------------------------------------------------------------*/
+/*                    autoload_global_parms                          */
+/*-------------------------------------------------------------------*/
+/*  Appends a blank delimited word to the list of parameters         */
+/*  that will be passed for every tape mounted by the autoloader     */
+/*-------------------------------------------------------------------*/
+void autoload_global_parms(DEVBLK *dev,char *par)
+{
+    logmsg(_("TAPE Autoloader - Adding global parm %s\n"),par);
+    if(dev->al_argv==NULL)
+    {
+        dev->al_argv=malloc(sizeof(char *)*256);
+        dev->al_argc=0;
+    }
+    dev->al_argv[dev->al_argc]=(char *)malloc(strlen(par)+sizeof(char));
+    strcpy(dev->al_argv[dev->al_argc],par);
+    dev->al_argc++;
+
+} /* end function autoload_global_parms */
+
+
+/*-------------------------------------------------------------------*/
+/*                    autoload_tape_entry                            */
+/*-------------------------------------------------------------------*/
+/*  populate an autoloader slot  (creates new slot if needed)        */
+/*-------------------------------------------------------------------*/
+void autoload_tape_entry(DEVBLK *dev,char *fn,char **strtokw)
+{
+    char *p;
+    TAPEAUTOLOADENTRY tae;
+    logmsg(_("TAPE Autoloader: Adding tape entry %s\n"),fn);
+    memset(&tae,0,sizeof(tae));
+    tae.filename=malloc(strlen(fn)+sizeof(char)+1);
+    strcpy(tae.filename,fn);
+    while((p=strtok_r(NULL," \t",strtokw)))
+    {
+        if(tae.argv==NULL)
+        {
+            tae.argv=malloc(sizeof(char *)*256);
+        }
+        tae.argv[tae.argc]=malloc(strlen(p)+sizeof(char)+1);
+        strcpy(tae.argv[tae.argc],p);
+        tae.argc++;
+    }
+    if(dev->als==NULL)
+    {
+        dev->als=malloc(sizeof(tae));
+        dev->alss=0;
+    }
+    else
+    {
+        dev->als=realloc(dev->als,sizeof(tae)*(dev->alss+1));
+    }
+    memcpy(&dev->als[dev->alss],&tae,sizeof(tae));
+    dev->alss++;
+
+} /* end function autoload_tape_entry */
+
+
+/*-------------------------------------------------------------------*/
+/*             autoload_wait_for_tapemount_thread                    */
+/*-------------------------------------------------------------------*/
+void *autoload_wait_for_tapemount_thread(void *db)
+{
+int     rc  = -1;
+DEVBLK *dev = (DEVBLK*) db;
+
+    obtain_lock(&dev->lock);
+    {
+        while
+        (
+            dev->als
+            &&
+            (rc = autoload_mount_next( dev )) != 0
+        )
+        {
+            release_lock( &dev->lock );
+            SLEEP(AUTOLOAD_WAIT_FOR_TAPEMOUNT_INTERVAL_SECS);
+            obtain_lock( &dev->lock );
+        }
+    }
+    release_lock(&dev->lock);
+    if ( rc == 0 )
+        device_attention(dev,CSW_DE);
+    return NULL;
+
+} /* end function autoload_wait_for_tapemount_thread */
+
+
+/*-------------------------------------------------------------------*/
+/*                     autoload_mount_first                          */
+/*-------------------------------------------------------------------*/
+/*  mount in the drive the tape which is                             */
+/*  positionned in the 1st autoloader slot                           */
+/*-------------------------------------------------------------------*/
+int autoload_mount_first(DEVBLK *dev)
+{
+    dev->alsix=0;
+    return(autoload_mount_tape(dev,0));
+}
+
+
+/*-------------------------------------------------------------------*/
+/*                     autoload_mount_next                           */
+/*-------------------------------------------------------------------*/
+/*  mount in the drive the tape whch is                              */
+/*  positionned in the slot after the currently mounted tape.        */
+/*  if this is the last tape, close the autoloader                   */
+/*-------------------------------------------------------------------*/
+int autoload_mount_next(DEVBLK *dev)
+{
+    if(dev->alsix>=dev->alss)
+    {
+        autoload_close(dev);
+        return -1;
+    }
+    dev->alsix++;
+    return(autoload_mount_tape(dev,dev->alsix));
+}
+
+
+/*-------------------------------------------------------------------*/
+/*                     autoload_mount_tape                           */
+/*-------------------------------------------------------------------*/
+/*  mount in the drive the tape which is                             */
+/*  positionned in the autoloader slot #alix                         */
+/*-------------------------------------------------------------------*/
+int autoload_mount_tape(DEVBLK *dev,int alix)
 {
     char        **pars;
     int        pcount=1;
@@ -4575,2065 +2550,43 @@ static int autoload_mount_tape(DEVBLK *dev,int alix)
     }
     free(pars);
     return(rc);
-}
+
+} /* end function autoload_mount_tape */
+
 
 /*-------------------------------------------------------------------*/
-/* autoload_mount_first: mount in the drive the tape */
-/*       positionned in the 1st autoloader slot       */
-
-static int autoload_mount_first(DEVBLK *dev)
-{
-    dev->alsix=0;
-    return(autoload_mount_tape(dev,0));
-}
-
+/* is_tapeloaded_filename                                            */
 /*-------------------------------------------------------------------*/
-/* autoload_mount_next: mount in the drive the tape */
-/*       positionned in the slot after the currently */
-/*       mounted tape. if this is the last tape,     */
-/*       close the autoloader                        */
-static int autoload_mount_next(DEVBLK *dev)
-{
-    if(dev->alsix>=dev->alss)
-    {
-        autoload_close(dev);
-        return -1;
-    }
-    dev->alsix++;
-    return(autoload_mount_tape(dev,dev->alsix));
-}
-
-/*-------------------------------------------------------------------*/
-
-static void *autoload_wait_for_tapemount_thread(void *db)
-{
-int     rc  = -1;
-DEVBLK *dev = (DEVBLK*) db;
-
-    obtain_lock(&dev->lock);
-    {
-        while
-        (
-            dev->als
-            &&
-            (rc = autoload_mount_next( dev )) != 0
-        )
-        {
-            release_lock( &dev->lock );
-            SLEEP(AUTOLOAD_WAIT_FOR_TAPEMOUNT_INTERVAL_SECS);
-            obtain_lock( &dev->lock );
-        }
-    }
-    release_lock(&dev->lock);
-    if ( !rc )
-        device_attention(dev,CSW_DE);
-    return NULL;
-}
-/*-------------------------------------------------------------------*/
-/* Initialize the device handler                                     */
-/*-------------------------------------------------------------------*/
-static int tapedev_init_handler (DEVBLK *dev, int argc, char *argv[])
-{
-U16             cutype;                 /* Control unit type         */
-BYTE            cumodel;                /* Control unit model number */
-BYTE            devmodel;               /* Device model number       */
-BYTE            devclass;               /* Device class              */
-BYTE            devtcode;               /* Device type code          */
-U32             sctlfeat;               /* Storage control features  */
-int             haverdc;                /* RDC Supported             */
-int             rc;
-
-    /* Determine the control unit type and model number */
-    /* Support for 3490/3422/3430/8809/9347, etc.. */
-    /* Close current tape */
-    if(dev->fd>=0)
-    {
-        dev->tmh->close(dev);
-        dev->fd=-1;
-    }
-    autoload_close(dev);
-    haverdc=0;
-    dev->tdparms.displayfeat=0;
-
-    if(!sscanf(dev->typname,"%hx",&(dev->devtype)))
-        dev->devtype = 0x3420;
-
-    switch(dev->devtype)
-    {
-    case 0x3480:
-        cutype = 0x3480;
-        cumodel = 0x31;
-        devmodel = 0x31; /* Model D31 */
-        devclass = 0x80;
-        devtcode = 0x80;
-        sctlfeat = 0x000002C0; /* Support Logical Write Protect */
-                               /* Autoloader installed */
-                               /* IDRC Supported */
-        dev->numdevid = 7;
-        dev->numsense = 24;
-        haverdc=1;
-        dev->tdparms.displayfeat=1;
-        break;
-   case 0x3490:
-        cutype = 0x3490;
-        cumodel = 0x50; /* Model C10 */
-        devmodel = 0x50;
-        devclass = 0x80;
-        devtcode = 0x80; /* Valid for 3490 too */
-        sctlfeat = 0x000002C0; /* Support Logical Write Protect */
-                               /* Autoloader installed */
-                               /* IDRC Supported */
-        dev->numdevid = 7;
-        dev->numsense = 32;
-        haverdc=1;
-        dev->tdparms.displayfeat=1;
-        break;
-   case 0x3590:
-        cutype = 0x3590;
-        cumodel = 0x50; /* Model C10 ?? */
-        devmodel = 0x50;
-        devclass = 0x80;
-        devtcode = 0x80; /* Valid for 3590 too */
-        sctlfeat = 0x000002C0; /* Support Logical Write Protect */
-                               /* Autoloader installed */
-                               /* IDRC Supported */
-        dev->numdevid = 7;
-        dev->numsense = 32;
-        haverdc=1;
-        dev->tdparms.displayfeat=1;
-        break;
-    case 0x3420:
-        cutype = 0x3803;
-        cumodel = 0x02;
-        devmodel = 0x06;
-        devclass = 0x80;
-        devtcode = 0x20;
-        sctlfeat = 0x00000000;
-        dev->numdevid = 0; /* Actually, doesn't support 0xE4 */
-        dev->numsense = 24;
-        break;
-    case 0x9347:
-        cutype = 0x9347;
-        cumodel = 0x01;
-        devmodel = 0x01;
-        devclass = 0x80;
-        devtcode = 0x20;
-        sctlfeat = 0x00000000;
-        dev->numdevid = 7;
-        dev->numsense = 32;
-        break;
-    case 0x9348:
-        cutype = 0x9348;
-        cumodel = 0x01;
-        devmodel = 0x01;
-        devclass = 0x80;
-        devtcode = 0x20;
-        sctlfeat = 0x00000000;
-        dev->numdevid = 7;
-        dev->numsense = 32;
-        break;
-    case 0x8809:
-        cutype = 0x8809;
-        cumodel = 0x01;
-        devmodel = 0x01;
-        devclass = 0x80;
-        devtcode = 0x20;
-        sctlfeat = 0x00000000;
-        dev->numdevid = 7;
-        dev->numsense = 32;
-        break;
-    case 0x3410:
-    case 0x3411:
-        dev->devtype = 0x3411;  /* a 3410 is a 3411 */
-        cutype = 0x3115; /* Model 115 IFA */
-        cumodel = 0x01;
-        devmodel = 0x01;
-        devclass = 0x80;
-        devtcode = 0x20;
-        sctlfeat = 0x00000000;
-        dev->numdevid=0;
-        dev->numsense = 9;
-        break;
-    case 0x3422:
-        cutype = 0x3422;
-        cumodel = 0x01;
-        devmodel = 0x01;
-        devclass = 0x80;
-        devtcode = 0x20;
-        sctlfeat = 0x00000000;
-        dev->numdevid = 7;
-        dev->numsense = 32;
-        break;
-    case 0x3430:
-        cutype = 0x3422;
-        cumodel = 0x01;
-        devmodel = 0x01;
-        devclass = 0x80;
-        devtcode = 0x20;
-        sctlfeat = 0x00000000;
-        dev->numdevid = 7;
-        dev->numsense = 32;
-        break;
-    default:
-        logmsg(_("Unsupported device type specified %4.4x\n"),dev->devtype);
-        cutype = dev->devtype; /* don't know what to do really */
-        cumodel = 0x01;
-        devmodel = 0x01;
-        devclass = 0x80;
-        devtcode = 0x20;
-        sctlfeat = 0x00000000;
-        dev->numdevid = 0; /* We don't know */
-        dev->numsense = 1;
-        break;
-    } // end switch(dev->devtype)
-
-    /* Initialize the device identifier bytes */
-    dev->devid[0] = 0xFF;
-    dev->devid[1] = cutype >> 8;
-    dev->devid[2] = cutype & 0xFF;
-    dev->devid[3] = cumodel;
-    dev->devid[4] = dev->devtype >> 8;
-    dev->devid[5] = dev->devtype & 0xFF;
-    dev->devid[6] = devmodel;
-
-    /* Initialize the device characteristics bytes */
-    if (haverdc)
-    {
-        memset (dev->devchar, 0, sizeof(dev->devchar));
-        memcpy (dev->devchar, dev->devid+1, 6);
-        dev->devchar[6] = (sctlfeat >> 24) & 0xFF;
-        dev->devchar[7] = (sctlfeat >> 16) & 0xFF;
-        dev->devchar[8] = (sctlfeat >> 8) & 0xFF;
-        dev->devchar[9] = sctlfeat & 0xFF;
-        dev->devchar[10] = devclass;
-        dev->devchar[11] = devtcode;
-        dev->devchar[40] = 0x41;
-        dev->devchar[41] = 0x80;
-        dev->numdevchar = 64;
-    }
-
-    /* Initialize SCSI tape control fields */
-#if defined(OPTION_SCSI_TAPE)
-    dev->sstat               = GMT_DR_OPEN(-1);
-    dev->stape_getstat_sstat = GMT_DR_OPEN(-1);
-#endif
-
-    /* Clear the DPA */
-    memset(dev->pgid, 0, sizeof(dev->pgid));
-    /* Clear Drive password - Adrian */
-    memset(dev->drvpwd, 0, sizeof(dev->drvpwd));
-
-
-    /* Request the channel to merge data chained write CCWs into
-       a single buffer before passing data to the device handler */
-    dev->cdwmerge = 1;
-
-    /* Tape is a syncio type 2 device */
-    dev->syncio = 2;
-
-    /* ISW */
-    /* Build a 'clear' sense */
-    memset(dev->sense,0,sizeof(dev->sense));
-    dev->sns_pending=0;
-
-    // Initialize the [non-SCSI] auto-loader...
-
-    // Programming Note: we don't [yet] know at this early stage
-    // what type of tape device we're dealing with (SCSI or non-
-    // SCSI) since 'mountnewtape' hasn't been called yet (which
-    // is the function that determines which media handler should
-    // be used and is the one that initializes dev->tapedevt)
-
-    // The only thing we know (or WILL know once 'autoload_init'
-    // is called) is whether or not there was a [non-SCSI] auto-
-    // loader defined for the device. That's it and nothing more.
-
-    autoload_init(dev,argc,argv);
-
-    // Was an auto-loader defined for this device?
-    if ( !dev->als )
-    {
-        // No. Just mount whatever tape there is (if any)...
-        rc = mountnewtape( dev, argc, argv );
-    }
-    else
-    {
-        // Yes. Try mounting the FIRST auto-loader slot...
-        if ( (rc = autoload_mount_first( dev )) != 0 )
-        {
-            // If that doesn't work, try subsequent slots...
-            while
-            (
-                dev->als
-                &&
-                (rc = autoload_mount_next( dev )) != 0
-            )
-            {
-                ;  // (nop; just go on to next slot)
-            }
-            rc = dev->als ? rc : -1;
-        }
-    }
-    return rc;
-} /* end function tapedev_init_handler */
-
-/*-------------------------------------------------------------------*/
-/* Query the device definition                                       */
-/*-------------------------------------------------------------------*/
-static void tapedev_query_device ( DEVBLK *dev, char **class,
-                int buflen, char *buffer )
-{
-    char dispmsg[256]; dispmsg[0]=0;
-
-    if (!dev || !class || !buffer || !buflen)
-        return;
-
-    *class = "TAPE";
-    *buffer = 0;
-
-    GetDisplayMsg( dev, dispmsg, sizeof(dispmsg) );
-
-    if ( !strcmp( dev->filename, TAPE_UNLOADED ) )
-    {
-        snprintf(buffer, buflen, "%s%s%s",
-            TAPE_UNLOADED,
-            dev->tdparms.displayfeat ? ", Display: " : "",
-            dev->tdparms.displayfeat ?    dispmsg    : "");
-    }
-    else
-    {
-        char tapepos[32]; tapepos[0]=0;
-
-        if ( TAPEDEVT_SCSITAPE != dev->tapedevt )
-        {
-            snprintf( tapepos, sizeof(tapepos), "[%d:%8.8lX] ",
-                dev->curfilen, (unsigned long int)dev->nxtblkpos );
-            tapepos[sizeof(tapepos)-1] = 0;
-        }
-#if defined(OPTION_SCSI_TAPE)
-        else
-        {
-            if (STS_BOT( dev )) strlcat(tapepos,"*BOT* ",sizeof(tapepos));
-            // If tape has a display, then GetDisplayMsg already
-            // appended *FP* for us. Otherwise we need to do it.
-            if ( !dev->tdparms.displayfeat )
-                if (STS_WR_PROT( dev ))
-                    strlcat(tapepos,"*FP* ",sizeof(tapepos));
-        }
-#endif
-
-        if ( TAPEDEVT_SCSITAPE != dev->tapedevt
-#if defined(OPTION_SCSI_TAPE)
-            || !STS_NOT_MOUNTED(dev)
-#endif
-        )
-        {
-            // Not a SCSI tape,  -or-  mounted SCSI tape...
-
-            snprintf (buffer, buflen, "%s%s %s%s%s",
-
-                dev->filename, (dev->readonly ? " ro" : ""),
-
-                tapepos,
-                dev->tdparms.displayfeat ? "Display: " : "",
-                dev->tdparms.displayfeat ?  dispmsg    : "");
-        }
-        else /* ( TAPEDEVT_SCSITAPE == dev->tapedevt && STS_NOT_MOUNTED(dev) ) */
-        {
-            // UNmounted SCSI tape...
-
-            snprintf (buffer, buflen, "%s%s (%sNOTAPE)%s%s",
-
-                dev->filename, (dev->readonly ? " ro" : ""),
-
-                dev->fd < 0              ?   "closed; "  : "",
-                dev->tdparms.displayfeat ? ", Display: " : "",
-                dev->tdparms.displayfeat ?    dispmsg    : ""  );
-        }
-    }
-
-    buffer[buflen-1] = 0;
-} /* end function tapedev_query_device */
-
-/*-------------------------------------------------------------------*/
-/* Close the device                                                  */
-/*-------------------------------------------------------------------*/
-static int tapedev_close_device ( DEVBLK *dev )
-{
-    autoload_close(dev);
-    dev->tmh->close(dev);
-    ASSERT( dev->fd < 0 );
-    dev->curfilen = 1;
-    dev->nxtblkpos = 0;
-    dev->prvblkpos = -1;
-    dev->curblkrem = 0;
-    dev->curbufoff = 0;
-    dev->blockid = 0;
-    dev->poserror = 0;
-    return 0;
-} /* end function tapedev_close_device */
-
-/* START PRELIM_CCW_CHECK */
-/*-------------------------------------------------------------------*/
-/* Ivan Warren 20030224                                              */
-/* Determine if a CCW code is valid for the Device                   */
-/*  rc = 0: Command is NOT valid                                     */
-/*  rc = 1: Command is Valid, tape MUST be loaded                    */
-/*  rc = 2: Command is Valid, tape NEED NOT be loaded                */
-/*  rc = 3: Command is Valid, But is a NO-OP (Return CE+DE now)      */
-/*  rc = 4: Command is Valid, But is a NO-OP for virtual tapes       */
-/*  rc = 5: Command is Valid, Tape Must be loaded - Add DE to status */
-/*  rc = 6: Command is Valid, Tape load attempted - but not an error */
-/*          (used for sense and no contingency allegiance exists)    */
-/*-------------------------------------------------------------------*/
-
-static int TapeCommandIsValid(BYTE code,U16 devtype,BYTE *rustat)
-{
-int i;
-int tix=0;
-int rc;
-int devtfound=0;
-
-    /* Find the D/T in the table - if not found, treat as invalid CCW code */
-
-    *rustat=0;
-    for(i=0;TapeDevtypeList[i]!=0;i+=TAPEDEVTYPELISTENTRYSIZE)
-    {
-        if(TapeDevtypeList[i]==devtype)
-        {
-           tix=TapeDevtypeList[i+1];
-           devtfound=1;
-           if(TapeDevtypeList[i+2])
-           {
-               *rustat|=CSW_UC;
-           }
-           if(TapeDevtypeList[i+3])
-           {
-               *rustat|=CSW_CUE;
-           }
-           break;
-        }
-    }
-    if(!devtfound)
-    {
-        return 0;
-    }
-
-    rc=TapeCommandTable[tix][code];
-    return rc;
-}
-/* END PRELIM_CCW_CHECK */
-
-/*-------------------------------------------------------------------*/
-/* PROGRAMMING NOTE: for the 32-bit to 22-bit (and vice versa)       */
-/* conversion, we're relying on (hoping really!) that an actual      */
-/* 32-bit block-id value will never actually exceed 30 bits (1-bit   */
-/* wrap + 7-bit segment# + 22-bit block-id) since we perform the     */
-/* conversion by simply splitting the low-order 30 bits of a 32-bit  */
-/* block-id into separate 8-bit (wrap and segment#) and 22-bit       */
-/* (block-id) fields, and then shifting them into their appropriate  */
-/* position (and of course combining/appending them for the opposite */
-/* conversion).                                                      */
-/*                                                                   */
-/* As such, this of course implies that we are thus treating the     */
-/* wrap bit and 7-bit segment number values of a "22-bit format"     */
-/* blockid as simply the high-order 8 bits of an actual 30-bit       */
-/* physical blockid (which may or may not work properly on actual    */
-/* SCSI hardware depdending on how[*] it handles inaccurate blockid  */
-/* values).                                                          */
-/*                                                                   */
-/* -----------------                                                 */
-/* [*] Most(?) [SCSI] devices treat the blockid value used in a      */
-/* Locate CCW as simply an "approximate location" of where the       */
-/* block in question actually resides on the physical tape, and      */
-/* will, after positioning itself to the *approximate* physical      */
-/* location of where the block in question is *believed* to reside   */
-/* (as indicated by the supplied Locate blockid), perform the        */
-/* *actual* positioning in low-speed mode based on its reading of    */
-/* its actual internally recorded blockid values. Thus, even when/if */
-/* the supplied Locate block-id value is wrong, the Locate should    */
-/* still succeed, albeit less efficiently (as it may be starting     */
-/* its locate at a physical position quite distant from where the    */
-/* actual block is physically located on the media).                 */
-/*-------------------------------------------------------------------*/
-
-/*-------------------------------------------------------------------*/
-/* Convert a 3590 32-bit blockid into 3480 "22-bit format" blockid   */
-/* Both i/p and o/p are presumed to be in big-endian guest format    */
-/*-------------------------------------------------------------------*/
-void blockid_32_to_22 ( BYTE *in_32blkid, BYTE *out_22blkid )
-{
-    out_22blkid[0] = ((in_32blkid[0] << 2) & 0xFC) | ((in_32blkid[1] >> 6) & 0x03);
-    out_22blkid[1] = in_32blkid[1] & 0x3F;
-    out_22blkid[2] = in_32blkid[2];
-    out_22blkid[3] = in_32blkid[3];
-}
-
-/*-------------------------------------------------------------------*/
-/* Convert a 3480 "22-bit format" blockid into a 3590 32-bit blockid */
-/* Both i/p and o/p are presumed to be in big-endian guest format    */
-/*-------------------------------------------------------------------*/
-void blockid_22_to_32 ( BYTE *in_22blkid, BYTE *out_32blkid )
-{
-    out_32blkid[0] = (in_22blkid[0] >> 2) & 0x3F;
-    out_32blkid[1] = ((in_22blkid[0] << 6) & 0xC0) | (in_22blkid[1] & 0x3F);
-    out_32blkid[2] = in_22blkid[2];
-    out_32blkid[3] = in_22blkid[3];
-}
-
-/*-------------------------------------------------------------------*/
-/* Locate CCW helper: convert guest-supplied 3480 or 3590 blockid    */
-/*                    to the actual SCSI hardware blockid format     */
-/* Both i/p and o/p are presumed to be in big-endian guest format    */
-/*-------------------------------------------------------------------*/
-void blockid_emulated_to_actual
-(
-    DEVBLK  *dev,           // ptr to Hercules device
-    BYTE    *emu_blkid,     // ptr to i/p 4-byte block-id in guest storage
-    BYTE    *act_blkid      // ptr to o/p 4-byte block-id for actual SCSI i/o
-)
-{
-    if ( TAPEDEVT_SCSITAPE != dev->tapedevt )
-    {
-        memcpy( act_blkid, emu_blkid, 4 );
-        return;
-    }
-
-#if defined(OPTION_SCSI_TAPE)
-    if (0x3590 == dev->devtype)
-    {
-        // 3590 being emulated; guest block-id is full 32-bits...
-
-        if (dev->stape_blkid_32)
-        {
-            // SCSI using full 32-bit block-ids too. Just copy as-is...
-
-            memcpy( act_blkid, emu_blkid, 4 );
-        }
-        else
-        {
-            // SCSI using 22-bit block-ids. Use low-order 30 bits
-            // of 32-bit guest-supplied blockid and convert it
-            // into a "22-bit format" blockid value for SCSI...
-
-            blockid_32_to_22 ( emu_blkid, act_blkid );
-        }
-    }
-    else // 3480 being emulated; guest block-id is 22-bits...
-    {
-        if (dev->stape_blkid_32)
-        {
-            // SCSI using full 32-bit block-ids. Extract the wrap,
-            // segment# and 22-bit blockid bits from the "22-bit
-            // format" guest-supplied blockid value and combine
-            // (append) them into a contiguous low-order 30 bits
-            // of a 32-bit blockid value for SCSI to use...
-
-            blockid_22_to_32 ( emu_blkid, act_blkid );
-        }
-        else
-        {
-            // SCSI using 22-bit block-ids too. Just copy as-is...
-
-            memcpy( act_blkid, emu_blkid, 4 );
-        }
-    }
-#endif /* defined(OPTION_SCSI_TAPE) */
-}
-
-/*-------------------------------------------------------------------*/
-/* Read Block Id CCW helper:  convert an actual SCSI block-id        */
-/*                            to guest emulated 3480/3590 format     */
-/* Both i/p and o/p are presumed to be in big-endian guest format    */
-/*-------------------------------------------------------------------*/
-void blockid_actual_to_emulated
-(
-    DEVBLK  *dev,           // ptr to Hercules device (for 'devtype')
-    BYTE    *act_blkid,     // ptr to i/p 4-byte block-id from actual SCSI i/o
-    BYTE    *emu_blkid      // ptr to o/p 4-byte block-id in guest storage
-)
-{
-    if ( TAPEDEVT_SCSITAPE != dev->tapedevt )
-    {
-        memcpy( emu_blkid, act_blkid, 4 );
-        return;
-    }
-
-#if defined(OPTION_SCSI_TAPE)
-    if (dev->stape_blkid_32)
-    {
-        // SCSI using full 32-bit block-ids...
-        if (0x3590 == dev->devtype)
-        {
-            // Emulated device is a 3590 too. Just copy as-is...
-            memcpy( emu_blkid, act_blkid, 4 );
-        }
-        else
-        {
-            // Emulated device using 22-bit format. Convert...
-            blockid_32_to_22 ( act_blkid, emu_blkid );
-        }
-    }
-    else
-    {
-        // SCSI using 22-bit format block-ids...
-        if (0x3590 == dev->devtype)
-        {
-            // Emulated device using full 32-bit format. Convert...
-            blockid_22_to_32 ( act_blkid, emu_blkid );
-        }
-        else
-        {
-            // Emulated device using 22-bit format too. Just copy as-is...
-            memcpy( emu_blkid, act_blkid, 4 );
-        }
-    }
-#endif /* defined(OPTION_SCSI_TAPE) */
-}
-
-/*-------------------------------------------------------------------*/
-/* Execute a Channel Command Word                                    */
-/*-------------------------------------------------------------------*/
-static void tapedev_execute_ccw (DEVBLK *dev, BYTE code, BYTE flags,
-        BYTE chained, U16 count, BYTE prevcode, int ccwseq,
-        BYTE *iobuf, BYTE *more, BYTE *unitstat, U16 *residual)
-{
-int             rc;                     /* Return code               */
-int             len;                    /* Length of data block      */
-long            num;                    /* Number of bytes to read   */
-U32             locblock;               /* Block Id for Locate Block */
-int             drc;                    /* code disposition          */
-BYTE            rustat;                 /* Addl CSW stat on Rewind Unload */
-
-    UNREFERENCED(prevcode);
-    UNREFERENCED(ccwseq);
-
-    /* If this is a data-chained READ, then return any data remaining
-       in the buffer which was not used by the previous CCW */
-    if (chained & CCW_FLAGS_CD)
-    {
-        if(IS_CCW_RDBACK(code))
-        {
-            /* We don't need to move anything in this case - just set length */
-        }
-        else
-        {
-            memmove (iobuf, iobuf + dev->curbufoff, dev->curblkrem);
-        }
-        num = (count < dev->curblkrem) ? count : dev->curblkrem;
-        *residual = count - num;
-        if (count < dev->curblkrem) *more = 1;
-        dev->curblkrem -= num;
-        dev->curbufoff = num;
-        *unitstat = CSW_CE | CSW_DE;
-        return;
-    }
-
-    /* Command reject if data chaining and command is not READ */
-    if (1
-        && (flags & CCW_FLAGS_CD)   // data chaining
-        && code != 0x02             // read
-        && code != 0x0C             // read backwards
-    )
-    {
-        logmsg(_("HHCTA072E Data chaining not supported for CCW %2.2X\n"),
-                code);
-        build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-        return;
-    }
-
-    /* Open the device file if necessary */
-    /* Ivan Warren 2003-02-24: Change logic in early determination
-     * of CCW handling - use a determination table
-    */
-    drc=TapeCommandIsValid(code,dev->devtype,&rustat);
-    switch(drc)
-    {
-    case 0: /* Unsupported CCW code for D/T */
-        build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-        return;
-    case 1: /* Valid - Tape MUST be loaded */
-    case 5: /* Valid - Tape MUST be loaded (add DE to status) */
-    case 2: /* Valid - Tape NEED NOT be loaded */
-        break;
-    case 3: /* Valid - But is a NO-OP (return CE+DE now) */
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        return;
-    case 4: /* Valid, But is a NO-OP (for virtual tapes) */
-        if(dev->tapedevt!=TAPEDEVT_SCSITAPE)
-        {
-            build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-            return;
-        }
-        break;
-    default: /* Should NOT occur! */
-        ASSERT(0);
-        build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-        break;
-    } // end switch(drc)
-
-    if ((1==drc || 5==drc) && (dev->fd < 0 || TAPEDEVT_SCSITAPE == dev->tapedevt))
-    {
-        *residual=count;
-        if (!strcmp (dev->filename, TAPE_UNLOADED))
-        {
-            build_senseX(TAPE_BSENSE_TAPEUNLOADED,dev,unitstat,code);
-            return;
-        }
-        if (dev->fd < 0)
-        {
-            rc=dev->tmh->open(dev,unitstat,code);
-            /* Exit with unit status if open was unsuccessful */
-            if (rc < 0) {
-                return;
-            }
-        }
-        if(!dev->tmh->tapeloaded(dev,unitstat,code))
-        {
-            build_senseX(TAPE_BSENSE_TAPEUNLOADED,dev,unitstat,code);
-            return;
-        }
-    }
-
-    /* Process depending on CCW opcode */
-    switch (code) {
-
-    /*---------------------------------------------------------------*/
-    /* WRITE                                                         */
-    /*---------------------------------------------------------------*/
-    case 0x01:
-        /* Unit check if tape is write-protected */
-        if (dev->readonly)
-        {
-            build_senseX(TAPE_BSENSE_WRITEPROTECT,dev,unitstat,code);
-            break;
-        }
-
-        /* Write a block from the tape according to device type */
-        if ( TAPEDISPTYP_WAITACT == dev->tapedisptype )
-        {
-            dev->tapedisptype = TAPEDISPTYP_IDLE;
-            UpdateDisplay( dev );
-        }
-        rc=dev->tmh->write(dev,iobuf,count,unitstat,code);
-        if (rc < 0)
-        {
-            break;
-        }
-        /* Set normal status */
-        *residual = 0;
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* READ FORWARD  (3590 only)                                     */
-    /*---------------------------------------------------------------*/
-    case 0x06:
-
-        /* From: SG24-2506-01 "IBM 3590 Tape Subsystem Technical Guide"
-
-        http://publibz.boulder.ibm.com/cgi-bin/bookmgr/FRAMESET/EZ309601/CCONTENTS?DT=19961211181910
-
-        5.2.1 Separate Channel Commands for IPL Read and Normal Read
-
-        On IBM 3480/3490 tape devices there is only one Read Forward
-        CCW, the X'02' command code.  This CCW is used to perform not
-        only normal read operations but also an IPL Read from tape,
-        for example, DFSMSdss Stand-Alone Restore.  When the CCW is
-        used as an IPL Read, it is not subject to resetting event
-        notification, by definition.  Because there is only one Read
-        Forward CCW, it cannot be subject to resetting event notification
-        on IBM 3480 and 3490 devices.
-
-        To differentiate between an IPL Read and a normal read forward
-        operation, the X'02' command code has been redefined to be the
-        IPL Read CCW, and a new X'06' command code has been defined to
-        be the Read Forward CCW.  The new Read Forward CCW, X'06', is
-        subject to resetting event notification, as should be the case
-        for normal read CCWs issued by applications or other host software.
-        */
-
-        // PROGRAMMING NOTE: I'm not sure what they mean by "resetting
-        // event notification" above, but for now we'll just FALL THROUGH
-        // to the below IPL READ logic...
-
-        // (purposely FALL THROUGH to below IPL READ logic for now)
-
-    /*---------------------------------------------------------------*/
-    /* IPL READ  (non-3590)                                          */
-    /*---------------------------------------------------------------*/
-    case 0x02:
-        /* Read a block from the tape according to device type */
-        if ( TAPEDISPTYP_WAITACT == dev->tapedisptype )
-        {
-            dev->tapedisptype = TAPEDISPTYP_IDLE;
-            UpdateDisplay( dev );
-        }
-        len=dev->tmh->read(dev,iobuf,unitstat,code);
-        /* Exit with unit check status if read error condition */
-        if (len < 0)
-        {
-            break;
-        }
-
-        /* Calculate number of bytes to read and residual byte count */
-        num = (count < len) ? count : len;
-        *residual = count - num;
-        if(count < len) *more = 1;
-
-        /* Save size and offset of data not used by this CCW */
-        dev->curblkrem = len - num;
-        dev->curbufoff = num;
-
-        /* Exit with unit exception status if tapemark was read */
-        if (!len)
-        {
-            build_senseX(TAPE_BSENSE_READTM,dev,unitstat,code);
-        }
-        else
-        {
-            build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        }
-
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* CONTROL NO-OPERATION                                          */
-    /*---------------------------------------------------------------*/
-    case 0x03:
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* REWIND                                                        */
-    /*---------------------------------------------------------------*/
-    case 0x07:
-        if ( TAPEDISPTYP_IDLE    == dev->tapedisptype ||
-             TAPEDISPTYP_WAITACT == dev->tapedisptype )
-        {
-            dev->tapedisptype = TAPEDISPTYP_REWINDING;
-            UpdateDisplay( dev );
-        }
-
-        rc = dev->tmh->rewind(dev,unitstat,code);
-
-        if ( TAPEDISPTYP_REWINDING == dev->tapedisptype )
-        {
-            dev->tapedisptype = TAPEDISPTYP_IDLE;
-            UpdateDisplay( dev );
-        }
-
-        if ( rc < 0 )
-        {
-            break;
-        }
-        /* Reset position counters to start of file */
-
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* READ PREVIOUS  (3590)                                         */
-    /*---------------------------------------------------------------*/
-    case 0x0A:
-
-        /* From: SG24-2506-01 "IBM 3590 Tape Subsystem Technical Guide"
-
-        http://publibz.boulder.ibm.com/cgi-bin/bookmgr/FRAMESET/EZ309601/CCONTENTS?DT=19961211181910
-
-        5.2.2 Read Previous to Replace Read Backward:
-
-        The ESCON-attached Magstar tape drive does not support the
-        Read Backward CCW (command code, X'0C').  It supports a new
-        Read Previous CCW that allows processing of an IBM 3590 High
-        Performance Tape Cartridge in the backward direction without
-        the performance penalties that exist with the Read Backward
-        CCW.  IBM 3480 and 3490 devices had to reread the physical
-        block from the medium for each request of a logical block.
-        The Magstar tape drive retains the physical block in the
-        device buffer and satisfies any subsequent Read Previous from
-        the buffer, similar to how Read Forward operates.  The Read
-        Previous CCW operates somewhat like the Read Backward CCW
-        in that it can be used to process the volumes in the backward
-        direction.  It is different from the Read Backward, however,
-        because the data is transferred to the host in the same order
-        in which it was written, rather than in reverse order like
-        Read Backward.
-        */
-
-        // PROGRAMMING NOTE: until we can add support to Hercules
-        // allowing direct SCSI i/o (so that we can issue the 'Read
-        // Reverse' command directly to the SCSI device), we will
-        // simply FALL THROUGH to our existing "Read Backward" logic.
-
-        // (purposely FALL THROUGH to the 'READ BACKWARD' logic below)
-
-    /*---------------------------------------------------------------*/
-    /* READ BACKWARD                                                 */
-    /*---------------------------------------------------------------*/
-    case 0x0C:
-        /* Backspace to previous block according to device type */
-        if ( TAPEDISPTYP_WAITACT == dev->tapedisptype )
-        {
-            dev->tapedisptype = TAPEDISPTYP_IDLE;
-            UpdateDisplay( dev );
-        }
-        rc=dev->tmh->bsb(dev,unitstat,code);
-        if (rc < 0)
-        {
-            break;
-        }
-
-        /* Exit with unit exception status if tapemark was sensed */
-        if (!rc)
-        {
-            *residual = 0;
-            build_senseX(TAPE_BSENSE_READTM,dev,unitstat,code);
-            break;
-        }
-
-        /* Now read in a forward direction the actual data block
-           we just backspaced over */
-        len=dev->tmh->read(dev,iobuf,unitstat,code);
-
-        /* Exit with unit check status if read error condition */
-        if (len < 0)
-        {
-            break;
-        }
-
-        /* Calculate number of bytes to read and residual byte count */
-        num = (count < len) ? count : len;
-        *residual = count - num;
-        if (count < len) *more = 1;
-
-        /* Save size and offset of data not used by this CCW */
-        dev->curblkrem = len - num;
-        dev->curbufoff = num;
-
-        /* Backspace to previous block according to device type */
-        rc=dev->tmh->bsb(dev,unitstat,code);
-
-        /* Exit with unit check status if error condition */
-        if (rc < 0)
-        {
-            break;
-        }
-
-        /* Set normal status */
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* READ MEDIA CHARACTERISTICS  (3590)                            */
-    /*---------------------------------------------------------------*/
-    case 0x62:
-
-        /* From: SG24-2506-01 "IBM 3590 Tape Subsystem Technical Guide"
-
-        http://publibz.boulder.ibm.com/cgi-bin/bookmgr/FRAMESET/EZ309601/CCONTENTS?DT=19961211181910
-
-        5.2.3 New Read Media Characteristics
-
-        The new Read Media Characteristics CCW (command code x'62')
-        provides up to 256 bytes of information about the media and
-        formats supported by the Magstar tape drive.
-        */
-
-        // ZZ FIXME: not coded yet.
-
-        /* Set command reject sense byte, and unit check status */
-        build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* REWIND UNLOAD                                                 */
-    /*---------------------------------------------------------------*/
-    case 0x0F:
-        if ( dev->tdparms.displayfeat )
-        {
-            if ( TAPEDISPTYP_UMOUNTMOUNT == dev->tapedisptype )
-            {
-                dev->tapedisptype   = TAPEDISPTYP_MOUNT;
-                dev->tapedispflags |= TAPEDISPFLG_REQAUTOMNT;
-                strlcpy( dev->tapemsg1, dev->tapemsg2, sizeof(dev->tapemsg1) );
-            }
-            else if ( TAPEDISPTYP_UNMOUNT == dev->tapedisptype )
-            {
-                dev->tapedisptype = TAPEDISPTYP_IDLE;
-            }
-        }
-
-        if ( TAPEDISPTYP_IDLE    == dev->tapedisptype ||
-             TAPEDISPTYP_WAITACT == dev->tapedisptype )
-        {
-            dev->tapedisptype = TAPEDISPTYP_UNLOADING;
-            UpdateDisplay( dev );
-        }
-
-#if defined(OPTION_SCSI_TAPE)
-        if ( TAPEDEVT_SCSITAPE == dev->tapedevt )
-            rewind_unload_scsitape( dev, unitstat, code );
-        else
-#endif
-            dev->tmh->close(dev);
-
-        if ( TAPEDISPTYP_UNLOADING == dev->tapedisptype )
-        {
-            dev->tapedisptype = TAPEDISPTYP_IDLE;
-            UpdateDisplay( dev );
-        }
-
-        dev->curfilen = 1;
-        dev->nxtblkpos = 0;
-        dev->prvblkpos = -1;
-
-        UpdateDisplay( dev );
-
-        /* Status may require tweaking according to D/T */
-        /* this is what TAPEUNLOADED2 does */
-
-        rc=1;
-        build_senseX(TAPE_BSENSE_TAPEUNLOADED2,dev,unitstat,code);
-
-        if ( dev->als )
-        {
-            TID dummy_tid;
-            char thread_name[64];
-            snprintf(thread_name,sizeof(thread_name),
-                "autoload wait for %4.4X tapemount thread",
-                dev->devnum);
-            thread_name[sizeof(thread_name)-1]=0;
-            create_thread( &dummy_tid, &sysblk.detattr,
-                autoload_wait_for_tapemount_thread,
-                dev, thread_name );
-        }
-
-        ReqAutoMount(dev);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* ERASE GAP                                                     */
-    /*---------------------------------------------------------------*/
-    case 0x17:
-        /* Unit check if tape is write-protected */
-        if (0
-            || dev->readonly
-#if defined(OPTION_SCSI_TAPE)
-            || (1
-                &&  TAPEDEVT_SCSITAPE == dev->tapedevt
-                &&  STS_WR_PROT( dev )
-               )
-#endif
-        )
-        {
-            build_senseX(TAPE_BSENSE_WRITEPROTECT,dev,unitstat,code);
-            break;
-        }
-
-        if ( TAPEDISPTYP_WAITACT == dev->tapedisptype )
-        {
-            dev->tapedisptype = TAPEDISPTYP_IDLE;
-            UpdateDisplay( dev );
-        }
-
-        if ( TAPEDEVT_SCSITAPE == dev->tapedevt )
-            dev->tmh->erg(dev,unitstat,code);
-
-        if ( TAPEDEVT_SCSITAPE != dev->tapedevt )
-            /* Set normal status */
-            build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* DATA SECURITY ERASE                                           */
-    /*---------------------------------------------------------------*/
-    case 0x97:
-        /* Unit check if tape is write-protected */
-        if (0
-            || dev->readonly
-#if defined(OPTION_SCSI_TAPE)
-            || (1
-                &&  TAPEDEVT_SCSITAPE == dev->tapedevt
-                &&  STS_WR_PROT( dev )
-               )
-#endif
-        )
-        {
-            build_senseX(TAPE_BSENSE_WRITEPROTECT,dev,unitstat,code);
-            break;
-        }
-
-        if ( TAPEDISPTYP_IDLE    == dev->tapedisptype ||
-             TAPEDISPTYP_WAITACT == dev->tapedisptype )
-        {
-            dev->tapedisptype = TAPEDISPTYP_ERASING;
-            UpdateDisplay( dev );
-        }
-
-        if ( TAPEDEVT_SCSITAPE == dev->tapedevt )
-            dev->tmh->dse(dev,unitstat,code);
-
-        if ( TAPEDISPTYP_ERASING == dev->tapedisptype )
-        {
-            dev->tapedisptype = TAPEDISPTYP_IDLE;
-            UpdateDisplay( dev );
-        }
-
-        if ( TAPEDEVT_SCSITAPE != dev->tapedevt )
-            /* Not yet implemented */
-            build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* WRITE TAPE MARK                                               */
-    /*---------------------------------------------------------------*/
-    case 0x1F:
-        /* Unit check if tape is write-protected */
-        if (dev->readonly)
-        {
-            build_senseX(TAPE_BSENSE_WRITEPROTECT,dev,unitstat,code);
-            break;
-        }
-        if ( TAPEDISPTYP_WAITACT == dev->tapedisptype )
-        {
-            dev->tapedisptype = TAPEDISPTYP_IDLE;
-            UpdateDisplay( dev );
-        }
-        rc=dev->tmh->wtm(dev,unitstat,code);
-        if(rc<0)
-        {
-            break;
-        }
-
-        dev->curfilen++;
-
-        /* Set normal status */
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* READ BLOCK ID                                                 */
-    /*---------------------------------------------------------------*/
-    case 0x22:
-    {
-        BYTE  blockid[8];       // (temp work)
-
-        /* Calculate number of bytes and residual byte count */
-        len = 2*sizeof(dev->blockid);
-        num = (count < len) ? count : len;
-        *residual = count - num;
-        if (count < len) *more = 1;
-
-        /* Copy Block Id to channel I/O buffer... */
-        {
-#if defined(OPTION_SCSI_TAPE)
-            struct  mtpos  mtpos;
-
-            if (TAPEDEVT_SCSITAPE != dev->tapedevt
-                // ZZ FIXME: The two blockid fields that READ BLOCK ID
-                // are returning are the "Channel block ID" and "Device
-                // block ID" fields (which correspond directly to the
-                // SCSI "First block location" and "Last block location"
-                // fields as returned by a READ POSITION scsi command),
-                // so we really SHOULD be doing direct scsi i/o for our-
-                // selves here (in order to retrieve BOTH of those values
-                // for ourselves (since MTIOCPOS only returns one value
-                // and not the other))...
-                || ioctl_tape( dev->fd, MTIOCPOS, (char*) &mtpos ) < 0 )
-            {
-#endif
-                // Either this is not a scsi tape, or else the MTIOCPOS
-                // call failed; use our emulated blockid value...
-
-                if (dev->poserror)
-                {
-                    // ZZ FIXME: I hope this is right: if the current position
-                    // is unknown (invalid) due to a previous positioning error,
-                    // then return a known-to-be-invalid position value...
-
-                    memset( blockid, 0xFF, 4 );
-                }
-                else
-                {
-                    if (0x3590 == dev->devtype)
-                    {
-                        blockid[0] = (dev->blockid >> 24) & 0xFF;
-                        blockid[1] = (dev->blockid >> 16) & 0xFF;
-                        blockid[2] = (dev->blockid >> 8 ) & 0xFF;
-                        blockid[3] = (dev->blockid      ) & 0xFF;
-                    }
-                    else // (3480 et. al)
-                    {
-                        blockid[0] = 0x01;
-                        blockid[1] = (dev->blockid >> 16) & 0x3F;
-                        blockid[2] = (dev->blockid >> 8 ) & 0xFF;
-                        blockid[3] = (dev->blockid      ) & 0xFF;
-                    }
-                }
-#if defined(OPTION_SCSI_TAPE)
-            }
-            else
-            {
-                // This IS a scsi tape *and* the MTIOCPOS call succeeded;
-                // use the actual hardware blockid value as returned by
-                // MTIOCPOS...
-
-                // ZZ FIXME: Even though the two blockid fields that the
-                // READ BLOCK ID ccw opcode returns ("Channel block ID" and
-                // "Device block ID") happen to correspond directly to the
-                // SCSI "First block location" and "Last block location"
-                // fields (as returned by a READ POSITION scsi command),
-                // MTIOCPOS unfortunately only returns one value and not the
-                // other. Thus, until we can add code to Herc to do scsi i/o
-                // directly for ourselves, we really have no choice but to
-                // return the same value for both here...
-
-                mtpos.mt_blkno = CSWAP32( mtpos.mt_blkno ); // (convert to guest format)
-                blockid_actual_to_emulated( dev, (BYTE*)&mtpos.mt_blkno, blockid );
-            }
-#endif
-            // We return the same values for both the "Channel block ID"
-            // and "Device block ID"...
-
-            memcpy( &blockid[4], &blockid[0], 4 );
-        }
-
-        /* Copy Block Id value to channel I/O buffer... */
-        memcpy( iobuf, blockid, num );
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-    }
-
-    /*---------------------------------------------------------------*/
-    /* BACKSPACE BLOCK                                               */
-    /*---------------------------------------------------------------*/
-    case 0x27:
-        /* Backspace to previous block according to device type */
-        if ( TAPEDISPTYP_WAITACT == dev->tapedisptype )
-        {
-            dev->tapedisptype = TAPEDISPTYP_IDLE;
-            UpdateDisplay( dev );
-        }
-        rc=dev->tmh->bsb(dev,unitstat,code);
-        /* Exit with unit check status if error condition */
-        if (rc < 0)
-        {
-            break;
-        }
-
-        /* Exit with unit exception status if tapemark was sensed */
-        if (!rc)
-        {
-            build_senseX(TAPE_BSENSE_READTM,dev,unitstat,code);
-            break;
-        }
-
-        /* Set normal status */
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* BACKSPACE FILE                                                */
-    /*---------------------------------------------------------------*/
-    case 0x2F:
-        /* Backspace to previous file according to device type */
-        if ( TAPEDISPTYP_WAITACT == dev->tapedisptype )
-        {
-            dev->tapedisptype = TAPEDISPTYP_IDLE;
-            UpdateDisplay( dev );
-        }
-
-        rc=dev->tmh->bsf(dev,unitstat,code);
-
-        /* Exit with unit check status if error condition */
-        if (rc < 0)
-        {
-            break;
-        }
-
-        /* Set normal status */
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* FORWARD SPACE BLOCK                                           */
-    /*---------------------------------------------------------------*/
-    case 0x37:
-        /* Forward to next block according to device type */
-        if ( TAPEDISPTYP_WAITACT == dev->tapedisptype )
-        {
-            dev->tapedisptype = TAPEDISPTYP_IDLE;
-            UpdateDisplay( dev );
-        }
-        rc=dev->tmh->fsb(dev,unitstat,code);
-        /* Exit with unit check status if error condition */
-        if (rc < 0)
-        {
-            break;
-        }
-
-        /* Exit with unit exception status if tapemark was sensed */
-        if (!rc)
-        {
-            build_senseX(TAPE_BSENSE_READTM,dev,unitstat,code);
-            break;
-        }
-
-        /* Set normal status */
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* FORWARD SPACE FILE                                            */
-    /*---------------------------------------------------------------*/
-    case 0x3F:
-        /* Forward to next file according to device type */
-        if ( TAPEDISPTYP_WAITACT == dev->tapedisptype )
-        {
-            dev->tapedisptype = TAPEDISPTYP_IDLE;
-            UpdateDisplay( dev );
-        }
-
-        rc=dev->tmh->fsf(dev,unitstat,code);
-
-        /* Exit with unit check status if error condition */
-        if (rc < 0)
-        {
-            break;
-        }
-
-        /* Set normal status */
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* SYNCHRONIZE                                                   */
-    /*---------------------------------------------------------------*/
-    case 0x43:
-        if ( TAPEDISPTYP_WAITACT == dev->tapedisptype )
-        {
-            dev->tapedisptype = TAPEDISPTYP_IDLE;
-            UpdateDisplay( dev );
-        }
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* LOCATE BLOCK                                                  */
-    /*---------------------------------------------------------------*/
-    case 0x4F:
-        /* Check for minimum count field */
-        if (count < sizeof(dev->blockid))
-        {
-            build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-            break;
-        }
-
-        /* Block to seek */
-        ASSERT( count >= sizeof(locblock) );
-        FETCH_FW(locblock, iobuf);
-
-        /* Check for invalid/reserved Format Mode bits */
-        if (0x3590 != dev->devtype &&
-            0x00C00000 == (locblock & 0x00C00000))
-        {
-            build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-            break;
-        }
-
-        if (0x3590 != dev->devtype)     /* Added by Fish */
-//          locblock &= 0x003FFFFF;     /* Re-applied by Adrian */
-            locblock &= 0xFF3FFFFF;     /* Changed by Fish */
-
-        /* Calculate residual byte count */
-        len = sizeof(locblock);
-        num = (count < len) ? count : len;
-        *residual = count - num;
-
-        /* Informative message if tracing */
-        if ( dev->ccwtrace || dev->ccwstep )
-            logmsg(_("HHCTA081I Locate block 0x%8.8"I32_FMT"X on %s%s%4.4X\n")
-                ,locblock
-                ,TAPEDEVT_SCSITAPE == dev->tapedevt ? (char*)dev->filename : ""
-                ,TAPEDEVT_SCSITAPE == dev->tapedevt ?             " = "    : ""
-                ,dev->devnum
-                );
-
-        /* Update display if needed */
-        if ( TAPEDISPTYP_IDLE    == dev->tapedisptype ||
-             TAPEDISPTYP_WAITACT == dev->tapedisptype )
-        {
-            dev->tapedisptype = TAPEDISPTYP_LOCATING;
-            UpdateDisplay( dev );
-        }
-
-        /* Start of block locate code */
-        {
-#if defined(OPTION_SCSI_TAPE)
-            struct mtop  mtop;
-
-            mtop.mt_op = MTSEEK;
-
-            locblock = CSWAP32( locblock ); // (convert to guest format)
-            blockid_emulated_to_actual( dev, (BYTE*)&locblock, (BYTE*)&mtop.mt_count );
-            mtop.mt_count = CSWAP32( mtop.mt_count ); // (convert back to host format)
-
-            /* Let the hardware do the locate if this is a SCSI drive;
-               Else do it the hard way if it's not (or an error occurs) */
-            if (TAPEDEVT_SCSITAPE != dev->tapedevt
-                || (rc = ioctl_tape( dev->fd, MTIOCTOP, (char*) &mtop )) < 0 )
-#endif
-            {
-                rc=dev->tmh->rewind(dev,unitstat,code);
-                if(rc<0)
-                {
-                    // ZZ FIXME: shouldn't we be returning
-                    // some type of unit-check here??
-                    // SENSE1_TAPE_RSE??
-                    dev->poserror = 1;   // (because the rewind failed)
-                }
-                else
-                {
-                    /* Reset position counters to start of file */
-                    dev->curfilen = 1;
-                    dev->nxtblkpos = 0;
-                    dev->prvblkpos = -1;
-                    dev->blockid = 0;
-                    dev->poserror = 0;
-
-                    /* Do it the hard way */
-                    while(dev->blockid < locblock && ( rc >= 0 ))
-                    {
-                        rc=dev->tmh->fsb(dev,unitstat,code);
-                    }
-                }
-            }
-        }
-
-        /* Update display if needed */
-        if ( TAPEDISPTYP_LOCATING == dev->tapedisptype )
-        {
-            dev->tapedisptype = TAPEDISPTYP_IDLE;
-            UpdateDisplay( dev );
-        }
-
-        if (rc < 0)
-        {
-            // ZZ FIXME: shouldn't we be returning
-            // some type of unit-check here??
-            // SENSE1_TAPE_RSE??
-            dev->poserror = 1;   // (because the locate failed)
-            break;
-        }
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* PERFORM SUBSYSTEM FUNCTION                                    */
-    /*---------------------------------------------------------------*/
-    case 0x77:
-        /* By Adrian Trenkwalder */
-
-        /* Byte 0 is the PSF order */
-        switch(iobuf[0])
-        {
-        /*-----------------------------------------------------------*/
-        /* Activate/Deactivate Forced Error Logging                  */
-        /* 0x8000nn / 0x8100nn                                       */
-        /*-----------------------------------------------------------*/
-        case PSF_ORDER_AFEL:
-        case PSF_ORDER_DFEL:
-          /* Calculate residual byte count */
-          num = (count < 3) ? count : 3;
-            *residual = count - num;
-
-            /* Control information length must be at least 3 bytes */
-            /* and the flag byte must be zero for all orders       */
-            if ( (count < 3)
-                ||  (iobuf[1] != PSF_FLAG_ZERO)
-                  || ((iobuf[2] != PSF_ACTION_FEL_IMPLICIT)
-                  && (iobuf[2] != PSF_ACTION_FEL_EXPLICIT))
-               )
-            {
-               build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-               break;
-            }
-
-            build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-            break;
-
-        /*-----------------------------------------------------------*/
-        /* Activate/Deactivate Access Control                        */
-        /* 0x8200nn / 0x8300nn                                       */
-        /*-----------------------------------------------------------*/
-        case PSF_ORDER_AAC:
-        case PSF_ORDER_DAC:
-            /* Calculate residual byte count */
-          num = (count < 4) ? count : 4;
-            *residual = count - num;
-
-          /* Control information length must be at least 4 bytes */
-          /* and the flag byte must be zero for all orders       */
-          if ( (count < 3)
-              || (iobuf[1] != PSF_FLAG_ZERO)
-                || ((iobuf[2] != PSF_ACTION_AC_LWP)
-                && (iobuf[2] != PSF_ACTION_AC_DCD)
-                && (iobuf[2] != PSF_ACTION_AC_DCR)
-                && (iobuf[2] != PSF_ACTION_AC_ER))
-             )
-            {
-              build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-              break;
-            }
-
-          build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-          break;
-
-        /*-----------------------------------------------------------*/
-        /* Reset Volume Fenced                                       */
-        /* 0x9000                                                    */
-        /*-----------------------------------------------------------*/
-        case PSF_ORDER_RVF:
-            /* Calculate residual byte count */
-          num = (count < 2) ? count : 2;
-            *residual = count - num;
-
-          /* Control information length must be at least 2 bytes */
-          /* and the flag byte must be zero for all orders       */
-          if ( (count < 2)
-              || (iobuf[1] != PSF_FLAG_ZERO)
-             )
-            {
-              build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-              break;
-            }
-
-          build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-          break;
-
-        /*-----------------------------------------------------------*/
-        /* Pin Device                                                */
-        /* 0xA100nn                                                  */
-        /*-----------------------------------------------------------*/
-        case PSF_ORDER_PIN_DEV:
-            /* Calculate residual byte count */
-          num = (count < 3) ? count : 3;
-            *residual = count - num;
-
-          /* Control information length must be at least 3 bytes */
-          /* and the flag byte must be zero for all orders       */
-          if ( (count < 3)
-                || (iobuf[1] != PSF_FLAG_ZERO)
-                || ((iobuf[2] != PSF_ACTION_PIN_CU0)
-                && (iobuf[2] != PSF_ACTION_PIN_CU1))
-             )
-            {
-              build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-              break;
-            }
-          build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-          break;
-
-        /*-----------------------------------------------------------*/
-        /* Unpin Device                                              */
-        /* 0xA200                                                    */
-        /*-----------------------------------------------------------*/
-        case PSF_ORDER_UNPIN_DEV:
-            /* Calculate residual byte count */
-          num = (count < 2) ? count : 2;
-            *residual = count - num;
-
-          /* Control information length must be at least 2 bytes */
-          /* and the flag byte must be zero for all orders       */
-          if ( (count < 2)
-                || (iobuf[1] != PSF_FLAG_ZERO)
-             )
-            {
-              build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-              break;
-            }
-          build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-          break;
-
-        /*-----------------------------------------------------------*/
-        /* Not yet supported                                         */
-        /* 0x180000000000mm00iiiiii  Prepare for Read Subsystem Data */
-        /* 0x1B00                    Set Special Intercept Condition */
-        /* 0x1C00xxccnnnn0000iiiiii..Message Not Supported           */
-        /*-----------------------------------------------------------*/
-        case PSF_ORDER_PRSD:
-        case PSF_ORDER_SSIC:
-        case PSF_ORDER_MNS:
-        // Fall through
-        default:
-          build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-          break;
-        }   /* End switch iobuf */
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* Control Access                                                */
-    /*---------------------------------------------------------------*/
-    case 0xE3:
-        /* By Adrian Trenkwalder */
-
-        /* Calculate residual byte count */
-        num = (count < 12) ? count : 12;
-        *residual = count - num;
-
-        /* Control information length must be at least 12 bytes */
-        if (count < 12)
-        {
-          build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-          break;
-        }
-
-        /* Byte 0 is the CAC mode-of-use */
-        switch(iobuf[0])
-        {
-        /*-----------------------------------------------------------*/
-        /* Set Password                                              */
-        /* 0x00nnnnnnnnnnnnnnnnnnnnnn                                */
-        /*-----------------------------------------------------------*/
-        case CAC_SET_PASSWORD:
-          /* Password must not be zero                               */
-          /* and the device path must be Explicitly Enabled          */
-          if (( memcmp(iobuf+1,"\00\00\00\00\00\00\00\00\00\00\00",11)==0)
-               ||((dev->pgstat & SPG_PARTSTAT_XENABLED) == 0) )
-          {
-            build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-            break;
-          }
-            /* Set Password if none set yet                            */
-          if (memcmp(dev->drvpwd,"\00\00\00\00\00\00\00\00\00\00\00",11)==0)
-          {
-            memcpy(dev->drvpwd,iobuf+1,11);
-          }
-          /* Password already set - they must match                 */
-            else
-          {
-            if (memcmp(dev->drvpwd,iobuf+1,11)!=0)
-            {
-              build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-              break;
-            }
-            }
-          build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-          break;
-
-        /*-----------------------------------------------------------*/
-        /* Conditional Enable                                        */
-        /* 0x80nnnnnnnnnnnnnnnnnnnnnn                                */
-        /*-----------------------------------------------------------*/
-        case CAC_COND_ENABLE:
-          /* A drive password must be set and it must match the one given as input */
-          if (  (memcmp(dev->drvpwd,"\00\00\00\00\00\00\00\00\00\00\00",11)==0)
-              ||(memcmp(dev->drvpwd,iobuf+1,11)!=0)
-             )
-          {
-             build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-             break;
-          }
-          build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-          break;
-
-        /*-----------------------------------------------------------*/
-        /* Conditional Disable                                       */
-        /* 0x40nnnnnnnnnnnnnnnnnnnnnn                                */
-        /*-----------------------------------------------------------*/
-        case CAC_COND_DISABLE:
-        /* A drive password is set, it must match the one given as input */
-        if (  (memcmp(dev->drvpwd,"\00\00\00\00\00\00\00\00\00\00\00",11)!=0)
-            &&(memcmp(dev->drvpwd,iobuf+1,11)!=0)
-           )
-        {
-           build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-           break;
-        }
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-        default:
-          build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-          break;
-        } /* End switch iobuf */
-      break;
-
-    /*---------------------------------------------------------------*/
-    /* READ SUBSYSTEM DATA  (3590)                                   */
-    /*---------------------------------------------------------------*/
-    case 0x3E:
-
-        // ZZ FIXME: not coded yet.
-
-        /* Set command reject sense byte, and unit check status */
-        build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* MODE SET   (non-cartidge drives?)                             */
-    /*---------------------------------------------------------------*/
-    case 0xCB: /* 9-track 800 bpi */
-    case 0xC3: /* 9-track 1600 bpi */
-    case 0xD3: /* 9-track 6250 bpi */
-        /* Patch to no-op modeset 1 (7-track) commands -             */
-        /*   causes VM problems                                      */
-        /*                                                           */
-        /* Andy Norrie 2002/10/06                                    */
-    case 0x13:
-    case 0x33:
-    case 0x3B:
-    case 0x23:
-    case 0x53:
-    case 0x73:
-    case 0x7B:
-    case 0x63:
-    case 0x6B:
-    case 0x93:
-    case 0xB3:
-    case 0xBB:
-    case 0xA3:
-    case 0xAB:
-    case 0xEB: /* invalid mode set issued by DOS/VS */
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* MODE SENSE   (3590)                                           */
-    /*---------------------------------------------------------------*/
-    case 0xCF:
-
-        // ZZ FIXME: not written yet.
-
-        // For now, just treat identically to above MODE SET.
-
-        // NOTE: Might possibly be able to be moved/combined into
-        // the previous 'MODE SET' logic??
-
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* MODE SET   (3480/3490/3590 cartidge drives only?)             */
-    /*---------------------------------------------------------------*/
-    case 0xDB: /* 3480 mode set */
-        /* Check for count field at least 1 */
-        if (count < 1)
-        {
-            build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-            break;
-        }
-        *residual = count - 1;
-        /* FIXME: Handle Supervisor Inhibit and IDRC bits */
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* Read and Reset Buffered Log (9347)                            */
-    /*---------------------------------------------------------------*/
-    case 0xA4:
-        /* Calculate residual byte count */
-        num = (count < dev->numsense) ? count : dev->numsense;
-        *residual = count - num;
-        if (count < dev->numsense) *more = 1;
-
-        /* Reset SENSE Data */
-        memset (dev->sense, 0, sizeof(dev->sense));
-        *unitstat=CSW_CE|CSW_DE;
-
-        /* Copy device Buffered log data (Bunch of 0s for now) */
-        memcpy (iobuf, dev->sense, num);
-
-        /* Indicate Contengency Allegiance has been cleared */
-        dev->sns_pending=0;
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* MEDIUM SENSE   (3590)                                         */
-    /*---------------------------------------------------------------*/
-    case 0xC2:
-
-        // Similar to (if not identical to) SCSI "Test Unit Ready"
-        // command. Basically just used to determine whether there
-        // is a tape mounted on the drive or not.
-
-        // (purposely FALL THROUGH to the normal 'SENSE' logic below)
-
-    /*---------------------------------------------------------------*/
-    /* SENSE                                                         */
-    /*---------------------------------------------------------------*/
-    case 0x04:
-        /* Calculate residual byte count */
-        num = (count < dev->numsense) ? count : dev->numsense;
-        *residual = count - num;
-        if (count < dev->numsense) *more = 1;
-
-        /* If a sense is pending, use it. */
-        /* Otherwise, build a STATUS sense */
-
-        if(!dev->sns_pending)
-        {
-            build_senseX(TAPE_BSENSE_UNSOLICITED,dev,unitstat,code);
-        }
-        *unitstat=CSW_CE|CSW_DE; /* Need to do that ourselves because */
-                                 /* we might not have gone through    */
-                                 /* build_senseX                      */
-
-        /* Copy device sense bytes to channel I/O buffer */
-        memcpy (iobuf, dev->sense, num);
-
-        /* Clear the device sense bytes */
-        memset (dev->sense, 0, sizeof(dev->sense));
-
-        /* Indicate Contengency Allegiance has been cleared */
-        dev->sns_pending=0;
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* READ BUFFERED LOG                                             */
-    /*---------------------------------------------------------------*/
-    case 0x24:
-        /* Calculate residual byte count */
-        num = (count < 64) ? count : 64;
-        *residual = count - num;
-        if (count < 64) *more = 1;
-
-        /* Clear the device sense bytes */
-        memset (iobuf, 0, num);
-
-        /* Copy device sense bytes to channel I/O buffer */
-        memcpy (iobuf, dev->sense,
-                dev->numsense < (U32)num ? dev->numsense : (U32)num);
-
-        /* Return unit status */
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* SENSE ID                                                      */
-    /*---------------------------------------------------------------*/
-    case 0xE4:
-        /* SENSE ID did not exist on the 3803 */
-        /* Changed logic: numdevid is 0 if 0xE4 not supported */
-        if (!dev->numdevid)
-        {
-            build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-            break;
-        }
-
-        /* Calculate residual byte count */
-        num = (count < dev->numdevid) ? count : dev->numdevid;
-        *residual = count - num;
-        if (count < dev->numdevid) *more = 1;
-
-        /* Copy device identifier bytes to channel I/O buffer */
-        memcpy (iobuf, dev->devid, num);
-
-        /* Return unit status */
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* SENSE PATH GROUP ID                                           */
-    /*---------------------------------------------------------------*/
-    case 0x34:
-        /* Calculate residual byte count */
-        num = (count < 12) ? count : 12;
-        *residual = count - num;
-        if (count < 12) *more = 1;
-
-        /* Byte 0 is the path group state byte */
-        /*
-        iobuf[0] = SPG_PATHSTAT_RESET
-                | SPG_PARTSTAT_IENABLED
-                | SPG_PATHMODE_SINGLE;
-                */
-        iobuf[0]=dev->pgstat;
-
-        /* Bytes 1-11 contain the path group identifier */
-        if(num>1)
-        {
-            memcpy (iobuf+1, dev->pgid, num-1);
-        }
-
-        /* Return unit status */
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* SET PATH GROUP ID                                             */
-    /*---------------------------------------------------------------*/
-    case 0xAF:
-
-        /* Calculate residual byte count */
-        num = (count < 12) ? count : 12;
-        *residual = count - num;
-
-        /* Control information length must be at least 12 bytes */
-        if (count < 12)
-        {
-            build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-            break;
-        }
-
-        /* Byte 0 is the path group state byte */
-        switch((iobuf[0] & SPG_SET_COMMAND))
-        {
-        case SPG_SET_ESTABLISH:
-            /* Only accept the new pathgroup id when
-               1) it has not yet been set (ie contains zeros) or
-               2) It is set, but we are setting the same value */
-            if(memcmp(dev->pgid,
-                 "\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00", 11)
-              && memcmp(dev->pgid, iobuf+1, 11))
-            {
-                build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-                break;
-            }
-            /* Bytes 1-11 contain the path group identifier */
-            memcpy (dev->pgid, iobuf+1, 11);
-            dev->pgstat=SPG_PATHSTAT_GROUPED|SPG_PARTSTAT_IENABLED;
-            build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-            break;
-        case SPG_SET_RESIGN:
-        default:
-            dev->pgstat=0;
-            memset(dev->pgid,0,11);
-            build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-            break;
-        case SPG_SET_DISBAND:
-            dev->pgstat=0;
-            build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-            break;
-        } // end switch((iobuf[0] & SPG_SET_COMMAND))
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* READ DEVICE CHARACTERISTICS                                   */
-    /*---------------------------------------------------------------*/
-    case 0x64:
-        /* Command reject if device characteristics not available */
-        if (!dev->numdevchar)
-        {
-            build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-            break;
-        }
-
-        /* Calculate residual byte count */
-        num = (count < dev->numdevchar) ? count : dev->numdevchar;
-        *residual = count - num;
-        if (count < dev->numdevchar) *more = 1;
-
-        /* Copy device characteristics bytes to channel buffer */
-        memcpy (iobuf, dev->devchar, num);
-
-        /* Return unit status */
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* LOAD DISPLAY                                                  */
-    /*---------------------------------------------------------------*/
-    case 0x9F:
-        /* Calculate residual byte count */
-        num = (count < 17) ? count : 17;
-        *residual = count - num;
-
-        /* Issue message on 3480 matrix display */
-        load_display (dev, iobuf, count);
-
-        /* Return unit status */
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* ASSIGN                                                        */
-    /*---------------------------------------------------------------*/
-    case 0xB7:
-        /* Calculate residual byte count */
-        num = (count < 11) ? count : 11;
-        *residual = count - num;
-
-        /* Control information length must be at least 11 bytes */
-        if (count < 11)
-        {
-            build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-            break;
-        }
-        if((memcmp(iobuf,"\00\00\00\00\00\00\00\00\00\00",11)==0)
-                || (memcmp(iobuf,dev->pgid,11)==0))
-        {
-            dev->pgstat|=SPG_PARTSTAT_XENABLED; /* Set Explicit Partition Enabled */
-        }
-        else
-        {
-            build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-            break;
-        }
-
-        /* Return unit status */
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* UNASSIGN                                                      */
-    /*---------------------------------------------------------------*/
-    case 0xC7:
-        /* Calculate residual byte count */
-        num = (count < 11) ? count : 11;
-        *residual = count - num;
-
-        /* Control information length must be at least 11 bytes */
-        if (count < 11)
-        {
-            build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-            break;
-        }
-
-        dev->pgstat=0;          /* Reset to All Implicitly enabled */
-        memset(dev->pgid,0,11); /* Reset Path group ID password */
-        /* Drive Password  - Adrian       */
-        memset(dev->drvpwd,0,sizeof(dev->drvpwd)); /* Reset drive password */
-
-
-        /* Return unit status */
-        build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
-        break;
-
-    /*---------------------------------------------------------------*/
-    /* INVALID OPERATION                                             */
-    /*---------------------------------------------------------------*/
-    default:
-        /* Set command reject sense byte, and unit check status */
-        build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
-
-    } /* end switch(code) */
-
-} /* end function tapedev_execute_ccw */
-
-/*-------------------------------------------------------------------*/
-
-static int is_tapeloaded_filename(DEVBLK *dev,BYTE *unitstat,BYTE code)
+int is_tapeloaded_filename ( DEVBLK *dev, BYTE *unitstat, BYTE code )
 {
     UNREFERENCED(unitstat);
     UNREFERENCED(code);
     // true 1 == tape loaded, false 0 == tape not loaded
     return strcmp( dev->filename, TAPE_UNLOADED ) != 0 ? 1 : 0;
 }
-static int return_false1(DEVBLK *dev)
+
+/*-------------------------------------------------------------------*/
+/* return_false1                                                     */
+/*-------------------------------------------------------------------*/
+int return_false1 ( DEVBLK *dev )
 {
     UNREFERENCED(dev);
     return 0;
 }
-static int write_READONLY(DEVBLK *dev,BYTE *unitstat,BYTE code)
+
+/*-------------------------------------------------------------------*/
+/* write_READONLY                                                    */
+/*-------------------------------------------------------------------*/
+int write_READONLY ( DEVBLK *dev, BYTE *unitstat, BYTE code )
 {
     build_senseX(TAPE_BSENSE_WRITEPROTECT,dev,unitstat,code);
     return -1;
 }
-static int write_READONLY5(DEVBLK *dev,BYTE *bfr,U16 blklen,BYTE *unitstat,BYTE code)
+
+/*-------------------------------------------------------------------*/
+/* write_READONLY5                                                   */
+/*-------------------------------------------------------------------*/
+int write_READONLY5 ( DEVBLK *dev, BYTE *bfr, U16 blklen, BYTE *unitstat, BYTE code )
 {
     UNREFERENCED(bfr);
     UNREFERENCED(blklen);
@@ -6642,166 +2595,108 @@ static int write_READONLY5(DEVBLK *dev,BYTE *bfr,U16 blklen,BYTE *unitstat,BYTE 
 }
 
 /*-------------------------------------------------------------------*/
-/*  (see 'tapedev.h' for layout of TAPEMEDIA_HANDLER structure)      */
+/* no_operation                                                      */
 /*-------------------------------------------------------------------*/
+int no_operation ( DEVBLK *dev, BYTE *unitstat, BYTE code )
+{
+    build_senseX( TAPE_BSENSE_STATUSONLY, dev, unitstat, code );
+    return 0;
+}
 
-static TAPEMEDIA_HANDLER tmh_aws = {
-    &open_awstape,
-    &close_awstape,
-    &read_awstape,
-    &write_awstape,
-    &rewind_awstape,
-    &bsb_awstape,
-    &fsb_awstape,
-    &bsf_awstape,
-    &fsf_awstape,
-    &write_awsmark,
-    NULL, /* DSE */
-    NULL, /* ERG */
-    &is_tapeloaded_filename,
-    passedeot_awstape
-};
+/*-------------------------------------------------------------------*/
+/* readblkid_virtual                                                 */
+/*-------------------------------------------------------------------*/
+int readblkid_virtual ( DEVBLK* dev, BYTE* logical, BYTE* physical )
+{
+    // NOTE: returned value is always in guest BIG-ENDIAN format...
 
-static TAPEMEDIA_HANDLER tmh_het = {
-    &open_het,
-    &close_het,
-    &read_het,
-    &write_het,
-    &rewind_het,
-    &bsb_het,
-    &fsb_het,
-    &bsf_het,
-    &fsf_het,
-    &write_hetmark,
-    NULL, /* DSE */
-    NULL, /* ERG */
-    &is_tapeloaded_filename,
-    passedeot_het
-};
+    BYTE  blockid[4];
 
+    if (0x3590 == dev->devtype)
+    {
+        // Full 32-bit block-id...
+
+        blockid[0] = (dev->blockid >> 24) & 0xFF;
+        blockid[1] = (dev->blockid >> 16) & 0xFF;
+        blockid[2] = (dev->blockid >> 8 ) & 0xFF;
+        blockid[3] = (dev->blockid      ) & 0xFF;
+    }
+    else // (3480 et. al)
+    {
+        // "22-bit" block-id...
+
+        blockid[0] = 0x01;  // ("wrap" value)
+        blockid[1] = (dev->blockid >> 16) & 0x3F;
+        blockid[2] = (dev->blockid >> 8 ) & 0xFF;
+        blockid[3] = (dev->blockid      ) & 0xFF;
+    }
+
+    // NOTE: For virtual tape devices, we return the same value
+    // for both the logical "Channel block ID" value as well as
+    // the physical "Device block ID" value...
+
+    if (logical)  memcpy( logical,  &blockid[0], 4 );
+    if (physical) memcpy( physical, &blockid[0], 4 );
+
+    return 0;
+}
+
+/*-------------------------------------------------------------------*/
+/* locateblk_virtual                                                 */
+/*-------------------------------------------------------------------*/
+int locateblk_virtual ( DEVBLK* dev, U32 blockid, BYTE *unitstat, BYTE code )
+{
+    // NOTE: 'blockid' passed in host (little-endian) format...
+
+    int rc;
+
+    /* Do it the hard way: rewind to load-point and then
+       keep doing fsb, fsb, fsb... until we find our block
+    */
+    if ((rc = dev->tmh->rewind( dev, unitstat, code)) >= 0)
+    {
+        /* Reset position counters to start of file */
+
+        dev->curfilen   =  1;
+        dev->nxtblkpos  =  0;
+        dev->prvblkpos  = -1;
+        dev->blockid    =  0;
+
+        /* Do it the hard way */
+
+        while ( dev->blockid < blockid && ( rc >= 0 ) )
+            rc = dev->tmh->fsb( dev, unitstat, code );
+    }
+
+    return rc;
+}
+
+/*-------------------------------------------------------------------*/
+/* generic_tmhcall              generic media-type-handler call...   */
+/*-------------------------------------------------------------------*/
+int generic_tmhcall ( GENTMH_PARMS* pGenParms )
+{
+    if (!pGenParms)
+    {
+        errno = EINVAL;             // (invalid arguments)
+        return -1;                  // (return failure)
+    }
+
+    switch (pGenParms->action)
+    {
 #if defined(OPTION_SCSI_TAPE)
-
-static TAPEMEDIA_HANDLER tmh_scsi = {
-    &open_scsitape,
-    &close_scsitape,
-    &read_scsitape,
-    &write_scsitape,
-    &rewind_scsitape,
-    &bsb_scsitape,
-    &fsb_scsitape,
-    &bsf_scsitape,
-    &fsf_scsitape,
-    &write_scsimark,
-    &dse_scsitape,
-    &erg_scsitape,
-    &is_tape_mounted_scsitape,
-
-    // PROGRAMMING NOTE: the following vector is actually assigned
-    // to the 'passedeot' entry-point, but since SCSI tapes aren't
-    // emulated devices but rather real hardware devices instead
-    // (who's status already includes whether EOT has been passed
-    // or not), this particular media-handler entry-point is not
-    // currently needed for its original intended purpose. Thus we
-    // can safely use it for our own custom purposes, which in our
-    // case is to force a manual refreshing/updating of the actual
-    // drive status information on behalf of the caller.
-
-    //                    ** IMPORTANT! **
-
-    // Please read the WARNING comments in the force_status_update
-    // function itself! It's important to NOT call this entry-point
-    // indiscriminately as doing so could cause improper functioning
-    // of the guest o/s!
-
-    &force_status_update
-};
+        case GENTMH_SCSI_ACTION_UPDATE_STATUS:
+        {
+            return update_status_scsitape( pGenParms->dev );
+        }
 #endif /* defined(OPTION_SCSI_TAPE) */
 
-static TAPEMEDIA_HANDLER tmh_oma = {
-    &open_omatape,
-    &close_omatape,
-    &read_omatape,
-    &write_READONLY5, /* WRITE */
-    &rewind_omatape,
-    &bsb_omatape,
-    &fsb_omatape,
-    &bsf_omatape,
-    &fsf_omatape,
-    &write_READONLY,  /* WTM */
-    &write_READONLY,  /* DSE */
-    &write_READONLY,  /* ERG */
-    &is_tapeloaded_filename,
-    &return_false1    /* passedeot */
-};
-/*-------------------------------------------------------------------*/
+        default:
+        {
+            errno = EINVAL;         // (invalid arguments)
+            return -1;              // (return failure)
+        }
+    }
 
-#if defined(OPTION_DYNAMIC_LOAD)
-static
-#endif
-
-DEVHND tapedev_device_hndinfo = {
-    &tapedev_init_handler,             /* Device Initialisation      */
-    &tapedev_execute_ccw,              /* Device CCW execute         */
-    &tapedev_close_device,             /* Device Close               */
-    &tapedev_query_device,             /* Device Query               */
-    NULL,                              /* Device Start channel pgm   */
-    NULL,                              /* Device End channel pgm     */
-    NULL,                              /* Device Resume channel pgm  */
-    NULL,                              /* Device Suspend channel pgm */
-    NULL,                              /* Device Read                */
-    NULL,                              /* Device Write               */
-    NULL,                              /* Device Query used          */
-    NULL,                              /* Device Reserve             */
-    NULL,                              /* Device Release             */
-    NULL,                              /* Device Attention           */
-    TapeImmedCommands,                 /* Immediate CCW Codes        */
-    NULL,                              /* Signal Adapter Input       */
-    NULL,                              /* Signal Adapter Output      */
-    NULL,                              /* Hercules suspend           */
-    NULL                               /* Hercules resume            */
-};
-
-/* Libtool static name colision resolution */
-/* note: lt_dlopen will look for symbol & modulename_LTX_symbol */
-#if !defined(HDL_BUILD_SHARED) && defined(HDL_USE_LIBTOOL)
-#define hdl_ddev hdt3420_LTX_hdl_ddev
-#define hdl_depc hdt3420_LTX_hdl_depc
-#define hdl_reso hdt3420_LTX_hdl_reso
-#define hdl_init hdt3420_LTX_hdl_init
-#define hdl_fini hdt3420_LTX_hdl_fini
-#endif // !defined(HDL_BUILD_SHARED) && defined(HDL_USE_LIBTOOL)
-
-#if defined(OPTION_DYNAMIC_LOAD)
-HDL_DEPENDENCY_SECTION;
-{
-    HDL_DEPENDENCY(HERCULES);
-    HDL_DEPENDENCY(DEVBLK);
-    HDL_DEPENDENCY(SYSBLK);
+    return -1;      // (never reached)
 }
-END_DEPENDENCY_SECTION
-
-#if defined(WIN32) && !defined(HDL_USE_LIBTOOL) && !defined(_MSVC_)
-  #undef sysblk
-  HDL_RESOLVER_SECTION;
-  {
-    HDL_RESOLVE_PTRVAR( psysblk, sysblk );
-  }
-  END_RESOLVER_SECTION
-#endif
-
-HDL_DEVICE_SECTION;
-{
-    HDL_DEVICE(3410, tapedev_device_hndinfo );
-    HDL_DEVICE(3411, tapedev_device_hndinfo );
-    HDL_DEVICE(3420, tapedev_device_hndinfo );
-    HDL_DEVICE(3480, tapedev_device_hndinfo );
-    HDL_DEVICE(3490, tapedev_device_hndinfo );
-    HDL_DEVICE(3590, tapedev_device_hndinfo );
-    HDL_DEVICE(9347, tapedev_device_hndinfo );
-    HDL_DEVICE(9348, tapedev_device_hndinfo );
-    HDL_DEVICE(8809, tapedev_device_hndinfo );
-    HDL_DEVICE(3422, tapedev_device_hndinfo );
-    HDL_DEVICE(3430, tapedev_device_hndinfo );
-}
-END_DEVICE_SECTION
-#endif // defined(OPTION_DYNAMIC_LOAD)

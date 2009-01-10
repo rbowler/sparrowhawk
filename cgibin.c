@@ -1,7 +1,7 @@
 /* CGIBIN.C     (c)Copyright Jan Jaeger, 2002-2007                   */
 /*              HTTP cgi-bin routines                                */
 
-// $Id: cgibin.c,v 1.74 2007/06/23 00:04:03 ivan Exp $
+// $Id: cgibin.c,v 1.75 2008/05/23 20:38:13 fish Exp $
 
 /* This file contains all cgi routines that may be executed on the   */
 /* server (ie under control of a hercules thread)                    */
@@ -45,6 +45,9 @@
 /*                                           Jan Jaeger - 28/03/2002 */
 
 // $Log: cgibin.c,v $
+// Revision 1.75  2008/05/23 20:38:13  fish
+// Change device query calls to not ask for what they don't need
+//
 // Revision 1.74  2007/06/23 00:04:03  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -749,7 +752,6 @@ void cgibin_debug_device_list(WEBBLK *webblk)
 {
 DEVBLK *dev;
 char   *class;
-char   buf[80];
 
     html_header(webblk);
 
@@ -764,7 +766,7 @@ char   buf[80];
     for(dev = sysblk.firstdev; dev; dev = dev->nextdev)
         if(dev->pmcw.flag5 & PMCW5_V)
         {
-             (dev->hnd->query)(dev, &class, sizeof(buf), buf);
+             (dev->hnd->query)(dev, &class, 0, NULL);
 
              hprintf(webblk->sock,"<tr>"
                                    "<td>%4.4X</td>"

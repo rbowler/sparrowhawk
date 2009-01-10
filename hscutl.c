@@ -8,9 +8,23 @@
 /* z/Architecture emulator                                           */
 /*********************************************************************/
 
-// $Id: hscutl.c,v 1.25 2007/01/12 14:38:47 rbowler Exp $
+// $Id: hscutl.c,v 1.29 2008/11/29 21:28:01 rbowler Exp $
 //
 // $Log: hscutl.c,v $
+// Revision 1.29  2008/11/29 21:28:01  rbowler
+// Fix warnings C4267 because win64 declares send length as int not size_t
+//
+// Revision 1.28  2008/07/10 18:29:02  fish
+// Fix crash in 'resolve_symbol_string' when incomplete symbol passed
+// (e.g. "$(x" for example)
+//
+// Revision 1.27  2008/02/19 11:49:19  ivan
+// - Move setting of CPU priority after spwaning timer thread
+// - Added support for Posix 1003.1e capabilities
+//
+// Revision 1.26  2007/11/11 20:38:24  rbowler
+// Suppress msg HHCUT001I if keepalive successful
+//
 // Revision 1.25  2007/01/12 14:38:47  rbowler
 // Error checking for Unix keepalive
 //
@@ -491,6 +505,12 @@ DLL_EXPORT char *resolve_symbol_string(const char *text)
         }
         buffer_addchar_and_alloc(&resstr,text[i],&curix,&maxix);
     }
+    if(!resstr)
+    {
+        /* Malloc anyway - the caller will free() */
+        resstr=malloc(strlen(text)+1);
+        strcpy(resstr,text);
+    }
     return(resstr);
 }
 
@@ -696,7 +716,7 @@ void socket_keepalive( int sfd, int idle_time, int probe_interval,
 {
     int rc, optval = 1;
     rc = setsockopt(sfd, SOL_SOCKET, SO_KEEPALIVE, &optval, sizeof(optval));
-    logmsg("HHCUT001I SO_KEEPALIVE rc=%d %s\n", rc, strerror(errno));
+    if (rc) logmsg("HHCUT001I SO_KEEPALIVE rc=%d %s\n", rc, strerror(errno));
 
   #if defined(TCP_KEEPALIVE)
     optval = idle_time;
@@ -777,7 +797,7 @@ DLL_EXPORT char * hgets(char *b,size_t c,int s)
 
 DLL_EXPORT int hwrite(int s,const char *bfr,size_t sz)
 {
-    return send(s,bfr,sz,0);
+    return send(s,bfr,(int)sz,0); /* (int) cast is for _WIN64 */
 }
 
 DLL_EXPORT int hprintf(int s,char *fmt,...)
@@ -808,3 +828,91 @@ DLL_EXPORT int hprintf(int s,char *fmt,...)
     free(bfr);
     return rc;
 }
+
+/* Posix 1003.1e capabilities support */
+
+#if defined(HAVE_SYS_CAPABILITY_H) && defined(HAVE_SYS_PRCTL_H) && defined(OPTION_CAPABILITIES)
+/*-------------------------------------------------------------------*/
+/* DROP root privileges but retain a capability                      */
+/*-------------------------------------------------------------------*/
+DLL_EXPORT int drop_privileges(int capa)
+{
+    uid_t    uid;
+    gid_t    gid;
+    cap_t   c;
+    int rc;
+    int failed;
+    cap_value_t v;
+    int have_capt;
+
+    /* If *real* userid is root, no need to do all this */
+    uid=getuid();
+    if(!uid) return 0;
+
+    failed=1;
+    have_capt=0;
+    do
+    {
+        c=cap_init();
+        if(!c) break;
+        have_capt=1;
+        v=capa;
+        rc=cap_set_flag(c,CAP_EFFECTIVE,1,&v,CAP_SET);
+        if(rc<0) break;
+        rc=cap_set_flag(c,CAP_INHERITABLE,1,&v,CAP_SET);
+        if(rc<0) break;
+        rc=cap_set_flag(c,CAP_PERMITTED,1,&v,CAP_SET);
+        if(rc<0) break;
+        rc=cap_set_proc(c);
+        if(rc<0) break;
+        rc=prctl(PR_SET_KEEPCAPS,1);
+        if(rc<0) break;
+        failed=0;
+    } while(0);
+    gid=getgid();
+    setregid(gid,gid);
+    setreuid(uid,uid);
+    if(!failed)
+    {
+        rc=cap_set_proc(c);
+        if(rc<0) failed=1;
+    }
+
+    if(have_capt)
+        cap_free(c);
+
+    return failed;
+}
+/*-------------------------------------------------------------------*/
+/* DROP all capabilities                                             */
+/*-------------------------------------------------------------------*/
+DLL_EXPORT int drop_all_caps(void)
+{
+    uid_t    uid;
+    cap_t   c;
+    int rc;
+    int failed;
+    int have_capt;
+
+    /* If *real* userid is root, no need to do all this */
+    uid=getuid();
+    if(!uid) return 0;
+
+    failed=1;
+    have_capt=0;
+    do
+    {
+        c=cap_from_text("all-eip");
+        if(!c) break;
+        have_capt=1;
+        rc=cap_set_proc(c);
+        if(rc<0) break;
+        failed=0;
+    } while(0);
+
+    if(have_capt)
+        cap_free(c);
+
+    return failed;
+}
+#endif

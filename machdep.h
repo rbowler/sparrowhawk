@@ -1,6 +1,6 @@
 /* MACHDEP.H  Machine specific code                                  */
 
-// $Id: machdep.h,v 1.61 2007/03/13 00:34:18 ivan Exp $
+// $Id: machdep.h,v 1.64 2008/11/24 21:08:36 rbowler Exp $
 
 /*-------------------------------------------------------------------*/
 /*                                                                   */
@@ -31,6 +31,15 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: machdep.h,v $
+// Revision 1.64  2008/11/24 21:08:36  rbowler
+// Fix win64 warning C4311 type cast pointer truncation in machdep.h
+//
+// Revision 1.63  2007/10/02 22:02:27  gsmith
+// cygwin does not need special assist for -fPIC
+//
+// Revision 1.62  2007/08/07 19:47:59  ivan
+// Fix a couple of gcc-4.2 warnings
+//
 // Revision 1.61  2007/03/13 00:34:18  ivan
 // fetch_dw macro fix for MSVC compiles
 //
@@ -216,11 +225,11 @@
     {
         // returns 0 == success, 1 otherwise
 
-        long  off, shift;
+        LONG_PTR  off, shift;
         BYTE  cc;
         U32  *ptr4, val4, old4, new4;
 
-        off   = (long)ptr & 3;
+        off   = (LONG_PTR)ptr & 3;
         shift = (3 - off) * 8;
         ptr4  = (U32*)(((BYTE*)ptr) - off);
         val4  = CSWAP32(*ptr4);
@@ -346,7 +355,7 @@
      */
 #undef BREG
 #undef XCHG_BREG
-#ifdef PIC
+#if defined(PIC) && !defined(__CYGWIN__)
 #define BREG "S"
 #define XCHG_BREG "xchgl   %%ebx,%%esi\n\t"
 #else
@@ -646,11 +655,11 @@ U32  *ptr4, val4, old4, new4;
     #define fetch_fw_noswap(_p) CSWAP32(fetch_fw((_p)))
   #else
     #if !defined(OPTION_STRICT_ALIGNMENT)
-      static __inline__ U32 fetch_fw_noswap(void *ptr) {
+      static __inline__ U32 fetch_fw_noswap(const void *ptr) {
         return *(U32 *)ptr;
       }
     #else
-      static __inline__ U32 fetch_fw_noswap(void *ptr) {
+      static __inline__ U32 fetch_fw_noswap(const void *ptr) {
         U32 value;
         memcpy(&value, (BYTE *)ptr, 4);
         return value;

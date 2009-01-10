@@ -1,9 +1,12 @@
 /* CON1052.C    (c)Copyright Jan Jaeger, 2004-2007                   */
 /*              Emulated 1052 on hercules console                    */
 
-// $Id: con1052c.c,v 1.13 2007/06/23 16:13:54 jmaynard Exp $
+// $Id: con1052c.c,v 1.14 2007/11/21 22:54:14 fish Exp $
 //
 // $Log: con1052c.c,v $
+// Revision 1.14  2007/11/21 22:54:14  fish
+// Use new BEGIN_DEVICE_CLASS_QUERY macro
+//
 // Revision 1.13  2007/06/23 16:13:54  jmaynard
 // Fixing two messages out of internationalization by removing redundant
 // carriage returns.
@@ -136,7 +139,7 @@ static void
 con1052_query_device (DEVBLK *dev, char **class,
                 int buflen, char *buffer)
 {
-    *class = "CON";
+    BEGIN_DEVICE_CLASS_QUERY( "CON", dev, class, buflen, buffer );
 
     snprintf(buffer, buflen,
         "*syscons cmdpref(%s)%s",

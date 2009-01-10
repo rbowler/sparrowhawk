@@ -6,7 +6,7 @@
 /*                                                                   */
 /*********************************************************************/
 
-// $Id: dyngui.c,v 1.59 2007/06/23 00:04:08 ivan Exp $
+// $Id: dyngui.c,v 1.64 2008/11/23 22:27:43 rbowler Exp $
 
 /*********************************************************************/
 /*                                                                   */
@@ -39,10 +39,26 @@
 /* 12/23/06  Improve efficiency of reporting register updates        */
 /* 12/23/06  Forced GUI status update/refresh support                */
 /* 03/25/07  Prevent need for OBTAIN_INTLOCK same as panel.c         */
+/* 02/10/08  Forced refresh doesn't apply to device-status reporting */
 /*                                                                   */
 /*********************************************************************/
 
 // $Log: dyngui.c,v $
+// Revision 1.64  2008/11/23 22:27:43  rbowler
+// Fix win64 type conversion warnings in w32util.c
+//
+// Revision 1.63  2008/02/12 08:42:15  fish
+// dyngui tweaks: new def devlist fmt, new debug_cd_cmd hook
+//
+// Revision 1.62  2007/12/29 14:40:51  fish
+// fix copyregs function to fallback to using dummyregs whenever regs->hostregs happens to be NULL
+//
+// Revision 1.61  2007/12/10 23:12:02  gsmith
+// Tweaks to OPTION_MIPS_COUNTING processing
+//
+// Revision 1.60  2007/09/05 00:24:18  gsmith
+// Use integer arithmetic calculating cpupct
+//
 // Revision 1.59  2007/06/23 00:04:08  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -106,7 +122,6 @@
 #endif
 #endif
 
-
 static FILE*    fOutputStream        = NULL;   // (stdout stream)
 static FILE*    fStatusStream        = NULL;   // (stderr stream)
 static int      nInputStreamFileNum  =  -1;    // (file descriptor for stdin stream)
@@ -126,7 +141,7 @@ void  Initialize         ();
 void  ProcessingLoop     ();
 void  Cleanup            ();
 void  UpdateTargetCPU    ();
-void  ReadInputData      (size_t nTimeoutMillsecs);
+void  ReadInputData      (int nTimeoutMillsecs);
 void  ProcessInputData   ();
 void* gui_panel_command  (char* pszCommand);
 void  UpdateStatus       ();
@@ -213,6 +228,12 @@ REGS* CopyREGS( int cpu )               // (same logic as in panel.c)
 
     memcpy( &copyregs, regs, sysblk.regs_copy_len );
 
+    if (!copyregs.hostregs)
+    {
+        release_lock(&sysblk.cpulock[cpu]);
+        return &sysblk.dummyregs;
+    }
+
 #if defined(_FEATURE_SIE)
     if (regs->sie_active)
     {
@@ -226,6 +247,7 @@ REGS* CopyREGS( int cpu )               // (same logic as in panel.c)
         regs = &copyregs;
 
     SET_PSW_IA( regs );
+
     release_lock( &sysblk.cpulock[cpu] );
     return regs;
 }
@@ -238,7 +260,7 @@ int    nInputLen       = 0;                     // amount of data it's holding
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void ReadInputData ( size_t  nTimeoutMillsecs )
+void ReadInputData ( int nTimeoutMillsecs )
 {
     size_t  nMaxBytesToRead;
     int     nBytesRead;
@@ -380,6 +402,8 @@ void  ProcessInputData ()
 ///////////////////////////////////////////////////////////////////////////////
 // (These are actually boolean flags..)
 
+double gui_version           = 0.0;     // (version of HercGUI we're talking to)
+
 BYTE   gui_forced_refresh    = 1;       // (force initial update refresh)
 
 BYTE   gui_wants_gregs       = 0;
@@ -389,8 +413,8 @@ BYTE   gui_wants_cregs64     = 0;
 BYTE   gui_wants_aregs       = 0;
 BYTE   gui_wants_fregs       = 0;
 BYTE   gui_wants_fregs64     = 0;
-BYTE   gui_wants_devlist     = 1;       // (should always be initially on)
-BYTE   gui_wants_new_devlist = 0;
+BYTE   gui_wants_devlist     = 0;
+BYTE   gui_wants_new_devlist = 1;       // (should always be initially on)
 #if defined(OPTION_MIPS_COUNTING)
 BYTE   gui_wants_cpupct      = 0;
 #endif
@@ -416,6 +440,12 @@ void*  gui_panel_command (char* pszCommand)
     gui_forced_refresh = 1;                         // (forced update refresh)
 
     pszCommand++;                                   // (bump past ']')
+
+    if (strncasecmp(pszCommand,"VERS=",5) == 0)
+    {
+        gui_version = atof(pszCommand+5);
+        return NULL;
+    }
 
     if (strncasecmp(pszCommand,"SCD=",4) == 0)
     {
@@ -583,23 +613,12 @@ void  UpdateStatus ()
 #if defined(OPTION_MIPS_COUNTING)
     if (gui_wants_cpupct)
     {
-        char  cpupct[10];
-
-        if (CPUSTATE_STOPPED == pTargetCPU_REGS->cpustate)
-            strcpy(cpupct,"0");
-        else
-            snprintf(cpupct,sizeof(cpupct),
-                "%1.0f",(100.0 * pTargetCPU_REGS->cpupct));
-
-        if (isdigit(cpupct[0]))
-        {
             gui_fprintf(fStatusStream,
 
-                "CPUPCT=%s\n"
+                "CPUPCT=%d\n"
 
-                ,cpupct
+                ,pTargetCPU_REGS->cpupct
             );
-        }
     }
 #endif
 
@@ -613,12 +632,7 @@ void  UpdateStatus ()
         || pcpu != prev_pcpu
         || memcmp(prev_psw, psw, sizeof(prev_psw)) != 0
         || prev_cpustate   != pTargetCPU_REGS->cpustate
-        || (prev_instcount != (
-#if defined(_FEATURE_SIE)
-                SIE_MODE(pTargetCPU_REGS) ?  pTargetCPU_REGS->hostregs->instcount :
-#endif
-                pTargetCPU_REGS->instcount)
-           )
+        || prev_instcount != INSTCOUNT(pTargetCPU_REGS)
     )
     {
         bStatusChanged = TRUE;          // (something has indeed changed...)
@@ -632,11 +646,7 @@ void  UpdateStatus ()
         prev_pcpu = pcpu;
         memcpy(prev_psw, psw, sizeof(prev_psw));
         prev_cpustate = pTargetCPU_REGS->cpustate;
-        prev_instcount = (
-#if defined(_FEATURE_SIE)
-            SIE_MODE(pTargetCPU_REGS) ? pTargetCPU_REGS->hostregs->instcount :
-#endif
-            pTargetCPU_REGS->instcount);
+        prev_instcount = INSTCOUNT(pTargetCPU_REGS);
     }
 
     // If anything has changed, inform the GUI...
@@ -775,11 +785,7 @@ void  UpdateCPUStatus ()
 #else  // !defined(_900)
                                                                    '.'
 #endif //  defined(_900)
-            ,(long long)(
-#if       defined(_FEATURE_SIE)
-            SIE_MODE(pTargetCPU_REGS) ? pTargetCPU_REGS->hostregs->instcount :
-#endif // defined(_FEATURE_SIE)
-            pTargetCPU_REGS->instcount)
+            ,(long long)INSTCOUNT(pTargetCPU_REGS)
         );
 
     } // endif cpu is online/offline
@@ -1702,7 +1708,6 @@ void  UpdateDeviceStatus ()
 ///////////////////////////////////////////////////////////////////////////////
 // Send device status msgs to the gui IF NEEDED...  (slightly more efficient)
 
-#ifdef EXTERNALGUI
 void  NewUpdateDevStats ()
 {
     DEVBLK*   pDEVBLK;
@@ -1803,8 +1808,7 @@ void  NewUpdateDevStats ()
         // for next time. In this way we only send device status
         // msgs to the GUI only when the status actually changes...
 
-        if (gui_forced_refresh ||
-            strcmp( pGUIStat->pszNewStatStr, pGUIStat->pszOldStatStr ))
+        if (strcmp( pGUIStat->pszNewStatStr, pGUIStat->pszOldStatStr ))
         {
             gui_fprintf ( fStatusStream, "%s\n", pGUIStat->pszNewStatStr );
             bUpdatesSent = TRUE;
@@ -1820,21 +1824,21 @@ void  NewUpdateDevStats ()
     if ( bUpdatesSent )
         gui_fprintf(fStatusStream, "DEVX=\n");  // (send end-of-batch indicator)
 }
-#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 // Our Hercules "debug_cpu_state" override...
-
-// The following function fixes an unintentional problem caused by the new
-// logger mechanism (wherein stdout and stderr now point to the same stream)
-// due to a oversight (bug) on my part wherein the 'LOAD' and 'MAN' messages
-// are being [mistakenly] written to stdout instead of stderr (where they
-// normally should be). The current version of the gui expects both messages
-// to come in on the stdout stream, but due to the recent logger changes, they
-// now come in on the stderr stream instead (because stdout was duped to stderr
-// by the new logger logic) thus causing the gui to miss seeing them without
-// the below fix. The below fix simply corrects for this by simply writing the
-// two messages to the stdout stream where the current gui expects to see them.
+//
+// Hercules calls the following function from several different places to fix
+// an unintentional problem caused by the new logger mechanism (wherein stdout
+// and stderr now point to the same stream) due to a oversight (bug) on my part
+// wherein the 'LOAD' and 'MAN' messages are being [mistakenly] written to stdout
+// instead of stderr (where they normally should be). The current version of
+// the gui expects both messages to come in on the stdout stream, but due to the
+// recent logger changes, they now come in on the stderr stream instead (because
+// stdout was duped to stderr by the new logger logic) thus causing the gui to
+// miss seeing them without the below fix. The below fix simply corrects for the
+// problem by simply writing the two messages to the stdout stream where older
+// versions of the gui expect to see them.
 
 void*  gui_debug_cpu_state ( REGS* pREGS )
 {
@@ -1864,6 +1868,19 @@ void *(*next_debug_call)(REGS *);
         return next_debug_call( pREGS );
 
     return NULL;    // (I have no idea why this is a void* func)
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Our Hercules "debug_cd_cmd" hook...
+//
+// The following function is called by the 'cd_cmd' panel command to notify
+// the GUI of what the new current directory was just changed to...
+
+void gui_debug_cd_cmd( char* pszCWD )
+{
+    ASSERT( pszCWD );
+    if (gui_version >= 1.12)
+        gui_fprintf( fStatusStream, "]CWD=%s\n", pszCWD );
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -2019,6 +2036,7 @@ HDL_REGISTER_SECTION;       // ("Register" our entry-points)
 HDL_REGISTER ( panel_display,   gui_panel_display   );// (Yep! We override EITHER!)
 HDL_REGISTER ( daemon_task,     gui_panel_display   );// (Yep! We override EITHER!)
 HDL_REGISTER ( debug_cpu_state, gui_debug_cpu_state );
+HDL_REGISTER ( debug_cd_cmd,    gui_debug_cd_cmd    );
 HDL_REGISTER ( panel_command,   gui_panel_command   );
 
 END_REGISTER_SECTION

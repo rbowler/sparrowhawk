@@ -2,7 +2,7 @@
 /*              ESA/390 CPU Emulator                                 */
 /*              Instructions N-Z                                     */
 
-// $Id: general2.c,v 1.114 2007/06/23 00:04:10 ivan Exp $
+// $Id: general2.c,v 1.126 2008/03/28 13:36:25 rbowler Exp $
 
 /*              (c) Copyright Peter Kuschnerus, 1999-2007 (UPT & CFC)*/
 
@@ -32,6 +32,42 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: general2.c,v $
+// Revision 1.126  2008/03/28 13:36:25  rbowler
+// Fix incorrect registers when cc=1 for TRTE,TRTRE
+//
+// Revision 1.125  2008/03/27 16:45:17  rbowler
+// TRTE and TRTRE incorrectly return cc=3
+//
+// Revision 1.124  2008/03/06 16:10:35  rbowler
+// Remove extraneous trailing blanks (cosmetic change only)
+//
+// Revision 1.123  2008/03/01 15:15:41  bernard
+// Removed the silly control-M characters
+//
+// Revision 1.122  2008/03/01 12:19:04  rbowler
+// Rename new features to include the word facility
+//
+// Revision 1.121  2008/03/01 07:51:00  bernard
+// TRTE, TRTRE: Checking for a_bit and ch>255 is double. Removed the a_bit.
+//
+// Revision 1.120  2008/02/29 16:25:13  bernard
+// Added Parsing Enhancement Facility
+//
+// Revision 1.119  2008/02/15 21:21:18  ptl00
+// Fix STCKE so that byte 0 is cleared
+//
+// Revision 1.118  2008/01/24 00:59:03  gsmith
+// Fix and optimize TR instruction
+//
+// Revision 1.117  2007/12/30 17:48:21  bernard
+// Anoter UTF xlate error
+//
+// Revision 1.116  2007/12/30 09:09:51  bernard
+// Some errors in UTF translation
+//
+// Revision 1.115  2007/11/30 15:14:14  rbowler
+// Permit String-Instruction facility to be activated in S/370 mode
+//
 // Revision 1.114  2007/06/23 00:04:10  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -520,6 +556,7 @@ VADR    effective_addr2,
 #endif /*defined(FEATURE_PERFORM_LOCKED_OPERATION)*/
 
 
+#if defined(FEATURE_STRING_INSTRUCTION)
 /*-------------------------------------------------------------------*/
 /* B25E SRST  - Search String                                  [RRE] */
 /*-------------------------------------------------------------------*/
@@ -579,7 +616,8 @@ BYTE    termchar;                       /* Terminating character     */
     /* Return condition code 3 */
     regs->psw.cc = 3;
 
-}
+} /* end DEF_INST(search_string) */
+#endif /*defined(FEATURE_STRING_INSTRUCTION)*/
 
 
 #if defined(FEATURE_ACCESS_REGISTERS)
@@ -835,7 +873,7 @@ U64     dreg;                           /* Double register work area */
 
 
 /*-------------------------------------------------------------------*/
-/* 8A   SRA   - Shift Right single                              [RS] */
+/* 8A   SRA   - Shift Right Single                              [RS] */
 /*-------------------------------------------------------------------*/
 DEF_INST(shift_right_single)
 {
@@ -1089,7 +1127,7 @@ U64     dreg;                           /* Double word work area     */
     PERFORM_SERIALIZATION (regs);
 
     /* Retrieve the TOD epoch, clock bits 0-51, and 4 zeroes */
-    dreg = tod_clock(regs);
+    dreg = 0x00ffffffffffffffULL & tod_clock(regs);
 
     /* Check that all 16 bytes of the operand are accessible */
     ARCH_DEP(validate_operand) (effective_addr2, b2, 15, ACCTYPE_WRITE, regs);
@@ -1109,7 +1147,7 @@ U64     dreg;                           /* Double word work area     */
     effective_addr2 &= ADDRESS_MAXWRAP(regs);
 
     /* Store nonzero value in pos 72 to 111 */
-    dreg = 0x0000000100000000ULL | (regs->cpuad << 16) | regs->todpr;
+    dreg = 0x0000000001000000ULL | (regs->cpuad << 16) | regs->todpr;
 
     ARCH_DEP(vstore8) ( dreg, effective_addr2, b2, regs );
 
@@ -1555,60 +1593,74 @@ U16     h2;                             /* 16-bit operand values     */
 /*-------------------------------------------------------------------*/
 DEF_INST(translate)
 {
-int     l;                              /* Lenght byte               */
+int     len, len2 = -1;                 /* Lengths                   */
 int     b1, b2;                         /* Values of base field      */
-VADR    effective_addr1,
-        effective_addr2;                /* Effective address         */
-U32     n;                              /* 32-bit operand values     */
-BYTE    sbyte;                          /* Byte work areas           */
-int     d;                              /* Integer work areas        */
-int     h;                              /* Integer work areas        */
-int     i;                              /* Integer work areas        */
-BYTE    cwork[256];                     /* Character work areas      */
+int     i, b, n;                        /* Work variables            */
+VADR    addr1, addr2;                   /* Effective addresses       */
+BYTE   *dest, *dest2 = NULL, *tab, *tab2; /* Mainstor pointers       */
 
-    SS_L(inst, regs, l, b1, effective_addr1,
-                                  b2, effective_addr2);
+    SS_L(inst, regs, len, b1, addr1, b2, addr2);
 
-    /* If operand 1 crosses a page, make sure both pages are accessable */
-    if((effective_addr1 & PAGEFRAME_PAGEMASK) !=
-        ((effective_addr1 + l) & PAGEFRAME_PAGEMASK))
-        ARCH_DEP(validate_operand) (effective_addr1, b1, l, ACCTYPE_WRITE_SKP, regs);
+    /* Get destination pointer */
+    dest = MADDR (addr1, b1, regs, ACCTYPE_WRITE, regs->psw.pkey);
 
-    /* Fetch first operand into work area */
-    ARCH_DEP(vfetchc) ( cwork, l, effective_addr1, b1, regs );
-
-    /* Determine the second operand range by scanning the
-       first operand to find the bytes with the highest
-       and lowest values */
-    for ( i = 0, d = 255, h = 0; i <= l; i++ )
+    /* Get pointer to next page if destination crosses a boundary */
+    if (CROSS2K (addr1, len))
     {
-        if (cwork[i] < d) d = cwork[i];
-        if (cwork[i] > h) h = cwork[i];
+        len2 = len;
+        len = 0x7FF - (addr1 & 0x7FF);
+        len2 -= (len + 1);
+        dest2 = MADDR ((addr1+len+1) & ADDRESS_MAXWRAP(regs),
+                       b1, regs, ACCTYPE_WRITE, regs->psw.pkey);
     }
 
-    n = (effective_addr2 + d) & ADDRESS_MAXWRAP(regs);
-    /* If operand 2 crosses a page, make sure both pages are accessable */
-    if((n & PAGEFRAME_PAGEMASK) !=
-        ((n + (h-d)) & PAGEFRAME_PAGEMASK))
-        ARCH_DEP(validate_operand) (n, b2, h-d, ACCTYPE_READ, regs);
-
-    /* Process first operand from left to right, refetching
-       second operand and storing the result byte by byte
-       to ensure correct handling of overlapping operands */
-    for ( i = 0; i <= l; i++ )
+    /* Fast path if table does not cross a boundary */
+    if (NOCROSS2K (addr2, 255))
     {
-        /* Fetch byte from second operand */
-        n = (effective_addr2 + cwork[i]) & ADDRESS_MAXWRAP(regs);
-        sbyte = ARCH_DEP(vfetchb) ( n, b2, regs );
+        tab = MADDR (addr2, b2, regs, ACCTYPE_READ, regs->psw.pkey);
+        /* Perform translate function */
+        for (i = 0; i <= len; i++)
+            dest[i] = tab[dest[i]];
+        for (i = 0; i <= len2; i++)
+            dest2[i] = tab[dest2[i]];
+    }
+    else
+    {
+        n = 0x800  - (addr2 & 0x7FF);
+        b = dest[0];
 
-        /* Store result at first operand address */
-        ARCH_DEP(vstoreb) ( sbyte, effective_addr1, b1, regs );
+        /* Referenced part of the table may or may not span boundary */
+        if (b < n)
+        {
+            tab = MADDR (addr2, b2, regs, ACCTYPE_READ, regs->psw.pkey);
+            for (i = 1; i <= len && b < n; i++)
+                b = dest[i];
+            for (i = 0; i <= len2 && b < n; i++)
+                b = dest2[i];
+            tab2 = b < n
+                 ? NULL
+                 : MADDR ((addr2+n) & ADDRESS_MAXWRAP(regs),
+                          b2, regs, ACCTYPE_READ, regs->psw.pkey);
+        }
+        else
+        {
+            tab2 = MADDR ((addr2+n) & ADDRESS_MAXWRAP(regs),
+                          b2, regs, ACCTYPE_READ, regs->psw.pkey);
+            for (i = 1; i <= len && b >= n; i++)
+                b = dest[i];
+            for (i = 0; i <= len2 && b >= n; i++)
+                b = dest2[i];
+            tab = b >= n
+                ? NULL
+                : MADDR (addr2, b2, regs, ACCTYPE_READ, regs->psw.pkey);
+        }
 
-        /* Increment first operand address */
-        effective_addr1++;
-        effective_addr1 &= ADDRESS_MAXWRAP(regs);
-
-    } /* end for(i) */
+        /* Perform translate function */
+        for (i = 0; i <= len; i++)
+            dest[i] = dest[i] < n ? tab[dest[i]] : tab2[dest[i]-n];
+        for (i = 0; i <= len2; i++)
+            dest2[i] = dest2[i] < n ? tab[dest2[i]] : tab2[dest2[i]-n];
+    } /* Translate table spans a boundary */
 }
 
 
@@ -2078,7 +2130,7 @@ DEF_INST(convert_utf8_to_utf32)
       /* 110fghij 10klmnop -> 00000000 00000000 00000fgh ijklmnop */
       utf32[1] = 0x00;
       utf32[2] = (utf8[0] & 0x1c) >> 2;
-      utf32[3] = (utf8[0] << 6) & (utf8[1] & 0x3f);
+      utf32[3] = (utf8[0] << 6) | (utf8[1] & 0x3f);
       read = 2;
     }
     else if(utf8[0] >= 0xe0 && utf8[0] <= 0xef)
@@ -2127,8 +2179,8 @@ DEF_INST(convert_utf8_to_utf32)
       /* xlate range e00000-efffff */
       /* 1110abcd 10efghij 10klmnop -> 00000000 00000000 abcdefgh ijklmnop */
       utf32[1] = 0x00;
-      utf32[2] = (utf8[0] << 4) & ((utf8[1] & 0x3c) >> 2);
-      utf32[3] = (utf8[1] << 6) & (utf8[2] & 0x3f);
+      utf32[2] = (utf8[0] << 4) | ((utf8[1] & 0x3c) >> 2);
+      utf32[3] = (utf8[1] << 6) | (utf8[2] & 0x3f);
       read = 3;
     }
     else if(utf8[0] >= 0xf0 && utf8[0] <= 0xf7)
@@ -2188,9 +2240,9 @@ DEF_INST(convert_utf8_to_utf32)
 
       /* xlate range f0000000-f7000000 */
       /* 1110uvw 10xyefgh 10ijklmn 10opqrst -> 00000000 000uvwxy efghijkl mnopqrst */
-      utf32[1] = ((utf8[0] & 0x07) << 2) & ((utf8[1] & 0x30) >> 4);
-      utf32[2] = (utf8[1] << 4) & ((utf8[2] & 0x3c) >> 2);
-      utf32[3] = (utf8[2] << 6) & (utf8[3] & 0x3f);
+      utf32[1] = ((utf8[0] & 0x07) << 2) | ((utf8[1] & 0x30) >> 4);
+      utf32[2] = (utf8[1] << 4) | ((utf8[2] & 0x3c) >> 2);
+      utf32[3] = (utf8[2] << 6) | (utf8[3] & 0x3f);
       read = 4;
     }
     else
@@ -2442,7 +2494,7 @@ DEF_INST(convert_utf32_to_utf8)
       /* 00000000 000uvwxy efghijkl mnopqrst -> 11110uvw 10xyefgh 10ijklmn 10opqrst */
       utf8[0] = 0xf0 | (utf32[1] >> 2);
       utf8[1] = 0x80 | ((utf32[1] & 0x03) << 4) | (utf32[2] >> 4);
-      utf8[2] = 0x80 | ((utf32[2] & 0x0f) < 2) | (utf32[3] >> 6);
+      utf8[2] = 0x80 | ((utf32[2] & 0x0f) << 2) | (utf32[3] >> 6);
       utf8[3] = 0x80 | (utf32[3] & 0x3f);
       write = 4;
     }
@@ -2539,7 +2591,7 @@ DEF_INST(convert_utf32_to_utf16)
       zabcd = (utf32[1] - 1) & 0x0f;
       utf16[0] = 0xd8 | (zabcd >> 2);
       utf16[1] = (zabcd << 6) | (utf32[2] >> 2);
-      utf16[2] = 0xd9 | (utf32[2] & 0x03);
+      utf16[2] = 0xdc | (utf32[2] & 0x03);
       utf16[3] = utf32[3];
       write = 4;
     }
@@ -2689,6 +2741,196 @@ DEF_INST(translate_and_test_reverse)
   regs->psw.cc = cc;
 }
 #endif /*defined(FEATURE_EXTENDED_TRANSLATION_FACILITY_3)*/
+
+#ifdef FEATURE_PARSING_ENHANCEMENT_FACILITY
+/*-------------------------------------------------------------------*/
+/* B9BF TRTE - Translate and Test Extended                     [RRF] */
+/*-------------------------------------------------------------------*/
+DEF_INST(translate_and_test_extended)
+{
+  int a_bit;                  /* Argument-Character Control (A)      */
+  U32 arg_ch;                 /* Argument character                  */
+  VADR buf_addr;              /* first argument address              */
+  GREG buf_len;               /* First argument length               */
+  int f_bit;                  /* Function-Code Control (F)           */
+  U32 fc;                     /* Function-Code                       */
+  VADR fct_addr;              /* Function-code table address         */
+  int l_bit;                  /* Argument-Character Limit (L)        */
+  int m3;
+  int processed;              /* # bytes processed                   */
+  int r1;
+  int r2;
+
+  RRF_M(inst, regs, r1, r2, m3);
+
+  a_bit = ((m3 & 0x08) ? 1 : 0);
+  f_bit = ((m3 & 0x04) ? 1 : 0);
+  l_bit = ((m3 & 0x02) ? 1 : 0);
+
+  buf_addr = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
+  buf_len = GR_A(r1 + 1, regs);
+
+  fct_addr = regs->GR(1) & ADDRESS_MAXWRAP(regs);
+
+  if(unlikely((a_bit && (buf_len % 1)) || r1 & 0x01))
+    regs->program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
+
+  fc = 0;
+  processed = 0;
+  while(buf_len && !fc && processed < 16384)
+  {
+    if(a_bit)
+    {
+      arg_ch = ARCH_DEP(vfetch2)(buf_addr, r1, regs);
+    }
+    else
+    {
+      arg_ch = ARCH_DEP(vfetchb)(buf_addr, r1, regs);
+    }
+
+    if(l_bit && arg_ch > 255)
+      fc = 0;
+    else
+    {
+      if(f_bit)
+        fc = ARCH_DEP(vfetch2)((fct_addr + (arg_ch * 2)) & ADDRESS_MAXWRAP(regs), 1, regs);
+      else
+        fc = ARCH_DEP(vfetchb)((fct_addr + arg_ch) & ADDRESS_MAXWRAP(regs), 1, regs);
+    }
+
+    if(!fc)
+    {
+      if(a_bit)
+      {
+        buf_len -= 2;
+        processed += 2;
+        buf_addr = (buf_addr + 2) & ADDRESS_MAXWRAP(regs);
+      }
+      else
+      {
+        buf_len--;
+        processed++;
+        buf_addr = (buf_addr + 1) & ADDRESS_MAXWRAP(regs);
+      }
+    }
+  }
+
+  /* Commit registers */
+  SET_GR_A(r1, regs, buf_addr);
+  SET_GR_A(r1 + 1, regs, buf_len);
+
+  /* Check if CPU determined number of bytes have been processed */
+  if(buf_len && !fc)
+  {
+    regs->psw.cc = 3;
+    return;
+  }
+
+  /* Set function code */
+  if(likely(r2 != r1 && r2 != r1 + 1))
+    SET_GR_A(r2, regs, fc);
+
+  /* Set condition code */
+  if(fc)
+    regs->psw.cc = 1;
+  else
+    regs->psw.cc = 0;
+}
+
+/*-------------------------------------------------------------------*/
+/* B9BD TRTRE - Translate and Test Reverse Extended            [RRF] */
+/*-------------------------------------------------------------------*/
+DEF_INST(translate_and_test_reverse_extended)
+{
+  int a_bit;                  /* Argument-Character Control (A)      */
+  U32 arg_ch;                 /* Argument character                  */
+  VADR buf_addr;              /* first argument address              */
+  GREG buf_len;               /* First argument length               */
+  int f_bit;                  /* Function-Code Control (F)           */
+  U32 fc;                     /* Function-Code                       */
+  VADR fct_addr;              /* Function-code table address         */
+  int l_bit;                  /* Argument-Character Limit (L)        */
+  int m3;
+  int processed;              /* # bytes processed                   */
+  int r1;
+  int r2;
+
+  RRF_M(inst, regs, r1, r2, m3);
+
+  a_bit = ((m3 & 0x08) ? 1 : 0);
+  f_bit = ((m3 & 0x04) ? 1 : 0);
+  l_bit = ((m3 & 0x02) ? 1 : 0);
+
+  buf_addr = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
+  buf_len = GR_A(r1 + 1, regs);
+
+  fct_addr = regs->GR(1) & ADDRESS_MAXWRAP(regs);
+
+  if(unlikely((a_bit && (buf_len % 1)) || r1 & 0x01))
+    regs->program_interrupt(regs, PGM_SPECIFICATION_EXCEPTION);
+
+  fc = 0;
+  processed = 0;
+  while(buf_len && !fc && processed < 16384)
+  {
+    if(a_bit)
+    {
+      arg_ch = ARCH_DEP(vfetch2)(buf_addr, r1, regs);
+    }
+    else
+    {
+      arg_ch = ARCH_DEP(vfetchb)(buf_addr, r1, regs);
+    }
+
+    if(l_bit && arg_ch > 255)
+      fc = 0;
+    else
+    {
+      if(f_bit)
+        fc = ARCH_DEP(vfetch2)((fct_addr + (arg_ch * 2)) & ADDRESS_MAXWRAP(regs), 1, regs);
+      else
+        fc = ARCH_DEP(vfetchb)((fct_addr + arg_ch) & ADDRESS_MAXWRAP(regs), 1, regs);
+    }
+
+    if(!fc)
+    {
+      if(a_bit)
+      {
+        buf_len -= 2;
+        processed += 2;
+        buf_addr = (buf_addr - 2) & ADDRESS_MAXWRAP(regs);
+      }
+      else
+      {
+        buf_len--;
+        processed++;
+        buf_addr = (buf_addr - 1) & ADDRESS_MAXWRAP(regs);
+      }
+    }
+  }
+
+  /* Commit registers */
+  SET_GR_A(r1, regs, buf_addr);
+  SET_GR_A(r1 + 1, regs, buf_len);
+
+  /* Check if CPU determined number of bytes have been processed */
+  if(buf_len && !fc)
+  {
+    regs->psw.cc = 3;
+    return;
+  }
+
+  /* Set function code */
+  if(likely(r2 != r1 && r2 != r1 + 1))
+    SET_GR_A(r2, regs, fc);
+
+  /* Set condition code */
+  if(fc)
+    regs->psw.cc = 1;
+  else
+    regs->psw.cc = 0;
+}
+#endif /* FEATURE_PARSING_ENHANCEMENT_FACILITY */
 
 #if !defined(_GEN_ARCH)
 

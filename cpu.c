@@ -4,7 +4,7 @@
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 
-// $Id: cpu.c,v 1.185 2007/06/23 00:04:05 ivan Exp $
+// $Id: cpu.c,v 1.208 2009/01/09 23:25:59 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements the CPU instruction execution function of  */
@@ -30,6 +30,90 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: cpu.c,v $
+// Revision 1.208  2009/01/09 23:25:59  ivan
+// Fix monitor code location when the monitor call occurs during the interception of a z/Arch SIE guest
+//
+// Revision 1.207  2008/12/21 02:51:58  ivan
+// Place the configuration in system check-stop state when a READ SCP INFO
+// is issued from a CPU that is not a CP Engine.
+//
+// Revision 1.206  2008/12/05 11:26:00  jj
+// Fix SIE psw update when host interrupt occurs durng guest processing
+//
+// Revision 1.205  2008/11/04 05:56:31  fish
+// Put ensure consistent create_thread ATTR usage change back in
+//
+// Revision 1.204  2008/11/03 15:31:57  rbowler
+// Back out consistent create_thread ATTR modification
+//
+// Revision 1.203  2008/10/18 09:32:20  fish
+// Ensure consistent create_thread ATTR usage
+//
+// Revision 1.202  2008/10/07 22:24:35  gsmith
+// Fix zero ilc problem after branch trace
+//
+// Revision 1.201  2008/08/13 21:21:55  gsmith
+// Fix bad guest IA after host interrupt during branch trace
+//
+// Revision 1.200  2008/04/11 14:28:15  bernard
+// Integrate regs->exrl into base Hercules code.
+//
+// Revision 1.199  2008/04/09 07:35:32  bernard
+// allign to Rogers terminal ;-)
+//
+// Revision 1.198  2008/04/08 17:12:29  bernard
+// Added execute relative long instruction
+//
+// Revision 1.197  2008/02/19 11:49:19  ivan
+// - Move setting of CPU priority after spwaning timer thread
+// - Added support for Posix 1003.1e capabilities
+//
+// Revision 1.196  2008/02/12 18:23:39  jj
+// 1. SPKA was missing protection check (PIC04) because
+//    AIA regs were not purged.
+//
+// 2. BASR with branch trace and PIC16, the pgm old was pointing
+//    2 bytes before the BASR.
+//
+// 3. TBEDR , TBDR using R1 as source, should be R2.
+//
+// 4. PR with page crossing stack (1st page invalid) and PSW real
+//    in stack, missed the PIC 11. Fixed by invoking abs_stck_addr
+//    for previous stack entry descriptor before doing the load_psw.
+//
+// Revision 1.195  2007/12/10 23:12:02  gsmith
+// Tweaks to OPTION_MIPS_COUNTING processing
+//
+// Revision 1.194  2007/12/07 12:08:51  rbowler
+// Enable B9xx,EBxx opcodes in S/370 mode for ETF2 (correction)
+//
+// Revision 1.193  2007/12/02 16:22:09  rbowler
+// Enable B9xx,EBxx opcodes in S/370 mode for ETF2
+//
+// Revision 1.192  2007/11/22 03:49:01  ivan
+// Store Monitor code DOUBLEWORD when MC invoked under z/Architecture
+// (previously only a fullword was stored)
+//
+// Revision 1.191  2007/11/18 22:18:51  rbowler
+// Permit FEATURE_IMMEDIATE_AND_RELATIVE to be activated in S/370 mode
+//
+// Revision 1.190  2007/11/02 20:19:20  ivan
+// Remove longjmp in process_interrupt() when cpu is STOPPING and a store status
+// was requested - leads to a CPU in the STOPPED state that is still executing
+// instructions.
+//
+// Revision 1.189  2007/08/06 22:14:53  gsmith
+// process_interrupt returns if nothing happens
+//
+// Revision 1.188  2007/08/06 22:14:07  gsmith
+// rework CPU execution loop
+//
+// Revision 1.187  2007/08/06 22:12:49  gsmith
+// cpu thread exitjmp
+//
+// Revision 1.186  2007/08/06 22:10:47  gsmith
+// reposition process_trace for readability
+//
 // Revision 1.185  2007/06/23 00:04:05  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -106,6 +190,32 @@
 #include "opcode.h"
 
 #include "inline.h"
+
+/*-------------------------------------------------------------------*/
+/* Put a CPU in check-stop state                                     */
+/* Must hold the system intlock                                      */
+/*-------------------------------------------------------------------*/
+void ARCH_DEP(checkstop_cpu)(REGS *regs)
+{
+    regs->cpustate=CPUSTATE_STOPPING;
+    regs->checkstop=1;
+    ON_IC_INTERRUPT(regs);
+}
+/*-------------------------------------------------------------------*/
+/* Put all the CPUs in the configuration in check-stop state         */
+/*-------------------------------------------------------------------*/
+void ARCH_DEP(checkstop_config)(void)
+{
+    int i;
+    for(i=0;i<MAX_CPU;i++)
+    {
+        if(IS_CPU_ONLINE(i))
+        {
+            ARCH_DEP(checkstop_cpu)(sysblk.regs[i]);
+        }
+    }
+    WAKEUP_CPUS_MASK(sysblk.waiting_mask);
+}
 
 /*-------------------------------------------------------------------*/
 /* Store current PSW at a specified address in main storage          */
@@ -342,6 +452,11 @@ REGS   *realregs;                       /* True regs structure       */
 RADR    px;                             /* host real address of pfx  */
 int     code;                           /* pcode without PER ind.    */
 int     ilc;                            /* instruction length        */
+#if defined(FEATURE_ESAME)
+/** FIXME : SEE ISW20090110-1 */
+void   *zmoncode;                       /* special reloc for z/Arch  */
+                                        /* mon call SIE intercept    */
+#endif
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
 int     sie_ilc=0;                      /* SIE instruction length    */
 #endif
@@ -462,8 +577,10 @@ static char *pgmintname[] = {
     {
         /* This can happen if BALR, BASR, BASSM or BSM
            program checks during trace */
-        ilc = realregs->execflag ? 4 : 2;
-        realregs->ip += 2;
+        ilc = realregs->execflag ? realregs->exrl ? 6 : 4 : 2;
+        realregs->ip += ilc;
+        realregs->psw.IA += ilc;
+        realregs->psw.ilc = ilc;
     }
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
     if(realregs->sie_active)
@@ -473,8 +590,9 @@ static char *pgmintname[] = {
         if (realregs->guestregs->psw.ilc == 0
          && !realregs->guestregs->psw.zeroilc)
         {
-            sie_ilc = realregs->guestregs->execflag ? 4 : 2;
-            realregs->guestregs->ip += 2;
+            sie_ilc = realregs->guestregs->execflag ?
+                      realregs->guestregs->exrl ? 6 : 4 : 2;
+            realregs->guestregs->psw.ilc = sie_ilc;
         }
     }
 #endif /*defined(FEATURE_INTERPRETIVE_EXECUTION)*/
@@ -693,6 +811,13 @@ static char *pgmintname[] = {
         /* Point to PSA in main storage */
         psa = (void*)(regs->mainstor + px);
 #if defined(_FEATURE_SIE)
+#if defined(FEATURE_ESAME)
+/** FIXME : SEE ISW20090110-1 */
+        if(code == PGM_MONITOR_EVENT)
+        {
+            zmoncode=psa->moncode;
+        }
+#endif
         nointercept = 1;
     }
     else
@@ -705,6 +830,15 @@ static char *pgmintname[] = {
             psa = (void*)(regs->hostregs->mainstor + SIE_STATE(regs) + SIE_IP_PSA_OFFSET);
             /* Set the main storage reference and change bits */
             STORAGE_KEY(SIE_STATE(regs), regs->hostregs) |= (STORKEY_REF | STORKEY_CHANGE);
+#if defined(FEATURE_ESAME)
+/** FIXME : SEE ISW20090110-1 */
+            if(code == PGM_MONITOR_EVENT)
+            {
+                PSA *_psa;
+                _psa=(void *)(regs->hostregs->mainstor + SIE_STATE(regs) + SIE_II_PSA_OFFSET);
+                zmoncode=_psa->ioid;
+            }
+#endif
         }
         else
         {
@@ -873,8 +1007,28 @@ static char *pgmintname[] = {
         {
             STORE_HW(psa->monclass, regs->monclass);
 
-            /* Store the monitor code at PSA+156 */
+            /* Store the monitor code word at PSA+156 */
+            /* or doubleword at PSA+176               */
+            /* ISW20090110-1 ZSIEMCFIX                */
+            /* In the event of a z/Arch guest being   */
+            /* intercepted during a succesful Monitor */
+            /* call, the monitor code is not stored   */
+            /* at psa->moncode (which is beyond sie2bk->ip */
+            /* but rather at the same location as an  */
+            /* I/O interrupt would store the SSID     */
+            /*    zmoncode points to this location    */
+            /*  **** FIXME **** FIXME  *** FIXME ***  */
+            /* ---- The determination of the location */
+            /*      of the z/Sie Intercept moncode    */
+            /*      should be made more flexible      */
+            /*      and should be put somewhere in    */
+            /*      esa390.h                          */
+            /*  **** FIXME **** FIXME  *** FIXME ***  */
+#if defined(FEATURE_ESAME)
+            STORE_DW(zmoncode, regs->MONCODE);
+#else
             STORE_W(psa->moncode, regs->MONCODE);
+#endif
         }
 
 #if defined(FEATURE_PER3)
@@ -1172,22 +1326,6 @@ void *cpu_thread (int *ptr)
 REGS *regs = NULL;
 int   cpu  = *ptr;
 
-    /* Set root mode in order to set priority */
-    SETMODE(ROOT);
-
-    /* Set CPU thread priority */
-    if (setpriority(PRIO_PROCESS, 0, sysblk.cpuprio))
-        logmsg (_("HHCCP001W CPU%4.4X thread set priority %d failed: %s\n"),
-                cpu, sysblk.cpuprio, strerror(errno));
-
-    /* Back to user mode */
-    SETMODE(USER);
-
-    /* Display thread started message on control panel */
-    logmsg (_("HHCCP002I CPU%4.4X thread started: tid="TIDPAT", pid=%d, "
-            "priority=%d\n"),
-            cpu, thread_id(), getpid(),
-            getpriority(PRIO_PROCESS,0));
 
     OBTAIN_INTLOCK(NULL);
 
@@ -1204,7 +1342,7 @@ int   cpu  = *ptr;
     /* Start the TOD clock and CPU timer thread */
     if (!sysblk.todtid)
     {
-        if ( create_thread (&sysblk.todtid, &sysblk.detattr,
+        if ( create_thread (&sysblk.todtid, DETACHED,
              timer_update_thread, NULL, "timer_update_thread") )
         {
             logmsg (_("HHCCP006S Cannot create timer thread: %s\n"),
@@ -1213,6 +1351,22 @@ int   cpu  = *ptr;
             return NULL;
         }
     }
+    /* Set root mode in order to set priority */
+    SETMODE(ROOT);
+
+    /* Set CPU thread priority */
+    if (setpriority(PRIO_PROCESS, 0, sysblk.cpuprio))
+        logmsg (_("HHCCP001W CPU%4.4X thread set priority %d failed: %s\n"),
+                cpu, sysblk.cpuprio, strerror(errno));
+
+    /* Back to user mode */
+    SETMODE(USER);
+
+    /* Display thread started message on control panel */
+    logmsg (_("HHCCP002I CPU%4.4X thread started: tid="TIDPAT", pid=%d, "
+            "priority=%d\n"),
+            cpu, thread_id(), getpid(),
+            getpriority(PRIO_PROCESS,0));
 
     /* Execute the program in specified mode */
     do {
@@ -1356,6 +1510,11 @@ void *cpu_uninit (int cpu, REGS *regs)
 
     if (regs->host)
     {
+#ifdef FEATURE_VECTOR_FACILITY
+        /* Mark Vector Facility offline */
+        regs->vf->online = 0;
+#endif /*FEATURE_VECTOR_FACILITY*/
+
         /* Remove CPU from all CPU bit masks */
         sysblk.config_mask &= ~BIT(cpu);
         sysblk.started_mask &= ~BIT(cpu);
@@ -1432,16 +1591,9 @@ void (ATTR_REGPARM(1) ARCH_DEP(process_interrupt))(REGS *regs)
         regs->opinterv = 0;
         regs->cpustate = CPUSTATE_STOPPED;
 
+        /* Thread exit (note - intlock still held) */
         if (!regs->configured)
-        {
-#ifdef FEATURE_VECTOR_FACILITY
-            /* Mark Vector Facility offline */
-            regs->vf->online = 0;
-#endif /*FEATURE_VECTOR_FACILITY*/
-
-            /* Thread exit (note - intlock still held) */
-            return;
-        }
+            longjmp(regs->exitjmp, SIE_NO_INTERCEPT);
 
         /* If initial CPU reset pending then perform reset */
         if (regs->sigpireset)
@@ -1470,8 +1622,13 @@ void (ATTR_REGPARM(1) ARCH_DEP(process_interrupt))(REGS *regs)
             ARCH_DEP(store_status) (regs, 0);
             logmsg (_("HHCCP010I CPU%4.4X store status completed.\n"),
                     regs->cpuad);
+            /* ISW 20071102 : Do not return via longjmp here. */
+            /*    process_interrupt needs to finish putting the */
+            /*    CPU in its manual state                     */
+            /*
             RELEASE_INTLOCK(regs);
             longjmp(regs->progjmp, SIE_NO_INTERCEPT);
+            */
         }
     } /*CPUSTATE_STOPPING*/
 
@@ -1487,11 +1644,7 @@ void (ATTR_REGPARM(1) ARCH_DEP(process_interrupt))(REGS *regs)
     /* This is where a stopped CPU will wait */
     if (unlikely(regs->cpustate == CPUSTATE_STOPPED))
     {
-    S64 saved_timer;
-#ifdef OPTION_MIPS_COUNTING
-        regs->waittod = hw_clock();
-#endif
-        saved_timer = cpu_timer(regs);
+        S64 saved_timer = cpu_timer(regs);
         regs->ints_state = IC_INITIAL_STATE;
         sysblk.started_mask ^= regs->cpubit;
         sysblk.intowner = LOCK_OWNER_NONE;
@@ -1510,12 +1663,6 @@ void (ATTR_REGPARM(1) ARCH_DEP(process_interrupt))(REGS *regs)
 
         ON_IC_INTERRUPT(regs);
 
-#ifdef OPTION_MIPS_COUNTING
-        /* Calculate the time we waited */
-        regs->waittime += hw_clock() - regs->waittod;
-        regs->waittod = 0;
-#endif
-
         /* Purge the lookaside buffers */
         ARCH_DEP(purge_tlb) (regs);
 #if defined(FEATURE_ACCESS_REGISTERS)
@@ -1525,13 +1672,16 @@ void (ATTR_REGPARM(1) ARCH_DEP(process_interrupt))(REGS *regs)
         /* If the architecture mode has changed we must adapt */
         if(sysblk.arch_mode != regs->arch_mode)
             longjmp(regs->archjmp,SIE_NO_INTERCEPT);
+
+        RELEASE_INTLOCK(regs);
+        longjmp(regs->progjmp, SIE_NO_INTERCEPT);
     } /*CPUSTATE_STOPPED*/
 
     /* Test for wait state */
-    else if (WAITSTATE(&regs->psw))
+    if (WAITSTATE(&regs->psw))
     {
 #ifdef OPTION_MIPS_COUNTING
-        regs->waittod = hw_clock();
+        regs->waittod = host_tod();
 #endif
 
         /* Test for disabled wait PSW and issue message */
@@ -1563,76 +1713,18 @@ void (ATTR_REGPARM(1) ARCH_DEP(process_interrupt))(REGS *regs)
 
 #ifdef OPTION_MIPS_COUNTING
         /* Calculate the time we waited */
-        regs->waittime += hw_clock() - regs->waittod;
+        regs->waittime += host_tod() - regs->waittod;
         regs->waittod = 0;
 #endif
+        RELEASE_INTLOCK(regs);
+        longjmp(regs->progjmp, SIE_NO_INTERCEPT);
     } /* end if(wait) */
 
     /* Release the interrupt lock */
     RELEASE_INTLOCK(regs);
-
-    longjmp(regs->progjmp, SIE_NO_INTERCEPT);
+    return;
 
 } /* process_interrupt */
-
-/*-------------------------------------------------------------------*/
-/* Process Trace                                                     */
-/*-------------------------------------------------------------------*/
-void ARCH_DEP(process_trace)(REGS *regs)
-{
-int     shouldtrace = 0;                /* 1=Trace instruction       */
-int     shouldstep = 0;                 /* 1=Wait for start command  */
-
-    /* Test for trace */
-    if (CPU_TRACING(regs, 0))
-        shouldtrace = 1;
-
-    /* Test for step */
-    if (CPU_STEPPING(regs, 0))
-        shouldstep = 1;
-
-    /* Display the instruction */
-    if (shouldtrace || shouldstep)
-    {
-        BYTE *ip = regs->ip < regs->aip ? regs->inst : regs->ip;
-        ARCH_DEP(display_inst) (regs, ip);
-    }
-
-    /* Stop the CPU */
-    if (shouldstep)
-    {
-        REGS *hostregs = regs->hostregs;
-        S64 saved_timer[2];
-
-        OBTAIN_INTLOCK(hostregs);
-#ifdef OPTION_MIPS_COUNTING
-        hostregs->waittod = hw_clock();
-#endif
-        /* The CPU timer is not decremented for a CPU that is in
-           the manual state (e.g. stopped in single step mode) */
-        saved_timer[0] = cpu_timer(regs);
-        saved_timer[1] = cpu_timer(hostregs);
-        hostregs->cpustate = CPUSTATE_STOPPED;
-        sysblk.started_mask &= ~hostregs->cpubit;
-        hostregs->stepwait = 1;
-        sysblk.intowner = LOCK_OWNER_NONE;
-        while (hostregs->cpustate == CPUSTATE_STOPPED)
-        {
-            wait_condition (&hostregs->intcond, &sysblk.intlock);
-        }
-        sysblk.intowner = hostregs->cpuad;
-        hostregs->stepwait = 0;
-        sysblk.started_mask |= hostregs->cpubit;
-        set_cpu_timer(regs,saved_timer[0]);
-        set_cpu_timer(hostregs,saved_timer[1]);
-#ifdef OPTION_MIPS_COUNTING
-        hostregs->waittime += hw_clock() - hostregs->waittod;
-        hostregs->waittod = 0;
-#endif
-        RELEASE_INTLOCK(hostregs);
-    }
-} /* process_trace */
-
 
 /*-------------------------------------------------------------------*/
 /* Run CPU                                                           */
@@ -1679,6 +1771,10 @@ REGS    regs;
     regs.tracing = (sysblk.inststep || sysblk.insttrace);
     regs.ints_state |= sysblk.ints_state;
 
+    /* Establish longjmp destination for cpu thread exit */
+    if (setjmp(regs.exitjmp))
+        return cpu_uninit(cpu, &regs);
+
     /* Establish longjmp destination for architecture switch */
     setjmp(regs.archjmp);
 
@@ -1709,8 +1805,10 @@ REGS    regs;
     /* Set `execflag' to 0 in case EXecuted instruction did a longjmp() */
     regs.execflag = 0;
 
-    while (!INTERRUPT_PENDING(&regs))
-    {
+    do {
+        if (INTERRUPT_PENDING(&regs))
+            ARCH_DEP(process_interrupt)(&regs);
+
         ip = INSTRUCTION_FETCH(&regs, 0);
         regs.instcount++;
         EXECUTE_INSTRUCTION(ip, &regs);
@@ -1732,14 +1830,70 @@ REGS    regs;
             UNROLLED_EXECUTE(&regs);
             UNROLLED_EXECUTE(&regs);
         } while (!INTERRUPT_PENDING(&regs));
-    } /* while(!INTERRUPT_PENDING(&regs)) */
+    } while (1);
 
-    /* process_interrupt will do longjmp unless we're exiting */
-    ARCH_DEP(process_interrupt)(&regs);
-    return cpu_uninit(cpu, &regs);
+    /* Never reached */
+    return NULL;
 
 } /* end function cpu_thread */
 
+/*-------------------------------------------------------------------*/
+/* Process Trace                                                     */
+/*-------------------------------------------------------------------*/
+void ARCH_DEP(process_trace)(REGS *regs)
+{
+int     shouldtrace = 0;                /* 1=Trace instruction       */
+int     shouldstep = 0;                 /* 1=Wait for start command  */
+
+    /* Test for trace */
+    if (CPU_TRACING(regs, 0))
+        shouldtrace = 1;
+
+    /* Test for step */
+    if (CPU_STEPPING(regs, 0))
+        shouldstep = 1;
+
+    /* Display the instruction */
+    if (shouldtrace || shouldstep)
+    {
+        BYTE *ip = regs->ip < regs->aip ? regs->inst : regs->ip;
+        ARCH_DEP(display_inst) (regs, ip);
+    }
+
+    /* Stop the CPU */
+    if (shouldstep)
+    {
+        REGS *hostregs = regs->hostregs;
+        S64 saved_timer[2];
+
+        OBTAIN_INTLOCK(hostregs);
+#ifdef OPTION_MIPS_COUNTING
+        hostregs->waittod = host_tod();
+#endif
+        /* The CPU timer is not decremented for a CPU that is in
+           the manual state (e.g. stopped in single step mode) */
+        saved_timer[0] = cpu_timer(regs);
+        saved_timer[1] = cpu_timer(hostregs);
+        hostregs->cpustate = CPUSTATE_STOPPED;
+        sysblk.started_mask &= ~hostregs->cpubit;
+        hostregs->stepwait = 1;
+        sysblk.intowner = LOCK_OWNER_NONE;
+        while (hostregs->cpustate == CPUSTATE_STOPPED)
+        {
+            wait_condition (&hostregs->intcond, &sysblk.intlock);
+        }
+        sysblk.intowner = hostregs->cpuad;
+        hostregs->stepwait = 0;
+        sysblk.started_mask |= hostregs->cpubit;
+        set_cpu_timer(regs,saved_timer[0]);
+        set_cpu_timer(hostregs,saved_timer[1]);
+#ifdef OPTION_MIPS_COUNTING
+        hostregs->waittime += host_tod() - hostregs->waittod;
+        hostregs->waittod = 0;
+#endif
+        RELEASE_INTLOCK(hostregs);
+    }
+} /* process_trace */
 
 /*-------------------------------------------------------------------*/
 /* Set Jump Pointers                                                 */
@@ -1767,7 +1921,6 @@ void ARCH_DEP(set_jump_pointers) (REGS *regs, int jump)
     switch (jump) {
 
  #if defined(MULTI_BYTE_ASSIST_IA32)
-  #if ARCH_MODE != ARCH_370
     case 0xa7:
 jump_a7xx:
  __asm__ (
@@ -1776,7 +1929,6 @@ jump_a7xx:
         : : "i" (offsetof(REGS,ARCH_DEP(opcode_a7xx)))
         );
         return;
-  #endif /* ARCH_MODE != ARCH_370 */
     case 0xb2:
 jump_b2xx:
  __asm__ (
@@ -1785,7 +1937,6 @@ jump_b2xx:
         : : "i" (offsetof(REGS,ARCH_DEP(opcode_b2xx)))
         );
         return;
-  #if defined(FEATURE_ESAME) || defined(FEATURE_ESAME_N3_ESA390)
     case 0xb9:
 jump_b9xx:
  __asm__ (
@@ -1794,6 +1945,7 @@ jump_b9xx:
         : : "i" (offsetof(REGS,ARCH_DEP(opcode_b9xx)))
         );
         return;
+  #if defined(FEATURE_ESAME) || defined(FEATURE_ESAME_N3_ESA390)
     case 0xc0:
 jump_c0xx:
  __asm__ (
@@ -1811,6 +1963,7 @@ jump_e3xx:
         );
         return;
     case 0xeb:
+  #endif /* defined(FEATURE_ESAME) || defined(FEATURE_ESAME_N3_ESA390) */
 jump_ebxx:
  __asm__ (
         "movzbl 5(%%eax),%%ecx\n\t"
@@ -1818,21 +1971,18 @@ jump_ebxx:
         : : "i" (offsetof(REGS,ARCH_DEP(opcode_ebxx)))
         );
         return;
-  #endif /* defined(FEATURE_ESAME) || defined(FEATURE_ESAME_N3_ESA390) */
  #endif /* defined(MULTI_BYTE_ASSIST_IA32) */
 
     } /* switch(jump) */
 
- #if ARCH_MODE != ARCH_370
     regs->ARCH_DEP(opcode_table)[0xa7] = &&jump_a7xx;
- #endif
     regs->ARCH_DEP(opcode_table)[0xb2] = &&jump_b2xx;
- #if defined(FEATURE_ESAME) || defined(FEATURE_ESAME_N3_ESA390)
     regs->ARCH_DEP(opcode_table)[0xb9] = &&jump_b9xx;
+ #if defined(FEATURE_ESAME) || defined(FEATURE_ESAME_N3_ESA390)
     regs->ARCH_DEP(opcode_table)[0xc0] = &&jump_c0xx;
     regs->ARCH_DEP(opcode_table)[0xe3] = &&jump_e3xx;
-    regs->ARCH_DEP(opcode_table)[0xeb] = &&jump_ebxx;
  #endif /* defined(FEATURE_ESAME) || defined(FEATURE_ESAME_N3_ESA390) */
+    regs->ARCH_DEP(opcode_table)[0xeb] = &&jump_ebxx;
 
 #else /* !defined(MULTI_BYTE_ASSIST) */
     UNREFERENCED(regs);

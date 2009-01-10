@@ -1,7 +1,7 @@
 /* QETH.C       (c) Copyright Jan Jaeger,   1999-2007                */
 /*              OSA Express                                          */
 
-// $Id: qeth.c,v 1.10 2007/06/23 00:04:15 ivan Exp $
+// $Id: qeth.c,v 1.11 2007/11/21 22:54:14 fish Exp $
 
 /* This module contains device handling functions for the            */
 /* OSA Express emulated card                                         */
@@ -11,6 +11,9 @@
 /* 0A00-0A02 QETH <optional parameters>                              */
 
 // $Log: qeth.c,v $
+// Revision 1.11  2007/11/21 22:54:14  fish
+// Use new BEGIN_DEVICE_CLASS_QUERY macro
+//
 // Revision 1.10  2007/06/23 00:04:15  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -82,9 +85,7 @@ logmsg(D_("senseidnum=%d\n"),dev->numdevid);
 static void qeth_query_device (DEVBLK *dev, char **class,
                 int buflen, char *buffer)
 {
-    UNREFERENCED(dev);
-
-    *class = "QETH";
+    BEGIN_DEVICE_CLASS_QUERY( "QETH", dev, class, buflen, buffer );
 
     snprintf (buffer, buflen, "\n");
 

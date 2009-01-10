@@ -3,11 +3,21 @@
 # --------------------------------------------------------------------------
 # (c) Copyright Roger Bowler, 2005-2007
 # --------------------------------------------------------------------------
+# $Id: PRIM_RULES.msvc,v 1.3 2008/10/21 20:09:20 rbowler Exp $
 #
 #  Primary generic build rules...  ('all', 'clean', etc...)
 #
 #
 #                           CHANGE HISTORY
+# $Log: PRIM_RULES.msvc,v $
+# Revision 1.3  2008/10/21 20:09:20  rbowler
+# Correct test for existence of rebase
+#
+# Revision 1.2  2008/10/11 23:47:05  fish
+# Fix MSVC build failure when 'rebase' utility doesn't exist
+# Add CVS "Id" and "Log"
+#
+#
 # DD/MM/YY Description
 #
 # 26/12/06 Fish: created by extraction from existing makefile-dllmod.msvc
@@ -19,7 +29,7 @@
 # ---------------------------------------------------------------------
 
 all: allzlib alllibbz2 allpcre
-    rebase -b 0x400000 $(X)*.dll
+    for %I in (rebase.exe) do if exist %~$$PATH:I rebase -b 0x400000 $(X)*.dll
     if exist $(EXEDIR)\*.manifest   del /f /q $(EXEDIR)\*.manifest
 
 clean: $(OBJDIR) $(EXEDIR) $(PDBDIR) $(MAPDIR) $(ASMDIR)

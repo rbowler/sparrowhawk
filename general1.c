@@ -7,7 +7,7 @@
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 
-// $Id: general1.c,v 1.151 2007/06/23 00:04:10 ivan Exp $
+// $Id: general1.c,v 1.170 2008/12/24 07:50:16 ivan Exp $
 
 /*-------------------------------------------------------------------*/
 /* This module implements all general instructions of the            */
@@ -32,6 +32,65 @@
 /*-------------------------------------------------------------------*/
 
 // $Log: general1.c,v $
+// Revision 1.170  2008/12/24 07:50:16  ivan
+// CSST Fix - Parm 2 alignement check error
+//
+// Revision 1.169  2008/12/23 13:44:57  ivan
+// CSST Facility 2 fix
+//
+// Revision 1.168  2008/12/22 00:29:10  ivan
+// Implement February 2008 z/Arch Compare And Swap And Store Facility 2
+// Update FAQ to reflect change
+// update FAQ to also indicate z/Arch DAT Enhancement is implemented
+//
+// Revision 1.167  2008/10/07 22:24:35  gsmith
+// Fix zero ilc problem after branch trace
+//
+// Revision 1.166  2008/05/06 22:15:42  rbowler
+// Fix warning: operation on `p1' may be undefined
+//
+// Revision 1.165  2008/04/11 14:28:44  bernard
+// Integrate regs->exrl into base Hercules code.
+//
+// Revision 1.164  2008/04/09 12:01:35  rbowler
+// Correct target instruction address for EXRL
+//
+// Revision 1.163  2008/04/09 07:38:09  bernard
+// Allign to Rogers terminal ;-)
+//
+// Revision 1.162  2008/04/09 07:15:14  bernard
+// Comment Roger
+//
+// Revision 1.161  2008/04/09 07:05:19  bernard
+// EXRL has format C6x0, not C6. Thanks Roger!
+//
+// Revision 1.160  2008/04/09 05:38:57  bernard
+// Instruction fetching error, now fetched with PSW_IA macro.
+//
+// Revision 1.159  2008/04/08 18:33:41  bernard
+// Error in EXRL
+//
+// Revision 1.158  2008/04/08 17:13:26  bernard
+// Added execute relative long instruction
+//
+// Revision 1.157  2008/03/05 00:34:44  ptl00
+// Fix CFC operand size fetch
+//
+// Revision 1.156  2008/03/04 00:52:32  ptl00
+// Fix BSM/BASSM mode switch trace
+//
+// Revision 1.155  2008/02/28 22:07:09  ptl00
+// Fix mode switch trace
+//
+// Revision 1.154  2008/02/15 21:20:00  ptl00
+// Fix EX to SS ops so that ILC is 4 on PER rupts
+//
+// Revision 1.153  2007/11/30 15:14:14  rbowler
+// Permit String-Instruction facility to be activated in S/370 mode
+//
+// Revision 1.152  2007/08/07 19:47:59  ivan
+// Fix a couple of gcc-4.2 warnings
+//
 // Revision 1.151  2007/06/23 00:04:10  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -437,6 +496,7 @@ VADR    newia;                          /* New instruction address   */
         regs->psw.ilc = 0; // indicates regs->ip not updated
         regs->CR(12) = ((ARCH_DEP(trace_br_func))regs->trace_br)
                         (regs->psw.amode, regs->GR_L(r2), regs);
+        regs->psw.ilc = 2; // reset if trace didn't pgm check
     }
 #endif /*defined(FEATURE_TRACING)*/
 
@@ -452,7 +512,7 @@ VADR    newia;                          /* New instruction address   */
     regs->GR_L(r1) =
         ( regs->psw.amode )
         ? (0x80000000                 | PSW_IA31(regs, 2))
-        : (((!regs->execflag ? 2 : 4) << 29)
+        : (((!regs->execflag ? 2 : regs->exrl ? 6 : 4) << 29)
         |  (regs->psw.cc << 28)       | (regs->psw.progmask << 24)
         |  PSW_IA24(regs, 2));
 
@@ -509,6 +569,7 @@ VADR    newia;                          /* New instruction address   */
         regs->psw.ilc = 0; // indcates regs->ip not updated
         regs->CR(12) = ((ARCH_DEP(trace_br_func))regs->trace_br)
                          (regs->psw.amode, regs->GR_L(r2), regs);
+        regs->psw.ilc = 2; // reset if trace didn't pgm check
     }
 #endif /*defined(FEATURE_TRACING)*/
 
@@ -570,6 +631,10 @@ DEF_INST(branch_and_save_and_set_mode)
 {
 int     r1, r2;                         /* Values of R fields        */
 VADR    newia;                          /* New instruction address   */
+int     xmode;                          /* 64 or 31 mode of target   */
+#if defined(FEATURE_ESAME)
+BYTE    *ipsav;                         /* save for ip               */
+#endif /*defined(FEATURE_ESAME)*/
 
     RR_B(inst, regs, r1, r2);
 
@@ -577,22 +642,32 @@ VADR    newia;                          /* New instruction address   */
     newia = regs->GR(r2);
 
 #if defined(FEATURE_TRACING)
-#if defined(FEATURE_ESAME)
+     #if defined(FEATURE_ESAME)
     /* Add a mode trace entry when switching in/out of 64 bit mode */
-    if((regs->CR(12) & CR12_MTRACE) && (r2 != 0) && regs->psw.amode64 != (newia & 1))
+    if((regs->CR(12) & CR12_MTRACE) && (r2 != 0) && (regs->psw.amode64 != (newia & 1)))
     {
-        regs->psw.ilc = 0; // indicates regs->ip not updated
-        ARCH_DEP(trace_ms) (regs->CR(12) & CR12_BRTRACE,
-                 newia | regs->psw.amode64 ? newia & 0x80000000 : 0, regs);
+        /* save ip and update it for mode switch trace */
+        ipsav = regs->ip;
+        INST_UPDATE_PSW(regs, 2, 0);
+        regs->psw.ilc = 2;
+        regs->CR(12) = ARCH_DEP(trace_ms) (regs->CR(12) & CR12_BRTRACE ? 1 : 0,
+                                           newia & ~0x01, regs);
+        regs->ip = ipsav;
     }
     else
-#endif /*defined(FEATURE_ESAME)*/
+     #endif /*defined(FEATURE_ESAME)*/
     /* Add a branch trace entry to the trace table */
     if ((regs->CR(12) & CR12_BRTRACE) && (r2 != 0))
     {
         regs->psw.ilc = 0; // indicates regs->ip not updated
-        regs->CR(12) = ARCH_DEP(trace_br) (regs->GR_L(r2) & 0x80000000,
-                                    regs->GR_L(r2), regs);
+     #if defined(FEATURE_ESAME)
+        if (newia & 0x01)
+            xmode = 1;
+        else
+     #endif /*defined(FEATURE_ESAME)*/
+        xmode = newia & 0x80000000 ? 1 : 0;
+        regs->CR(12) = ARCH_DEP(trace_br) (xmode, newia & ~0x01, regs);
+        regs->psw.ilc = 2; // reset if trace didn't pgm check
     }
 #endif /*defined(FEATURE_TRACING)*/
 
@@ -601,7 +676,7 @@ VADR    newia;                          /* New instruction address   */
     if ( regs->psw.amode64 )
         regs->GR_G(r1) = PSW_IA64(regs, 3); // low bit on
     else
-#endif
+#endif /*defined(FEATURE_ESAME)*/
     if ( regs->psw.amode )
         regs->GR_L(r1) = 0x80000000 | PSW_IA31(regs, 2);
     else
@@ -634,14 +709,17 @@ VADR    newia;                          /* New instruction address   */
     /* Compute the branch address from the R2 operand */
     newia = regs->GR(r2);
 
-#if defined(FEATURE_ESAME)
+#if defined(FEATURE_TRACING)
+     #if defined(FEATURE_ESAME)
     /* Add a mode trace entry when switching in/out of 64 bit mode */
-    if((regs->CR(12) & CR12_MTRACE) && (r2 != 0) && regs->psw.amode64 != (newia & 1))
+    if((regs->CR(12) & CR12_MTRACE) && (r2 != 0) && (regs->psw.amode64 != (newia & 1)))
     {
-        regs->psw.ilc = 0; // indicates regs->ip not updated
-        ARCH_DEP(trace_ms) (0, newia, regs);
+        INST_UPDATE_PSW(regs, 2, 0);
+        regs->psw.ilc = 2; 
+        regs->CR(12) = ARCH_DEP(trace_ms) (0, 0, regs);
     }
-#endif /*defined(FEATURE_ESAME)*/
+     #endif /*defined(FEATURE_ESAME)*/
+#endif /*defined(FEATURE_TRACING)*/
 
     /* Insert addressing mode into bit 0 of R1 operand */
     if ( r1 != 0 )
@@ -1144,8 +1222,8 @@ GREG    gr2_high_bit = CFC_HIGH_BIT;    /* (work constant; uses a64) */
         op1_addr = ( regs->GR(1) + index ) & ADDRESS_MAXWRAP(regs);
         op3_addr = ( regs->GR(3) + index ) & ADDRESS_MAXWRAP(regs);
 
-        ARCH_DEP( vfetchc )( op1, op_size, op1_addr, AR1, regs );
-        ARCH_DEP( vfetchc )( op3, op_size, op3_addr, AR1, regs );
+        ARCH_DEP( vfetchc )( op1, op_size - 1, op1_addr, AR1, regs );
+        ARCH_DEP( vfetchc )( op3, op_size - 1, op3_addr, AR1, regs );
 
         /* Update GR2 operand index value... (Note: we must do this AFTER
            we fetch the operand data in case of storage access exceptions) */
@@ -1366,6 +1444,15 @@ U64     old, new;                       /* old, new values           */
 
 
 #if defined(FEATURE_COMPARE_AND_SWAP_AND_STORE)
+
+#if defined(FEATURE_COMPARE_AND_SWAP_AND_STORE_FACILITY_2)
+#define MAX_CSST_FC 2
+#define MAX_CSST_SC 4
+#else
+#define MAX_CSST_FC 1
+#define MAX_CSST_SC 3
+#endif
+
 /*-------------------------------------------------------------------*/
 /* C8x2 CSST  - Compare and Swap and Store                     [SSF] */
 /*-------------------------------------------------------------------*/
@@ -1378,8 +1465,11 @@ VADR    addr1, addr2;                   /* Effective addresses       */
 VADR    addrp;                          /* Parameter list address    */
 BYTE   *main1;                          /* Mainstor address of op1   */
 int     ln2;                            /* Second operand length - 1 */
-U64     old8, new8=0;                   /* Swap values for cmpxchg8  */
-U32     old4, new4=0;                   /* Swap values for cmpxchg4  */
+U64     old16l=0, old16h=0, 
+        new16l=0, new16h=0;             /* swap values for cmpxchg16 */
+U64     old8=0, new8=0;                 /* Swap values for cmpxchg8  */
+U32     old4=0, new4=0;                 /* Swap values for cmpxchg4  */
+U64     stv16h=0,stv16l=0;              /* 16-byte store value pair  */
 U64     stv8=0;                         /* 8-byte store value        */
 U32     stv4=0;                         /* 4-byte store value        */
 U16     stv2=0;                         /* 2-byte store value        */
@@ -1396,30 +1486,56 @@ BYTE    sc;                             /* Store characteristic      */
     sc = regs->GR_LHLCH(0);
      
     /* Program check if function code is not 0 or 1 */
-    if (fc > 1)
+    if (fc > MAX_CSST_FC)
         regs->program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
 
     /* Program check if store characteristic is not 0, 1, 2, or 3 */
-    if (sc > 3)
+    if (sc > MAX_CSST_SC)
         regs->program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
          
     /* Calculate length minus 1 of second operand */
     ln2 = (1 << sc) - 1;
      
     /* Program check if first operand is not on correct boundary */
-    if (fc == 0) {
-        FW_CHECK(addr1, regs);
-    } else {
-        DW_CHECK(addr1, regs);
+    switch(fc)
+    {
+        case 0:
+            FW_CHECK(addr1, regs);
+            break;
+        case 1:
+            DW_CHECK(addr1, regs);
+            break;
+#if defined(FEATURE_COMPARE_AND_SWAP_AND_STORE_FACILITY_2)
+        case 2:
+            QW_CHECK(addr1, regs);
+            break;
+#endif
     }
          
+#if defined(FEATURE_COMPARE_AND_SWAP_AND_STORE_FACILITY_2)
+    if(r3 & 1)
+    {
+        regs->program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+    }
+#endif
+
     /* Program check if second operand is not on correct boundary */
-    if (sc == 1) {
-        HW_CHECK(addr2, regs);
-    } else if (sc == 2) {
-        FW_CHECK(addr2, regs);
-    } else if (sc == 3) { 
-        DW_CHECK(addr2, regs);
+    switch(sc)
+    {
+        case 1:
+            HW_CHECK(addr2, regs);
+            break;
+        case 2:
+            FW_CHECK(addr2, regs);
+            break;
+        case 3:
+            DW_CHECK(addr2, regs);
+            break;
+#if defined(FEATURE_COMPARE_AND_SWAP_AND_STORE_FACILITY_2)
+        case 4:
+            QW_CHECK(addr2, regs);
+            break;
+#endif
     }
          
     /* Perform serialization before starting operation */
@@ -1437,63 +1553,113 @@ BYTE    sc;                             /* Store characteristic      */
     /* Obtain main-storage access lock */
     OBTAIN_MAINLOCK(regs);
 
-    /* Load the compare value from the r3 register */
-    if (fc == 0) {
-        old4 = CSWAP32(regs->GR_L(r3));
-    } else {
-        old8 = CSWAP64(regs->GR_G(r3));
-    }
-
-    /* Load replacement value from bytes 0-3 or 0-7 of parameter list */
-    if (fc == 0) {
-        new4 = ARCH_DEP(vfetch4) (addrp, rp, regs);
-        new4 = CSWAP32(new4);
-    } else {
-        new8 = ARCH_DEP(vfetch8) (addrp, rp, regs );
-        new8 = CSWAP64(new8);
+    /* Load the compare value from the r3 register and also */
+    /* load replacement value from bytes 0-3, 0-7 or 0-15 of parameter list */
+    switch(fc)
+    {
+        case 0:
+            old4 = CSWAP32(regs->GR_L(r3));
+            new4 = ARCH_DEP(vfetch4) (addrp, rp, regs);
+            new4 = CSWAP32(new4);
+            break;
+        case 1:
+            old8 = CSWAP64(regs->GR_G(r3));
+            new8 = ARCH_DEP(vfetch8) (addrp, rp, regs);
+            new8 = CSWAP64(new8);
+            break;
+#if defined(FEATURE_COMPARE_AND_SWAP_AND_STORE_FACILITY_2)
+        case 2:
+            old16h = CSWAP64(regs->GR_G(r3));
+            old16l = CSWAP64(regs->GR_G(r3+1));
+            new16h = ARCH_DEP(vfetch8) (addrp, rp, regs);
+            new16l = ARCH_DEP(vfetch8) (addrp+8, rp, regs);
+            new16h = CSWAP64(new16h);
+            new16l = CSWAP64(new16l);
+            break;
+#endif
     }
 
     /* Load the store value from bytes 16-23 of parameter list */
     addrp += 16;
     addrp = addrp & ADDRESS_MAXWRAP(regs);
 
-    if (sc == 0) {
-        stv1 = ARCH_DEP(vfetchb) (addrp, rp, regs);
-    } else if (sc == 1) {
-        stv2 = ARCH_DEP(vfetch2) (addrp, rp, regs);
-    } else if (sc == 2) {
-        stv4 = ARCH_DEP(vfetch4) (addrp, rp, regs);
-    } else if (sc == 3) {
-        stv8 = ARCH_DEP(vfetch8) (addrp, rp, regs);
+    switch(sc)
+    {
+        case 0:
+            stv1 = ARCH_DEP(vfetchb) (addrp, rp, regs);
+            break;
+        case 1:
+            stv2 = ARCH_DEP(vfetch2) (addrp, rp, regs);
+            break;
+        case 2:
+            stv4 = ARCH_DEP(vfetch4) (addrp, rp, regs);
+            break;
+        case 3:
+            stv8 = ARCH_DEP(vfetch8) (addrp, rp, regs);
+            break;
+#if defined(FEATURE_COMPARE_AND_SWAP_AND_STORE_FACILITY_2)
+        case 4:
+            stv16h = ARCH_DEP(vfetch8) (addrp, rp, regs);
+            stv16l = ARCH_DEP(vfetch8) (addrp+8, rp, regs);
+            break;
+#endif
     }
 
-    /* Perform the compare and swap */
-    if (fc == 0) {
-        regs->psw.cc = cmpxchg4 (&old4, new4, main1);
-    } else {
-        regs->psw.cc = cmpxchg8 (&old8, new8, main1);
+    switch(fc)
+    {
+        case 0:
+            regs->psw.cc = cmpxchg4 (&old4, new4, main1);
+            break;
+        case 1:
+            regs->psw.cc = cmpxchg8 (&old8, new8, main1);
+            break;
+#if defined(FEATURE_COMPARE_AND_SWAP_AND_STORE_FACILITY_2)
+        case 2:
+            regs->psw.cc = cmpxchg16 (&old16h, &old16l, new16h, new16l, main1);
+            break;
+#endif
     }
-
     if (regs->psw.cc == 0)
     {
         /* Store the store value into the second operand location */
-        if (sc == 0) {
-            ARCH_DEP(vstoreb) (stv1, addr2, b2, regs);
-        } else if (sc == 1) {
-            ARCH_DEP(vstore2) (stv2, addr2, b2, regs);
-        } else if (sc == 2) {
-            ARCH_DEP(vstore4) (stv4, addr2, b2, regs);
-        } else if (sc == 3) {
-            ARCH_DEP(vstore8) (stv8, addr2, b2, regs);
+        switch(sc)
+        {
+            case 0:
+                ARCH_DEP(vstoreb) (stv1, addr2, b2, regs);
+                break;
+            case 1:
+                ARCH_DEP(vstore2) (stv2, addr2, b2, regs);
+                break;
+            case 2:
+                ARCH_DEP(vstore4) (stv4, addr2, b2, regs);
+                break;
+            case 3:
+                ARCH_DEP(vstore8) (stv8, addr2, b2, regs);
+                break;
+#if defined(FEATURE_COMPARE_AND_SWAP_AND_STORE_FACILITY_2)
+            case 4:
+                ARCH_DEP(vstore8) (stv16h, addr2, b2, regs);
+                ARCH_DEP(vstore8) (stv16l, addr2+8, b2, regs);
+                break;
+#endif
         }
     }
     else
     {
-        /* Load the first operand into r3 register */
-        if (fc == 0) {
-            regs->GR_L(r3) = CSWAP32(old4);
-        } else {
-            regs->GR_G(r3) = CSWAP64(old8);
+        switch(fc)
+        {
+            case 0:
+                regs->GR_L(r3) = CSWAP32(old4);
+                break;
+            case 1:
+                regs->GR_G(r3) = CSWAP64(old8);
+                break;
+#if defined(FEATURE_COMPARE_AND_SWAP_AND_STORE_FACILITY_2)
+            case 2:
+                regs->GR_G(r3) = CSWAP64(old16h);
+                regs->GR_G(r3+1) = CSWAP64(old16l);
+                break;
+#endif
         }
     }
 
@@ -1993,6 +2159,7 @@ BYTE    pad;                            /* Padding byte              */
 #endif /*defined(FEATURE_COMPARE_AND_MOVE_EXTENDED)*/
 
 
+#if defined(FEATURE_STRING_INSTRUCTION)
 /*-------------------------------------------------------------------*/
 /* B25D CLST  - Compare Logical String                         [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2070,9 +2237,11 @@ BYTE    termchar;                       /* Terminating character     */
     /* Set condition code */
     regs->psw.cc =  cc;
 
-}
+} /* end DEF_INST(compare_logical_string) */
+#endif /*defined(FEATURE_STRING_INSTRUCTION)*/
 
 
+#if defined(FEATURE_STRING_INSTRUCTION)
 /*-------------------------------------------------------------------*/
 /* B257 CUSE  - Compare Until Substring Equal                  [RRE] */
 /*-------------------------------------------------------------------*/
@@ -2267,7 +2436,8 @@ S32     remlen1, remlen2;               /* Lengths remaining         */
     /* Set condition code */
     regs->psw.cc =  cc;
 
-}
+} /* end DEF_INST(compare_until_substring_equal) */
+#endif /*defined(FEATURE_STRING_INSTRUCTION)*/
 
 
 #ifdef FEATURE_EXTENDED_TRANSLATION
@@ -3062,7 +3232,11 @@ BYTE   *ip;                             /* -> executed instruction   */
         memcpy (regs->exinst, ip, 8);
 
     /* Program check if recursive execute */
-    if ( regs->exinst[0] == 0x44 )
+    if ( regs->exinst[0] == 0x44
+#if defined(FEATURE_EXECUTE_EXTENSIONS_FACILITY)
+         || (regs->exinst[0] == 0xc6 && !(regs->exinst[1] & 0x0f))
+#endif /*defined(FEATURE_EXECUTE_EXTENSIONS_FACILITY)*/
+                                                                   )
         regs->program_interrupt (regs, PGM_EXECUTE_EXCEPTION);
 
     /* Or 2nd byte of instruction with low-order byte of R1 */
@@ -3074,12 +3248,85 @@ BYTE   *ip;                             /* -> executed instruction   */
      * be incremented back by the instruction decoder.
      */
     regs->execflag = 1;
+    regs->exrl = 0;
     regs->ip -= ILC(regs->exinst[0]);
 
     EXECUTE_INSTRUCTION (regs->exinst, regs);
 
-    regs->execflag = 0;
+    /* Leave execflag on if pending PER so ILC will reflect EX */
+    if (!OPEN_IC_PER(regs))
+        regs->execflag = 0;
 }
+
+
+#if defined(FEATURE_EXECUTE_EXTENSIONS_FACILITY)
+/*-------------------------------------------------------------------*/
+/* C6x0 EXRL  - Execute Relative Long                          [RIL] */
+/*-------------------------------------------------------------------*/
+DEF_INST(execute_relative_long)
+{
+int     r1;                             /* Register number           */
+BYTE   *ip;                             /* -> executed instruction   */
+
+    RIL_A(inst, regs, r1, regs->ET);
+
+#if defined(_FEATURE_SIE)
+    /* Ensure that the instruction field is zero, such that
+       zeros are stored in the interception parm field, if
+       the interrupt is intercepted */
+    memset(regs->exinst, 0, 8);
+#endif /*defined(_FEATURE_SIE)*/
+
+    /* Fetch target instruction from operand address */
+    ip = INSTRUCTION_FETCH(regs, 1);
+    if (ip != regs->exinst)
+        memcpy (regs->exinst, ip, 8);
+
+#if 1
+    /* Display target instruction if stepping or tracing */
+    if (CPU_STEPPING_OR_TRACING(regs, 6))
+    {
+        int n, ilc;
+        char buf[256];
+      #if defined(FEATURE_ESAME)
+        n = sprintf (buf, "EXRL target  ADDR="F_VADR"    ", regs->ET);
+      #else
+        n = sprintf (buf, "EXRL  ADDR="F_VADR"  ", regs->ET);
+      #endif
+        ilc = ILC(ip[0]);
+        n += sprintf (buf+n, " INST=%2.2X%2.2X", ip[0], ip[1]);
+        if (ilc > 2) n += sprintf (buf+n, "%2.2X%2.2X", ip[2], ip[3]);
+        if (ilc > 4) n += sprintf (buf+n, "%2.2X%2.2X", ip[4], ip[5]);
+        logmsg ("%s %s", buf,(ilc<4) ? "        " : (ilc<6) ? "    " : "");
+        DISASM_INSTRUCTION(ip);
+        logmsg ("\n");
+    }
+#endif
+
+    /* Program check if recursive execute */
+    if ( regs->exinst[0] == 0x44 || 
+         (regs->exinst[0] == 0xc6 && !(regs->exinst[1] & 0x0f)) )
+        regs->program_interrupt (regs, PGM_EXECUTE_EXCEPTION);
+
+    /* Or 2nd byte of instruction with low-order byte of R1 */
+    regs->exinst[1] |= r1 ? regs->GR_LHLCL(r1) : 0;
+
+    /*
+     * Turn execflag on indicating this instruction is EXecuted.
+     * psw.ip is backed up by the EXecuted instruction length to
+     * be incremented back by the instruction decoder.
+     */
+    regs->execflag = 1;
+    regs->exrl = 1;
+    regs->ip -= ILC(regs->exinst[0]);
+
+    EXECUTE_INSTRUCTION (regs->exinst, regs);
+
+    /* Leave execflag on if pending PER so ILC will reflect EXRL */
+    if (!OPEN_IC_PER(regs))
+        regs->execflag = 0;
+}
+#endif /* defined(FEATURE_EXECUTE_EXTENSION_FACILITY) */
 
 
 #if defined(FEATURE_ACCESS_REGISTERS)
@@ -3274,16 +3521,16 @@ U32    *p1, *p2 = NULL;                 /* Mainstor pointers         */
         m = n;
 
     /* Copy from operand beginning */
-    for (i = 0; i < m; i++)
+    for (i = 0; i < m; i++, p1++)
     {
-        regs->AR((r1 + i) & 0xF) = fetch_fw (p1++);
+        regs->AR((r1 + i) & 0xF) = fetch_fw (p1);
         SET_AEA_AR (regs, (r1 + i) & 0xF);
     }
 
     /* Copy from next page */
-    for ( ; i < n; i++)
+    for ( ; i < n; i++, p2++)
     {
-        regs->AR((r1 + i) & 0xF) = fetch_fw (p2++);
+        regs->AR((r1 + i) & 0xF) = fetch_fw (p2);
         SET_AEA_AR (regs, (r1 + i) & 0xF);
     }
 
@@ -3441,8 +3688,8 @@ U32    *p1, *p2;                        /* Mainstor pointers         */
     {
         /* Boundary not crossed */
         n >>= 2;
-        for (i = 0; i < n; i++)
-            regs->GR_L((r1 + i) & 0xF) = fetch_fw (p1++);
+        for (i = 0; i < n; i++, p1++)
+            regs->GR_L((r1 + i) & 0xF) = fetch_fw (p1);
     }
     else
     {
@@ -3455,11 +3702,11 @@ U32    *p1, *p2;                        /* Mainstor pointers         */
         {
             /* Addresses are word aligned */
             m >>= 2;
-            for (i = 0; i < m; i++)
-                regs->GR_L((r1 + i) & 0xF) = fetch_fw (p1++);
+            for (i = 0; i < m; i++, p1++)
+                regs->GR_L((r1 + i) & 0xF) = fetch_fw (p1);
             n >>= 2;
-            for ( ; i < n; i++)
-                regs->GR_L((r1 + i) & 0xF) = fetch_fw (p2++);
+            for ( ; i < n; i++, p2++)
+                regs->GR_L((r1 + i) & 0xF) = fetch_fw (p2);
         }
         else
         {
@@ -4010,6 +4257,7 @@ int     i;                              /* Loop counter              */
 }
 
 
+#if defined(FEATURE_STRING_INSTRUCTION)
 /*-------------------------------------------------------------------*/
 /* B255 MVST  - Move String                                    [RRE] */
 /*-------------------------------------------------------------------*/
@@ -4076,7 +4324,8 @@ int     cpu_length;                     /* length to next page       */
     /* Set condition code 3 */
     regs->psw.cc = 3;
 
-}
+} /* end DEF_INST(move_string) */
+#endif /*defined(FEATURE_STRING_INSTRUCTION)*/
 
 
 /*-------------------------------------------------------------------*/

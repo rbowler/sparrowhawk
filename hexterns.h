@@ -7,9 +7,50 @@
 //      The <config.h> header and other required headers are
 //      presumed to have already been #included ahead of it...
 
-// $Id: hexterns.h,v 1.15 2007/01/11 19:54:33 fish Exp $
+// $Id: hexterns.h,v 1.27 2009/01/07 16:36:55 bernard Exp $
 //
 // $Log: hexterns.h,v $
+// Revision 1.27  2009/01/07 16:36:55  bernard
+// hldmsg command
+//
+// Revision 1.26  2009/01/02 19:21:51  jj
+// DVD-RAM IPL
+// RAMSAVE
+// SYSG Integrated 3270 console fixes
+//
+// Revision 1.25  2008/12/30 15:40:01  rbowler
+// Allow $(LPARNAME) in herclogo file
+//
+// Revision 1.24  2008/12/28 21:05:08  rbowler
+// Integrated 3270 (SYSG) console attn/read commands
+//
+// Revision 1.23  2008/12/24 15:42:14  jj
+// Add debug entry point for sclp event masks
+//
+// Revision 1.22  2008/12/22 13:10:21  jj
+// Add sclp debug entry points
+//
+// Revision 1.21  2008/12/01 23:57:21  rbowler
+// Fix warning C4273: 'losc_set/check' : inconsistent dll linkage
+//
+// Revision 1.20  2008/12/01 16:19:49  jj
+// Check for licensed operating systems without impairing architectural
+// compliance of IFL's
+//
+// Revision 1.19  2008/07/08 05:35:49  fish
+// AUTOMOUNT redesign: support +allowed/-disallowed dirs
+// and create associated 'automount' panel command - Fish
+//
+// Revision 1.18  2008/02/19 11:49:19  ivan
+// - Move setting of CPU priority after spwaning timer thread
+// - Added support for Posix 1003.1e capabilities
+//
+// Revision 1.17  2008/02/12 08:42:15  fish
+// dyngui tweaks: new def devlist fmt, new debug_cd_cmd hook
+//
+// Revision 1.16  2008/01/04 02:28:51  gsmith
+// sf commands update
+//
 // Revision 1.15  2007/01/11 19:54:33  fish
 // Addt'l keep-alive mods: create associated supporting config-file stmt and panel command where individual customer-preferred values can be specified and/or dynamically modified.
 //
@@ -110,6 +151,36 @@
 #define CONF_DLL_IMPORT DLL_EXPORT
 #endif
 
+#ifndef _BLDCFG_C_
+#ifndef _HENGINE_DLL_
+#define BLDC_DLL_IMPORT DLL_IMPORT
+#else   /* _HDASD_DLL_ */
+#define BLDC_DLL_IMPORT extern
+#endif  /* _HDASD_DLL_ */
+#else
+#define BLDC_DLL_IMPORT DLL_EXPORT
+#endif
+
+#ifndef _SERVICE_C_
+#ifndef _HENGINE_DLL_
+#define SERV_DLL_IMPORT DLL_IMPORT
+#else   /* _HENGINE_DLL_ */
+#define SERV_DLL_IMPORT extern
+#endif  /* _HENGINE_DLL_ */
+#else
+#define SERV_DLL_IMPORT DLL_EXPORT
+#endif
+
+#ifndef _LOADPARM_C_
+#ifndef _HENGINE_DLL_
+#define LOADPARM_DLL_IMPORT DLL_IMPORT
+#else   /* _HENGINE_DLL_ */
+#define LOADPARM_DLL_IMPORT extern
+#endif  /* _HENGINE_DLL_ */
+#else
+#define LOADPARM_DLL_IMPORT DLL_EXPORT
+#endif
+
 #if defined( _MSC_VER ) && (_MSC_VER >= 1300) && (_MSC_VER < 1400)
 //  '_ftol'   is defined in MSVCRT.DLL
 //  '_ftol2'  we define ourselves in "w32ftol2.c"
@@ -147,7 +218,7 @@ HSYS_DLL_IMPORT int extgui;             // __attribute__ ((deprecated));
    HDC(debug_cpu_state, regs) interface */
 #endif /*EXTERNALGUI*/
 
-/* Functions in module config.c */
+/* Functions in module config.c or bldcfg.c */
 void build_config (char *fname);
 void release_config ();
 CONF_DLL_IMPORT DEVBLK *find_device_by_devnum (U16 lcss, U16 devnum);
@@ -159,10 +230,10 @@ int  attach_device (U16 lcss, U16 devnum, const char *devtype, int addargc,
 int  detach_subchan (U16 lcss, U16 subchan);
 int  detach_device (U16 lcss, U16 devnum);
 int  define_device (U16 lcss, U16 olddev, U16 newdev);
-DLL_EXPORT int  group_device(DEVBLK *dev, int members);
+CONF_DLL_IMPORT int  group_device(DEVBLK *dev, int members);
 int  configure_cpu (int cpu);
 int  deconfigure_cpu (int cpu);
-DLL_EXPORT int parse_args (char* p, int maxargc, char** pargv, int* pargc);
+BLDC_DLL_IMPORT int parse_args (char* p, int maxargc, char** pargv, int* pargc);
 #define MAX_ARGS  12                    /* Max argv[] array size     */
 int parse_and_attach_devices(const char *devnums,const char *devtype,int ac,char **av);
 CONF_DLL_IMPORT int parse_single_devnum(const char *spec, U16 *lcss, U16 *devnum);
@@ -170,13 +241,16 @@ int parse_single_devnum_silent(const char *spec, U16 *lcss, U16 *devnum);
 int readlogo(char *fn);
 void clearlogo(void);
 CONF_DLL_IMPORT int parse_conkpalv(char* s, int* idle, int* intv, int* cnt );
-
+#if defined( OPTION_TAPE_AUTOMOUNT )
+BLDC_DLL_IMPORT int add_tamdir( char *tamdir, TAMDIR **ppTAMDIR );
+#endif /* OPTION_TAPE_AUTOMOUNT */
 
 /* Global data areas and functions in module cpu.c                   */
 extern const char* arch_name[];
 extern const char* get_arch_mode_string(REGS* regs);
 
 /* Functions in module panel.c */
+void expire_kept_msgs(int unconditional);
 #ifdef OPTION_MIPS_COUNTING
 HPAN_DLL_IMPORT U32    maxrates_rpt_intvl;  // (reporting interval)
 HPAN_DLL_IMPORT U32    curr_high_mips_rate; // (high water mark for current interval)
@@ -199,6 +273,10 @@ HAO_DLL_IMPORT void hao_message(char *message); /* process message */
 HCMD_DLL_IMPORT int aia_cmd     (int argc, char *argv[], char *cmdline);
 HCMD_DLL_IMPORT int stopall_cmd (int argc, char *argv[], char *cmdline);
 
+/* Functions in losc.c */
+void losc_set (int license_status);
+void losc_check(char *ostype);
+
 #if defined(OPTION_DYNAMIC_LOAD)
 
 HHDL_DLL_IMPORT char *(*hdl_device_type_equates) (const char *);
@@ -213,12 +291,14 @@ HSYS_DLL_IMPORT void *(*panel_command)  (void *);
 
 HSYS_DLL_IMPORT void *(*debug_device_state)         (DEVBLK *);
 HSYS_DLL_IMPORT void *(*debug_cpu_state)            (REGS *);
+HSYS_DLL_IMPORT void  (*debug_cd_cmd)               (char *);
 HSYS_DLL_IMPORT void *(*debug_watchdog_signal)      (REGS *);
 HSYS_DLL_IMPORT void *(*debug_program_interrupt)    (REGS *, int);
 HSYS_DLL_IMPORT void *(*debug_diagnose)             (U32, int,  int, REGS *);
 HSYS_DLL_IMPORT void *(*debug_iucv)                 (int, VADR, REGS *);
 HSYS_DLL_IMPORT void *(*debug_sclp_unknown_command) (U32,    void *, REGS *);
 HSYS_DLL_IMPORT void *(*debug_sclp_unknown_event)   (void *, void *, REGS *);
+HSYS_DLL_IMPORT void *(*debug_sclp_unknown_event_mask) (void *, void *, REGS *);
 HSYS_DLL_IMPORT void *(*debug_chsc_unknown_request) (void *, void *, REGS *);
 HSYS_DLL_IMPORT void *(*debug_sclp_event_data)      (void *, void *, REGS *);
 
@@ -226,6 +306,7 @@ HSYS_DLL_IMPORT void *(*debug_sclp_event_data)      (void *, void *, REGS *);
 void *panel_command (void *cmdline);
 void panel_display (void);
 #define debug_cpu_state                 NULL
+#define debug_cd_cmd                    NULL
 #define debug_device_state              NULL
 #define debug_program_interrupt         NULL
 #define debug_diagnose                  NULL
@@ -243,7 +324,7 @@ void get_loadparm(BYTE *dest);
 char *str_loadparm();
 void set_lparname(char *name);
 void get_lparname(BYTE *dest);
-char *str_lparname();
+LOADPARM_DLL_IMPORT char *str_lparname();
 
 #if defined(OPTION_SET_STSI_INFO)
 /* Functions in control.c */
@@ -270,7 +351,9 @@ void *timer_update_thread (void *argp);
 void scp_command (char *command, int priomsg);
 int can_signal_quiesce ();
 int signal_quiesce (U16 count, BYTE unit);
+void sclp_attention(U16 type);
 void sclp_reset();
+SERV_DLL_IMPORT void sclp_sysg_attention();
 int servc_hsuspend(void *file);
 int servc_hresume(void *file);
 
@@ -306,11 +389,11 @@ int     cckd_read_track (DEVBLK *, int, BYTE *);
 int     cckd_update_track (DEVBLK *, int, int, BYTE *, int, BYTE *);
 int     cfba_read_block (DEVBLK *, int, BYTE *);
 int     cfba_write_block (DEVBLK *, int, int, BYTE *, int, BYTE *);
-CCKD_DLL_IMPORT void    cckd_sf_add (DEVBLK *);
-CCKD_DLL_IMPORT void    cckd_sf_remove (DEVBLK *, int);
-CCKD_DLL_IMPORT void    cckd_sf_newname (DEVBLK *, char *);
-CCKD_DLL_IMPORT void    cckd_sf_stats (DEVBLK *);
-CCKD_DLL_IMPORT void    cckd_sf_comp (DEVBLK *);
+CCKD_DLL_IMPORT void   *cckd_sf_add (void *);
+CCKD_DLL_IMPORT void   *cckd_sf_remove (void *);
+CCKD_DLL_IMPORT void   *cckd_sf_stats (void *);
+CCKD_DLL_IMPORT void   *cckd_sf_comp (void *);
+CCKD_DLL_IMPORT void   *cckd_sf_chk (void *);
 CCKD_DLL_IMPORT int     cckd_command(char *, int);
 CCKD_DLL_IMPORT void    cckd_print_itrace ();
 
@@ -339,6 +422,7 @@ void get_connected_client (DEVBLK* dev, char** pclientip, char** pclientname);
 void alter_display_real (char *opnd, REGS *regs);
 void alter_display_virt (char *opnd, REGS *regs);
 void disasm_stor(REGS *regs, char *opnd);
+int drop_privileges(int capa);
 
 /* Functions in module sr.c */
 int suspend_cmd(int argc, char *argv[],char *cmdline);

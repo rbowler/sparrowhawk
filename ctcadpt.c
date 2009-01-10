@@ -15,9 +15,29 @@
 //
 //   Please read README.NETWORKING for more info.
 //
-// $Id: ctcadpt.c,v 1.68 2007/06/23 00:04:07 ivan Exp $
+// $Id: ctcadpt.c,v 1.75 2008/11/04 05:56:31 fish Exp $
 //
 // $Log: ctcadpt.c,v $
+// Revision 1.75  2008/11/04 05:56:31  fish
+// Put ensure consistent create_thread ATTR usage change back in
+//
+// Revision 1.74  2008/11/03 15:31:57  rbowler
+// Back out consistent create_thread ATTR modification
+//
+// Revision 1.73  2008/10/18 09:32:21  fish
+// Ensure consistent create_thread ATTR usage
+//
+// Revision 1.72  2008/07/17 07:19:12  fish
+// Fix FCS (Frame Check Sequence) bug in LCS_Write function
+// and other minor bugs.
+//
+// Revision 1.70  2008/07/17 03:30:40  fish
+// CTC/LCS cosmetic-only changes -- part 1
+// (no actual functionality was changed!)
+//
+// Revision 1.69  2007/11/21 22:54:14  fish
+// Use new BEGIN_DEVICE_CLASS_QUERY macro
+//
 // Revision 1.68  2007/06/23 00:04:07  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -191,7 +211,8 @@ void  CTCX_Query( DEVBLK* pDEVBLK,
                   int     iBufLen,
                   char*   pBuffer )
 {
-    *ppszClass = "CTCA";
+    BEGIN_DEVICE_CLASS_QUERY( "CTCA", pDEVBLK, ppszClass, iBufLen, pBuffer );
+
     snprintf( pBuffer, iBufLen, "%s", pDEVBLK->filename );
 }
 
@@ -652,7 +673,7 @@ static int  CTCT_Init( DEVBLK *dev, int argc, char *argv[] )
         arg->dev = dev;
         snprintf(str,sizeof(str),"CTCT %4.4X ListenThread",dev->devnum);
         str[sizeof(str)-1]=0;
-        create_thread( &tid, &sysblk.joinattr, CTCT_ListenThread, arg, str );
+        create_thread( &tid, JOINABLE, CTCT_ListenThread, arg, str );
     }
     else  // successfully connected (outbound) to the other end
     {
@@ -924,7 +945,7 @@ static void  CTCT_Read( DEVBLK* pDEVBLK,   U16   sCount,
     STORE_HW( pSegment->hwLength, iLength + sizeof( CTCISEG ) );
 
     // Store Frame type
-    STORE_HW( pSegment->hwType, FRAME_TYPE_IP );
+    STORE_HW( pSegment->hwType, ETH_TYPE_IP );
 
     // Copy data
     memcpy( pSegment->bData, pDEVBLK->buf, iLength );
@@ -1353,20 +1374,20 @@ int             lastlen = 2;            /* block length at last pckt */
 //
 // Output:
 //      pbMACAddr    Pointer to a BYTE array to receive the MAC Address
-//                   that MUST be at least LCS_ADDR_LEN bytes long.
+//                   that MUST be at least sizeof(MAC) bytes long.
 //
 // Returns:
 //      0 on success, -1 otherwise
 //
 
-int             ParseMAC( char* pszMACAddr, BYTE* pbMACAddr )
+int  ParseMAC( char* pszMACAddr, BYTE* pbMACAddr )
 {
-    char    work[((LCS_ADDR_LEN*3)-0)];
+    char    work[((sizeof(MAC)*3)-0)];
     BYTE    sep;
     int     x, i;
 
-    if (strlen(pszMACAddr) != ((LCS_ADDR_LEN*3)-1)
-        || (LCS_ADDR_LEN > 1 &&
+    if (strlen(pszMACAddr) != ((sizeof(MAC)*3)-1)
+        || (sizeof(MAC) > 1 &&
             *(pszMACAddr+2) != '-' &&
             *(pszMACAddr+2) != ':')
     )
@@ -1375,10 +1396,10 @@ int             ParseMAC( char* pszMACAddr, BYTE* pbMACAddr )
         return -1;
     }
 
-    strncpy(work,pszMACAddr,((LCS_ADDR_LEN*3)-1));
-    work[((LCS_ADDR_LEN*3)-1)] = sep = *(pszMACAddr+2);
+    strncpy(work,pszMACAddr,((sizeof(MAC)*3)-1));
+    work[((sizeof(MAC)*3)-1)] = sep = *(pszMACAddr+2);
 
-    for (i=0; i < LCS_ADDR_LEN; i++)
+    for (i=0; i < sizeof(MAC); i++)
     {
         if
         (0

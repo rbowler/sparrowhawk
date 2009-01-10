@@ -2,7 +2,7 @@
 // W32MTIO.H      --      Win32 'mtio.h' (Magnetic Tape structures)
 //
 // (c) Copyright "Fish" (David B. Trout), 2005-2007. Released under
-// the Q Public License (http://www.conmicro.cx/hercules/herclic.html)
+// the Q Public License (http://www.hercules-390.org/herclic.html)
 // as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 //
@@ -15,9 +15,19 @@
 //
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: w32mtio.h,v 1.5 2007/06/23 00:04:19 ivan Exp $
+// $Id: w32mtio.h,v 1.7 2008/03/25 11:41:31 fish Exp $
 //
 // $Log: w32mtio.h,v $
+// Revision 1.7  2008/03/25 11:41:31  fish
+// SCSI TAPE MODS part 1: groundwork: non-functional changes:
+// rename some functions, comments, general restructuring, etc.
+// New source modules awstape.c, omatape.c, hettape.c and
+// tapeccws.c added, but not yet used (all will be used in a future
+// commit though when tapedev.c code is eventually split)
+//
+// Revision 1.6  2007/11/30 14:54:33  jmaynard
+// Changed conmicro.cx to hercules-390.org or conmicro.com, as needed.
+//
 // Revision 1.5  2007/06/23 00:04:19  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -64,6 +74,10 @@ struct mtop {
 #define MTRAS1          14  /* run self test 1 (nondestructive) */
 #define MTRAS2          15  /* run self test 2 (destructive) */
 #define MTRAS3          16  /* reserved for self test 3 */
+
+#define MTEOTWARN       17  /* Fish: Warning Zone size (0 bytes == disable) */
+                            /* Some BSD's only support an "MTEWARN" boolean */
+#define MTEWARN  MTEOTWARN  /* (for transparency/portability)               */
 
 #define MTSETBLK        20  /* set block length (SCSI) */
 #define MTSETDENSITY    21  /* set tape density (SCSI) */

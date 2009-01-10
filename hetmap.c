@@ -9,9 +9,12 @@
 || ----------------------------------------------------------------------------
 */
 
-// $Id: hetmap.c,v 1.26 2007/06/23 00:04:11 ivan Exp $
+// $Id: hetmap.c,v 1.27 2008/11/04 04:50:46 fish Exp $
 //
 // $Log: hetmap.c,v $
+// Revision 1.27  2008/11/04 04:50:46  fish
+// Ensure consistent utility startup
+//
 // Revision 1.26  2007/06/23 00:04:11  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -163,15 +166,7 @@ main( int argc, char *argv[] )
 #define O_LABELS        0X40
 #define O_DATASETS      0X20
 
-#ifdef EXTERNALGUI
-    if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0)
-    {
-        extgui = 1;
-        argc--;
-        setvbuf(stderr, NULL, _IONBF, 0);
-        setvbuf(stdout, NULL, _IONBF, 0);
-    }
-#endif /*EXTERNALGUI*/
+    INITIALIZE_UTILITY("hetmap");
 
     opts = O_ALL;
 
