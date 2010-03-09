@@ -1,3 +1,40 @@
+16 Feb 2010 Fix Conditional SSKE failing with Storage Key Assist - Ivan Warren
+04 Feb 2010 - Fix building on 64-bit Macs under Snow Leopard - Jay Maynard
+16 Dec 2009 Fix S/370 SIE guests - Ivan Warren
+14 Jun 2009 uptime command - Fish
+14 Jun 2009 Support expanded storage sizes exceeding 4GB (64-bit only) - Roger Bowler
+05 Jun 2009 Visual Studio 2008 + makefile.bat x64 & runjobs support - Fish
+02 Jun 2009 Miscellaneous minor hetget fixes - kerravon86 by Fish
+02 Jun 2009 Configuration Topology Facility support for PTF and STSI - Fish
+01 Jun 2009 socket printer support - Fish
+01 Jun 2009 New TT32 pre-v3.3 header and stats - Fish
+01 Jun 2009 Fix OMA (TDF) unloaded tape open bug - kerravon86 by Fish
+01 Jun 2009 Support for non-default Windows tape device names - Fish
+01 Jun 2009 Fix tape file extension neutrality special case - Fish
+15 May 2009 Add 3705 device - Jay Maynard, for Max H. Parke
+13 May 2009 Add TTY and 2741 support to 2703 - Jay Maynard, for Max H. Parke
+03 May 2009 Disable SENSE ID CCW for 2311, 2314 subject to LEGACYSENSEID setting,
+            change 2314 control unit from 2841 to 2314 - Kevin Leonard
+27 Apr 2009 Fix scsitape open hang on *nix causing Machine Check - Fish by rbowler
+19 Apr 2009 MAXCPU configuration statement - Roger Bowler
+19 Apr 2009 CMPSC expand works optimized with absolute addresses - Bernard
+17 Mar 2009 Changed "notrunc" to "noclear" and fix compile error on MSVC -
+            Jay Maynard
+15 Mar 2009 Added "notrunc" option to printer and punch devices to not
+            truncate output file uopn opening - Jay Maynard
+11 Mar 2009 CMPSC expand output cache implementation - Bernard van der Helm
+01 Mar 2009 Complete DIAGNOSE X'24' and Implement DIAGNOSE X'210' - Harold Grovesteen
+27 Feb 2009 >70% better CMPSC expand performance - Bernard van der Helm
+22 Feb 2009 30% better CMPSC expand performance - Bernard van der Helm
+20 Feb 2009 Implement VM DIAGNOSE X'260' - Harold Grovesteen
+18 Feb 2009 Turbo CMPSC expand - >15% better performance - Bernard van der Helm
+08 Feb 2009 Ability to build 64-bit executables for Windows - Roger Bowler
+07 Feb 2009 MVCL & MVCLE now obey MP Concurrent Block Consistency rules - Ivan Warren
+07 Feb 2009 Prevent restart on special engines - Bernard van der Helm
+04 Feb 2009 Ensure unaligned LM/STM/LMG/STMG work on aligned constrained hosts - Ivan Warren 
+03 Feb 2009 Fix TPROT under SIE problem reported by 'pat' - Ivan Warren
+23 Jan 2009 copyright notice - Bernard van der Helm
+17 Jan 2009 Fix change recording on page crossing first op of MVC - Reported by Greg Price
 08 Jan 2009 Cosmetic improvement to CPU type display on startup - Jay
             Maynard
 07 Jan 2009 Remove --enable-universal-binary configure option; doesn't work
@@ -224,7 +261,7 @@
 31 Dec 2006 Fix cmdline tabbed filename-completion for MSVC - Fish
 30 Dec 2006 Add ability to modify gpr reg values to gpr command - Fish
 30 Dec 2006 PR# build_msc/103: fix MSVC diag 8 'sh' capture - Fish
-27 Dec 2006 Permanently disable Microsoft's completely INSANE
+27 Dec 2006 Permanently disable Microsoft's default
             Invalid CRT Parameter handling behavior - Fish
 27 Dec 2006 PR# tape/100: Fix crash if bad filespec in OMA (TDF) - Fish
 23 Dec 2006 Misc dyngui mods (64-bit regs, efficiency, etc) - Fish

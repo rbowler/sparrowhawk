@@ -1,13 +1,13 @@
-/* DASDUTIL.C   (c) Copyright Roger Bowler, 1999-2007                */
+/* DASDUTIL.C   (c) Copyright Roger Bowler, 1999-2009                */
 /*              Hercules DASD Utilities: Common subroutines          */
 
-// $Id: dasdutil.c,v 1.60 2007/06/23 00:04:08 ivan Exp $
+// $Id: dasdutil.c 5628 2010-02-13 14:03:36Z jmaynard $
 
 /*-------------------------------------------------------------------*/
 /* This module contains common subroutines used by DASD utilities    */
 /*-------------------------------------------------------------------*/
 
-// $Log: dasdutil.c,v $
+// $Log$
 // Revision 1.60  2007/06/23 00:04:08  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -1177,8 +1177,9 @@ char            pathname[MAX_PATH];     /* file path in host format  */
     ckdtab = dasd_lookup (DASD_CKDDEV, NULL, devtype, volcyls);
     if (ckdtab == NULL)
     {
-        logmsg (_("HHCDU028E device type %4.4X not found in dasd table\n"),
-               devtype);
+        fprintf (stderr,
+                  _("HHCDU028E device type %4.4X not found in dasd table\n"),
+                  devtype);
         return -1;
     }
 

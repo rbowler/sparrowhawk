@@ -1,11 +1,6 @@
-// $Id: hsys.c,v 1.10 2009/01/02 19:21:51 jj Exp $
+// $Id: hsys.c 5483 2009-10-12 05:49:53Z fish $
 //
-// $Log: hsys.c,v $
-// Revision 1.10  2009/01/02 19:21:51  jj
-// DVD-RAM IPL
-// RAMSAVE
-// SYSG Integrated 3270 console fixes
-//
+// $Log$
 // Revision 1.9  2008/12/24 15:42:14  jj
 // Add debug entry point for sclp event masks
 //
@@ -43,7 +38,7 @@ DLL_EXPORT void  (*daemon_task) (void);
 DLL_EXPORT int   (*config_command) (int argc, char *argv[], char *cmdline);
 DLL_EXPORT int   (*system_command) (int argc, char *argv[], char *cmdline);
 DLL_EXPORT void *(*debug_cpu_state) (REGS *);
-DLL_EXPORT void  (*debug_cd_cmd) (char *);
+DLL_EXPORT void *(*debug_cd_cmd) (char *);
 DLL_EXPORT void *(*debug_device_state) (DEVBLK *);
 DLL_EXPORT void *(*debug_program_interrupt) (REGS *, int);
 DLL_EXPORT void *(*debug_diagnose) (U32, int, int, REGS *);

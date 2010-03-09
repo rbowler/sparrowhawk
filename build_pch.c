@@ -1,9 +1,9 @@
-/* BUILD_PCH  (c)Copyright Ivan Warren, 2005-2007                    */
+/* BUILD_PCH  (c)Copyright Ivan Warren, 2005-2009                    */
 /*            Dummy module for building pre-compiled header files    */
 
-// $Id: build_pch.c,v 1.5 2007/06/23 00:04:03 ivan Exp $
+// $Id: build_pch.c 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: build_pch.c,v $
+// $Log$
 // Revision 1.5  2007/06/23 00:04:03  ivan
 // Update copyright notices to include current year (2007)
 //

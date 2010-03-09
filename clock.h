@@ -1,9 +1,9 @@
-/* CLOCK.H      (c) Copyright Jan Jaeger, 2000-2007                  */
+/* CLOCK.H      (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              TOD Clock functions                                  */
 
-// $Id: clock.h,v 1.28 2007/12/11 15:03:10 rbowler Exp $
+// $Id: clock.h 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: clock.h,v $
+// $Log$
 // Revision 1.28  2007/12/11 15:03:10  rbowler
 // Fix untab columns
 //

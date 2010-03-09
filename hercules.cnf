@@ -2,9 +2,12 @@
 #       Sample configuration file for Hercules ESA/390 emulator
 #
 
-# $Id: hercules.cnf,v 1.25 2008/12/01 16:19:49 jj Exp $
+# $Id: hercules.cnf 5334 2009-04-19 20:37:29Z rbowler $
 #
-# $Log: hercules.cnf,v $
+# $Log$
+# Revision 1.26  2009/01/14 14:45:20  jj
+# hercules command table now also used for config commands
+#
 # Revision 1.25  2008/12/01 16:19:49  jj
 # Check for licensed operating systems without impairing architectural
 # compliance of IFL's
@@ -28,10 +31,10 @@
   XPNDSIZE  0                   # Expanded storage size in megabytes
   NUMCPU    1                   # Number of CPUs
 # NUMVEC    1                   # Number of Vector Processors
+  MAXCPU    8                   # Maximum number of CPUs
   ARCHMODE  ESA/390             # Architecture mode S/370, ESA/390 or z/Arch
   ALRF      DISABLE             # ASN-and-LX-Reuse facility
   ECPSVM    NO                  # VM Assist : NO or Level (20 recommended)
-PGMPRDOS LICENSED
 
 #------------------------------------------------------------------------------
 #       OS Tailoring

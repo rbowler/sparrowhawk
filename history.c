@@ -1,9 +1,6 @@
-// $Id: history.c,v 1.6 2006/12/08 09:43:26 jj Exp $
+// $Id: history.c 4102 2006-12-08 09:43:35Z jj $
 //
-// $Log: history.c,v $
-// Revision 1.6  2006/12/08 09:43:26  jj
-// Add CVS message log
-//
+// $Log$
 
 #include "hstdinc.h"
 

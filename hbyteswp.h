@@ -5,12 +5,9 @@
 /* compile option -DNO_ASM_BYTESWAP will expand 'C' code             */
 /* otherwise Intel (486+) assember will be generated                 */
 
-// $Id: hbyteswp.h,v 1.12 2009/01/08 01:59:20 jmaynard Exp $
+// $Id: hbyteswp.h 5039 2009-01-08 01:59:20Z jmaynard $
 //
-// $Log: hbyteswp.h,v $
-// Revision 1.12  2009/01/08 01:59:20  jmaynard
-// Got the test for 64-but NO_ASM_BYTESWAP backwards. Fixed.
-//
+// $Log$
 // Revision 1.11  2009/01/07 18:00:13  jmaynard
 // Added x86_64 assembler swap assists for those systems that don't have
 // byteswap.h in the library.

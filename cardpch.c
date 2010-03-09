@@ -1,23 +1,12 @@
-/* CARDPCH.C    (c) Copyright Roger Bowler, 1999-2007                */
+/* CARDPCH.C    (c) Copyright Roger Bowler, 1999-2009                */
 /*              ESA/390 Card Punch Device Handler                    */
 
-// $Id: cardpch.c,v 1.32 2007/11/21 22:54:13 fish Exp $
+// $Id: cardpch.c 5309 2009-04-04 20:49:13Z rbowler $
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
 /* System/370 card punch devices.                                    */
 /*-------------------------------------------------------------------*/
-
-// $Log: cardpch.c,v $
-// Revision 1.32  2007/11/21 22:54:13  fish
-// Use new BEGIN_DEVICE_CLASS_QUERY macro
-//
-// Revision 1.31  2007/06/23 00:04:03  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.30  2006/12/08 09:43:16  jj
-// Add CVS message log
-//
 
 #include "hstdinc.h"
 #include "hercules.h"
@@ -77,6 +66,7 @@ int     i;                              /* Array subscript           */
     dev->crlf = 0;
     dev->cardpos = 0;
     dev->cardrem = CARD_LENGTH;
+    dev->notrunc = 0;
 
     if(!sscanf(dev->typname,"%hx",&(dev->devtype)))
         dev->devtype = 0x3525;
@@ -99,6 +89,12 @@ int     i;                              /* Array subscript           */
         if (strcasecmp(argv[i], "crlf") == 0)
         {
             dev->crlf = 1;
+            continue;
+        }
+
+        if (strcasecmp(argv[i], "noclear") == 0)
+        {
+            dev->notrunc = 1;
             continue;
         }
 
@@ -138,10 +134,11 @@ static void cardpch_query_device (DEVBLK *dev, char **class,
 
     BEGIN_DEVICE_CLASS_QUERY( "PCH", dev, class, buflen, buffer );
 
-    snprintf (buffer, buflen, "%s%s%s",
+    snprintf (buffer, buflen, "%s%s%s%s",
                 dev->filename,
                 (dev->ascii ? " ascii" : " ebcdic"),
-                ((dev->ascii && dev->crlf) ? " crlf" : ""));
+                ((dev->ascii && dev->crlf) ? " crlf" : ""),
+                (dev->notrunc ? " notrunc" : ""));
 
 } /* end function cardpch_query_device */
 
@@ -168,6 +165,7 @@ static void cardpch_execute_ccw (DEVBLK *dev, BYTE code, BYTE flags,
 int             rc;                     /* Return code               */
 int             i;                      /* Loop counter              */
 int             num;                    /* Number of bytes to move   */
+int             open_flags;             /* File open flags           */
 BYTE            c;                      /* Output character          */
 char            pathname[MAX_PATH];     /* file path in host format  */
 
@@ -178,8 +176,12 @@ char            pathname[MAX_PATH];     /* file path in host format  */
     if (dev->fd < 0 && !IS_CCW_SENSE(code))
     {
         hostpath(pathname, dev->filename, sizeof(pathname));
-        rc = open (pathname,
-                    O_WRONLY | O_CREAT | O_TRUNC /* | O_SYNC */ |  O_BINARY,
+        open_flags = O_WRONLY | O_CREAT /* | O_SYNC */ |  O_BINARY;
+        if (dev->notrunc != 1)
+        {
+            open_flags |= O_TRUNC;
+        }
+        rc = open (pathname, open_flags,
                     S_IRUSR | S_IWUSR | S_IRGRP);
         if (rc < 0)
         {

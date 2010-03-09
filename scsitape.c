@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////////
 // SCSITAPE.C   --   Hercules SCSI tape handling module
 //
-// (c) Copyright "Fish" (David B. Trout), 2005-2007. Released under
+// (c) Copyright "Fish" (David B. Trout), 2005-2009. Released under
 // the Q Public License (http://www.hercules-390.org/herclic.html)
 // as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
@@ -12,60 +12,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: scsitape.c,v 1.33 2008/11/04 05:56:31 fish Exp $
-//
-// $Log: scsitape.c,v $
-// Revision 1.33  2008/11/04 05:56:31  fish
-// Put ensure consistent create_thread ATTR usage change back in
-//
-// Revision 1.32  2008/11/03 15:31:53  rbowler
-// Back out consistent create_thread ATTR modification
-//
-// Revision 1.31  2008/10/18 09:32:21  fish
-// Ensure consistent create_thread ATTR usage
-//
-// Revision 1.30  2008/05/22 21:34:22  fish
-// Attempt to fix my *nix SCSI tape BSR over tapemark bug identified by Bob Schneider [bschneider@pingdata.net]
-//
-// Revision 1.29  2008/03/31 06:36:49  fish
-// (untab)
-//
-// Revision 1.28  2008/03/30 02:51:33  fish
-// Fix SCSI tape EOV (end of volume) processing
-//
-// Revision 1.27  2008/03/29 08:36:46  fish
-// More complete/extensive 3490/3590 tape support
-//
-// Revision 1.26  2008/03/28 02:09:42  fish
-// Add --blkid-24 option support, poserror flag renamed to fenced,
-// added 'generic', 'readblkid' and 'locateblk' tape media handler
-// call vectors.
-//
-// Revision 1.25  2008/03/27 07:14:16  fish
-// SCSI MODS: groundwork: part 3: final shuffling around.
-// Moved functions from one module to another and resequenced
-// functions within each. NO CODE WAS ACTUALLY CHANGED.
-// Next commit will begin the actual changes.
-//
-// Revision 1.24  2008/03/25 11:41:31  fish
-// SCSI TAPE MODS part 1: groundwork: non-functional changes:
-// rename some functions, comments, general restructuring, etc.
-// New source modules awstape.c, omatape.c, hettape.c and
-// tapeccws.c added, but not yet used (all will be used in a future
-// commit though when tapedev.c code is eventually split)
-//
-// Revision 1.23  2007/11/30 14:54:33  jmaynard
-// Changed conmicro.cx to hercules-390.org or conmicro.com, as needed.
-//
-// Revision 1.22  2007/07/24 22:36:33  fish
-// Fix tape Synchronize CCW (x'43') to do actual commit
-//
-// Revision 1.21  2007/06/23 00:04:15  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.20  2006/12/08 09:43:29  jj
-// Add CVS message log
-//
+// $Id: scsitape.c 5587 2009-12-31 15:05:57Z rbowler $
 
 #include "hstdinc.h"
 #include "hercules.h"
@@ -74,7 +21,7 @@
 #if defined(OPTION_SCSI_TAPE)
 
 /*-------------------------------------------------------------------*/
-/*                     (Debugging stuff)                             */
+/* Messages issued by this module are prefixed HHCTA3nn              */
 /*-------------------------------------------------------------------*/
 
 //#define  ENABLE_TRACING_STMTS     // (Fish: DEBUGGING)
@@ -143,17 +90,17 @@ int rc;
 
     /* Open the SCSI tape device */
     dev->readonly = 0;
-    rc = open_tape (dev->filename, O_RDWR | O_BINARY);
+    rc = open_tape (dev->filename, O_RDWR | O_BINARY | O_NONBLOCK);
     if (rc < 0 && EROFS == errno )
     {
         dev->readonly = 1;
-        rc = open_tape (dev->filename, O_RDONLY | O_BINARY);
+        rc = open_tape (dev->filename, O_RDONLY | O_BINARY | O_NONBLOCK);
     }
 
     /* Check for successful open */
     if (rc < 0)
     {
-        logmsg (_("HHCTA024E Error opening %u:%4.4X=%s; errno=%d: %s\n"),
+        logmsg (_("HHCTA324E Error opening %u:%4.4X=%s; errno=%d: %s\n"),
                 SSID_TO_LCSS(dev->ssid), dev->devnum,
                 dev->filename, errno, strerror(errno));
         sysblk.auto_scsi_mount_secs = 0; // (forced)
@@ -222,7 +169,14 @@ int rc;
 int finish_scsitape_open( DEVBLK *dev, BYTE *unitstat, BYTE code )
 {
 int             rc;                     /* Return code               */
+int             oflags;                 /* re-open flags             */
 struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
+
+    /* Switch drive over to BLOCKING-mode i/o... */
+
+    close_tape( dev->fd );
+    oflags = O_BINARY | (dev->readonly ? O_RDONLY : O_RDWR);
+    VERIFY( (dev->fd = open_tape (dev->filename, oflags)) > 0);
 
     /* Since a tape was just mounted, reset the blockid back to zero */
 
@@ -244,7 +198,7 @@ struct mtop     opblk;                  /* Area for MTIOCTOP ioctl   */
         dev->fd = -1;
         close_tape( rc );
         errno = save_errno;
-        logmsg (_("HHCTA030E Error setting attributes for %u:%4.4X=%s; errno=%d: %s\n"),
+        logmsg (_("HHCTA330E Error setting attributes for %u:%4.4X=%s; errno=%d: %s\n"),
                 SSID_TO_LCSS(dev->ssid), dev->devnum,
                 dev->filename, errno, strerror(errno));
         build_senseX(TAPE_BSENSE_ITFERROR,dev,unitstat,code);
@@ -296,7 +250,7 @@ void close_scsitape(DEVBLK *dev)
 
             if ((rc = ioctl_tape ( dev->fd, MTIOCTOP, (char*)&opblk)) != 0)
             {
-                logmsg (_("HHCTA073W Error rewinding %u:%4.4X=%s; errno=%d: %s\n"),
+                logmsg (_("HHCTA373W Error rewinding %u:%4.4X=%s; errno=%d: %s\n"),
                         SSID_TO_LCSS(dev->ssid), dev->devnum,
                         dev->filename, errno, strerror(errno));
             }
@@ -362,7 +316,7 @@ int  rc;
 
     /* Handle read error condition */
 
-    logmsg (_("HHCTA032E Error reading data block from %u:%4.4X=%s; errno=%d: %s\n"),
+    logmsg (_("HHCTA332E Error reading data block from %u:%4.4X=%s; errno=%d: %s\n"),
             SSID_TO_LCSS(dev->ssid), dev->devnum,
             dev->filename, errno, strerror(errno));
 
@@ -432,7 +386,7 @@ int  save_errno;
 
     save_errno = errno;
     {
-        logmsg (_("HHCTA033E Error writing data block to %u:%4.4X=%s; errno=%d: %s\n"),
+        logmsg (_("HHCTA333E Error writing data block to %u:%4.4X=%s; errno=%d: %s\n"),
                 SSID_TO_LCSS(dev->ssid), dev->devnum,
                 dev->filename, errno, strerror(errno));
 
@@ -508,7 +462,7 @@ int  rc, save_errno;
 
     save_errno = errno;
     {
-        logmsg (_("HHCTA034E Error writing tapemark to %u:%4.4X=%s; errno=%d: %s\n"),
+        logmsg (_("HHCTA334E Error writing tapemark to %u:%4.4X=%s; errno=%d: %s\n"),
                 SSID_TO_LCSS(dev->ssid), dev->devnum,
                 dev->filename, errno, strerror(errno));
 
@@ -559,7 +513,7 @@ struct mtop opblk;
     if (rc >= 0)
     {
         /* Increment current file number since tapemark was written */
-/*      dev->curfilen++; /* (CCW processor handles this automatically
+        /*dev->curfilen++;*/ /* (CCW processor handles this automatically
                              so there's no need for us to do it here) */
 
         /* (tapemarks count as block identifiers too!) */
@@ -643,7 +597,7 @@ struct mtop opblk;
 
     save_errno = errno;
     {
-        logmsg (_("HHCTA089E Synchronize error on "
+        logmsg (_("HHCTA389E Synchronize error on "
             "%u:%4.4X=%s; errno=%d: %s\n"),
             SSID_TO_LCSS(dev->ssid), dev->devnum,
             dev->filename, errno, strerror(errno));
@@ -731,7 +685,7 @@ struct mtop opblk;
 
     save_errno = errno;
     {
-        logmsg (_("HHCTA035E Forward space block error on %u:%4.4X=%s; errno=%d: %s\n"),
+        logmsg (_("HHCTA335E Forward space block error on %u:%4.4X=%s; errno=%d: %s\n"),
                 SSID_TO_LCSS(dev->ssid), dev->devnum,
                 dev->filename, errno, strerror(errno));
     }
@@ -908,7 +862,7 @@ struct mtget starting_mtget;
     /* Bona fide backspace block i/o error ... */
     save_errno = errno;
     {
-        logmsg (_("HHCTA036E Backspace block error on %u:%4.4X=%s; errno=%d: %s\n"),
+        logmsg (_("HHCTA336E Backspace block error on %u:%4.4X=%s; errno=%d: %s\n"),
                 SSID_TO_LCSS(dev->ssid), dev->devnum,
                 dev->filename, errno, strerror(errno));
     }
@@ -969,7 +923,7 @@ struct mtop opblk;
 
     save_errno = errno;
     {
-        logmsg (_("HHCTA037E Forward space file error on %u:%4.4X=%s; errno=%d: %s\n"),
+        logmsg (_("HHCTA337E Forward space file error on %u:%4.4X=%s; errno=%d: %s\n"),
                 SSID_TO_LCSS(dev->ssid), dev->devnum,
                 dev->filename, errno, strerror(errno));
     }
@@ -1073,7 +1027,7 @@ struct mtop opblk;
 
     save_errno = errno;
     {
-        logmsg (_("HHCTA038E Backspace file error on %u:%4.4X=%s; errno=%d: %s\n"),
+        logmsg (_("HHCTA338E Backspace file error on %u:%4.4X=%s; errno=%d: %s\n"),
                 SSID_TO_LCSS(dev->ssid), dev->devnum,
                 dev->filename, errno, strerror(errno));
     }
@@ -1124,7 +1078,7 @@ struct mtop opblk;
     dev->blockid  = -1;     // (because the rewind failed)
     dev->curfilen = -1;     // (because the rewind failed)
 
-    logmsg (_("HHCTA073E Error rewinding %u:%4.4X=%s; errno=%d: %s\n"),
+    logmsg (_("HHCTA373E Error rewinding %u:%4.4X=%s; errno=%d: %s\n"),
             SSID_TO_LCSS(dev->ssid), dev->devnum,
             dev->filename, errno, strerror(errno));
 
@@ -1156,7 +1110,7 @@ struct mtop opblk;
         dev->fenced = 0;
 
         if ( dev->ccwtrace || dev->ccwstep )
-            logmsg (_("HHCTA077I Tape %u:%4.4X unloaded\n"),
+            logmsg (_("HHCTA377I Tape %u:%4.4X unloaded\n"),
                 SSID_TO_LCSS(dev->ssid), dev->devnum);
 
         // PR# tape/88: no sense with 'close_scsitape'
@@ -1172,7 +1126,7 @@ struct mtop opblk;
     dev->curfilen = -1; // (because the rewind-unload failed)
     dev->blockid  = -1; // (because the rewind-unload failed)
 
-    logmsg ( _("HHCTA076E Error unloading %u:%4.4X=%s; errno=%d: %s\n" ),
+    logmsg ( _("HHCTA376E Error unloading %u:%4.4X=%s; errno=%d: %s\n" ),
             SSID_TO_LCSS(dev->ssid), dev->devnum,
             dev->filename, errno, strerror( errno ) );
 
@@ -1232,7 +1186,7 @@ int rc;
 
             if ( rc < 0)
             {
-                logmsg (_("HHCTA999E Erase Gap error on %u:%4.4X=%s; errno=%d: %s\n"),
+                logmsg (_("HHCTA380E Erase Gap error on %u:%4.4X=%s; errno=%d: %s\n"),
                         SSID_TO_LCSS(dev->ssid), dev->devnum,
                         dev->filename, errno, strerror(errno));
                 build_senseX(TAPE_BSENSE_WRITEFAIL,dev,unitstat,code);
@@ -1269,7 +1223,7 @@ int dse_scsitape( DEVBLK *dev, BYTE *unitstat, BYTE code )
 
     if ( ioctl_tape( dev->fd, MTIOCTOP, (char*)&opblk ) < 0 )
     {
-        logmsg (_("HHCTA999E Data Security Erase error on %u:%4.4X=%s; errno=%d: %s\n"),
+        logmsg (_("HHCTA381E Data Security Erase error on %u:%4.4X=%s; errno=%d: %s\n"),
                 SSID_TO_LCSS(dev->ssid), dev->devnum,
                 dev->filename, errno, strerror(errno));
         build_senseX(TAPE_BSENSE_WRITEFAIL,dev,unitstat,code);
@@ -1325,7 +1279,7 @@ int readblkid_scsitape ( DEVBLK* dev, BYTE* logical, BYTE* physical )
         int save_errno = errno;
         {
             if ( dev->ccwtrace || dev->ccwstep )
-                logmsg(_("HHCTA082W ioctl_tape(MTIOCPOS=MTTELL) failed on %4.4X = %s: %s\n")
+                logmsg(_("HHCTA382W ioctl_tape(MTIOCPOS=MTTELL) failed on %4.4X = %s: %s\n")
                     ,dev->devnum
                     ,dev->filename
                     ,strerror(errno)
@@ -1387,7 +1341,7 @@ int locateblk_scsitape ( DEVBLK* dev, U32 blockid, BYTE *unitstat, BYTE code )
         int save_errno = errno;
         {
             if ( dev->ccwtrace || dev->ccwstep )
-                logmsg(_("HHCTA083W ioctl_tape(MTIOCTOP=MTSEEK) failed on %4.4X = %s: %s\n")
+                logmsg(_("HHCTA383W ioctl_tape(MTIOCTOP=MTSEEK) failed on %4.4X = %s: %s\n")
                     ,dev->devnum
                     ,dev->filename
                     ,strerror(errno)
@@ -1990,7 +1944,7 @@ void int_scsi_status_update( DEVBLK* dev, int mountstat_only ) // (internal call
         (
             buf, sizeof(buf),
 
-            "%u:%4.4X filename=%s (%s), sstat=0x%8.8X: %s %s"
+            "%u:%4.4X filename=%s (%s), sstat=0x%8.8lX: %s %s"
 
             ,SSID_TO_LCSS(dev->ssid)
             ,dev->devnum
@@ -2011,7 +1965,7 @@ void int_scsi_status_update( DEVBLK* dev, int mountstat_only ) // (internal call
         if ( STS_BOT(dev) )
             dev->eotwarning = 0;
 
-        logmsg ( _("HHCTA023I %s\n"), buf );
+        logmsg ( _("HHCTA323I %s\n"), buf );
     }
 
 } /* end function int_scsi_status_update */
@@ -2072,7 +2026,7 @@ void *scsi_tapemountmon_thread( void *db )
 
     logmsg
     (
-        _( "HHCTA200I SCSI-Tape mount-monitoring thread started;\n"
+        _( "HHCTA300I SCSI-Tape mount-monitoring thread started;\n"
            "          dev=%u:%4.4X, tid="TIDPAT", pri=%d, pid=%d\n" )
 
         ,SSID_TO_LCSS(dev->ssid)
@@ -2091,18 +2045,18 @@ void *scsi_tapemountmon_thread( void *db )
         if ( (fd = dev->fd) < 0 )
         {
             dev->readonly = 0;
-            fd = open_tape (dev->filename, O_RDWR | O_BINARY);
+            fd = open_tape (dev->filename, O_RDWR | O_BINARY | O_NONBLOCK);
             if (fd < 0 && EROFS == errno )
             {
                 dev->readonly = 1;
-                fd = open_tape (dev->filename, O_RDONLY | O_BINARY);
+                fd = open_tape (dev->filename, O_RDONLY | O_BINARY | O_NONBLOCK);
             }
 
             // Check for successful open
 
             if (fd < 0)
             {
-                logmsg (_("HHCTA024E Error opening SCSI device %u:%4.4X=%s; errno=%d: %s\n"),
+                logmsg (_("HHCTA324E Error opening SCSI device %u:%4.4X=%s; errno=%d: %s\n"),
                         SSID_TO_LCSS(dev->ssid), dev->devnum,
                         dev->filename, errno, strerror(errno));
                 sysblk.auto_scsi_mount_secs = 0; // (forced)
@@ -2212,7 +2166,7 @@ void *scsi_tapemountmon_thread( void *db )
 
     logmsg
     (
-        _( "HHCTA299I SCSI-Tape mount-monitoring thread ended;\n"
+        _( "HHCTA301I SCSI-Tape mount-monitoring thread ended;\n"
            "          dev=%u:%4.4X, tid="TIDPAT", pid=%d\n" )
 
         ,SSID_TO_LCSS(dev->ssid)

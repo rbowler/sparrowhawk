@@ -1,7 +1,7 @@
-/* tapesplt.C  (c) Copyright Jay Maynard, 2000-2007                 */
+/* tapesplt.C  (c) Copyright Jay Maynard, 2000-2009                 */
 /*              Split AWSTAPE format tape image                      */
 
-// $Id: tapesplt.c,v 1.27 2008/11/04 04:50:46 fish Exp $
+// $Id: tapesplt.c 5127 2009-01-23 13:25:01Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* This program reads an AWSTAPE format tape image file and produces */
@@ -9,7 +9,7 @@
 /* options.                                                          */
 /*-------------------------------------------------------------------*/
 
-// $Log: tapesplt.c,v $
+// $Log$
 // Revision 1.27  2008/11/04 04:50:46  fish
 // Ensure consistent utility startup
 //

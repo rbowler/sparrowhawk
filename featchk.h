@@ -1,53 +1,14 @@
-/* FEATCHK.H    (c) Copyright Jan Jaeger, 2000-2007                  */
+/* FEATCHK.H    (c) Copyright Jan Jaeger, 2000-2009                  */
+/*              Feature definition consistency checks                */
+
+// $Id: featchk.h 5454 2009-08-14 14:25:06Z rbowler $
+
 /*-------------------------------------------------------------------*/
-/*                                                                   */
-/*           Feature definition consistency checks                   */
-/*                                                                   */
 /*  Perform various checks on feature combinations, and set          */
 /*  additional flags to percolate certain features such as           */
 /*  SIE down to lower architecture levels such that these            */
 /*  can include emulation support                                    */
-/*                                                                   */
 /*-------------------------------------------------------------------*/
-
-// $Id: featchk.h,v 1.51 2008/12/27 23:34:37 rbowler Exp $
-//
-// $Log: featchk.h,v $
-// Revision 1.51  2008/12/27 23:34:37  rbowler
-// Integrated 3270 (SYSG) console send command
-//
-// Revision 1.50  2008/12/24 22:35:53  rbowler
-// Framework for integrated 3270 and ASCII console features
-//
-// Revision 1.49  2008/12/22 00:29:10  ivan
-// Implement February 2008 z/Arch Compare And Swap And Store Facility 2
-// Update FAQ to reflect change
-// update FAQ to also indicate z/Arch DAT Enhancement is implemented
-//
-// Revision 1.48  2007/12/23 00:29:20  rbowler
-// reset_channel_path, cancel_subchannel unresolved if no channel subsystem feature
-//
-// Revision 1.47  2007/06/23 00:04:09  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.46  2007/03/08 01:27:02  gsmith
-// Remove inline attr from vfetchx/vstorex _full functions
-//
-// Revision 1.45  2007/01/14 23:31:46  gsmith
-// nerak's patch, one more time
-//
-// Revision 1.44  2007/01/14 19:49:13  gsmith
-// Fix typos
-//
-// Revision 1.43  2007/01/14 19:42:38  gsmith
-// Fix S370 only build - nerak60510
-//
-// Revision 1.42  2007/01/04 14:21:27  rbowler
-// Decimal floating point does not require binary floating point
-//
-// Revision 1.41  2006/12/08 09:43:21  jj
-// Add CVS message log
-//
 
 #if defined(FEATCHK_CHECK_ALL)
 
@@ -291,6 +252,11 @@
  #error Move page facility cannot be defined with 2K storage keys
 #endif
 
+#if defined(FEATURE_FAST_SYNC_DATA_MOVER) \
+ && !defined(FEATURE_MOVE_PAGE_FACILITY_2)
+ #error Fast sync data mover facility requires Move page facility
+#endif
+
 #if defined(FEATURE_ESAME) \
   && defined(FEATURE_INTERPRETIVE_EXECUTION) \
   && !defined(_FEATURE_SIE)
@@ -424,6 +390,9 @@
  #error Integrated ASCII console requires FEATURE_SYSTEM_CONSOLE
 #endif
 
+#if defined(FEATURE_VM_BLOCKIO) && !defined(FEATURE_EMULATE_VM)
+ #error VM Standard Block I/O DIAGNOSE 0x250 requires FEATURE_EMULATE_VM
+#endif
 
 #if defined(FEATURE_MESSAGE_SECURITY_ASSIST)
  #if defined(_370)

@@ -1,13 +1,13 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //         fthreads.h           Fish's WIN32 version of pthreads
 ////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2001-2007. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2001-2009. Released under the Q Public License
 // (http://www.hercules-390.org/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: fthreads.h,v 1.24 2008/03/25 11:41:31 fish Exp $
+// $Id: fthreads.h 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: fthreads.h,v $
+// $Log$
 // Revision 1.24  2008/03/25 11:41:31  fish
 // SCSI TAPE MODS part 1: groundwork: non-functional changes:
 // rename some functions, comments, general restructuring, etc.

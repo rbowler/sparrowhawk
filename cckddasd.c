@@ -1,14 +1,14 @@
-/* CCKDDASD.C   (c) Copyright Roger Bowler, 1999-2007                */
+/* CCKDDASD.C   (c) Copyright Roger Bowler, 1999-2009                */
 /*       ESA/390 Compressed CKD Direct Access Storage Device Handler */
 
-// $Id: cckddasd.c,v 1.146 2008/11/04 05:56:30 fish Exp $
+// $Id: cckddasd.c 5125 2009-01-23 12:01:44Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* This module contains device functions for compressed emulated     */
 /* count-key-data direct access storage devices.                     */
 /*-------------------------------------------------------------------*/
 
-// $Log: cckddasd.c,v $
+// $Log$
 // Revision 1.146  2008/11/04 05:56:30  fish
 // Put ensure consistent create_thread ATTR usage change back in
 //

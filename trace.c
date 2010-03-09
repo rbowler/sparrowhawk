@@ -1,10 +1,10 @@
-/* TRACE.C      (c) Copyright Jan Jaeger, 2000-2007                  */
+/* TRACE.C      (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              Implicit tracing functions                           */
 
-// $Id: trace.c,v 1.32 2008/02/28 22:06:34 ptl00 Exp $
+// $Id: trace.c 5127 2009-01-23 13:25:01Z bernard $
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
 /*-------------------------------------------------------------------*/
 /* This module contains procedures for creating entries in the       */
@@ -18,7 +18,7 @@
 /*      ASN-and-LX-reuse facility - Roger Bowler            July 2004*/
 /*-------------------------------------------------------------------*/
 
-// $Log: trace.c,v $
+// $Log$
 // Revision 1.32  2008/02/28 22:06:34  ptl00
 // Fix mode switch trace
 //

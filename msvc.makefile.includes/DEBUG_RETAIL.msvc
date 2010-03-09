@@ -3,7 +3,7 @@
 # --------------------------------------------------------------------------
 # (c) Copyright Roger Bowler, 2005-2007
 # --------------------------------------------------------------------------
-# $Id: DEBUG_RETAIL.msvc,v 1.4 2008/01/31 22:32:36 rbowler Exp $
+# $Id: DEBUG_RETAIL.msvc 5382 2009-06-05 09:09:01Z fish $
 #
 #  Sets appropriate compiler/linker flags (cdebug & ldebug) depending on
 #  whether a normal retail release or debugging version of the product is
@@ -11,7 +11,16 @@
 #
 #
 #                           CHANGE HISTORY
-# $Log: DEBUG_RETAIL.msvc,v $
+# $Log$
+# Revision 1.7  2009/02/08 15:07:20  rbowler
+# Eliminate superfluous trailing blanks (cosmetic change only)
+#
+# Revision 1.6  2009/02/05 23:43:09  rbowler
+# Reduce warning level from W4 to W3 for win64
+#
+# Revision 1.5  2009/02/05 23:22:18  rbowler
+# C1189: cannot use 32-bit time_t (_USE_32BIT_TIME_T) with _WIN64
+#
 # Revision 1.4  2008/01/31 22:32:36  rbowler
 # Move MSVC compiler level determination to CONFIG.msvc
 #
@@ -32,7 +41,7 @@
 #       AFTER calling win32.mak since it sets it.
 # -------------------------------------------------
 
-!IF $(vsversion) < 8 
+!IF $(vsversion) < 8
 MAPFILE = /map:$(MAPDIR)\$(@B).map /mapinfo:lines
 !ELSE
 MAPFILE = /map:$(MAPDIR)\$(@B).map
@@ -52,7 +61,7 @@ MAPFILE = /map:$(MAPDIR)\$(@B).map
 # says to use the new /fp option instead.
 # rbowler: Compiler version check (vsversion) is now in CONFIG.msvc
 
-!IF $(vsversion) < 8 
+!IF $(vsversion) < 8
 
 cflags = $(cflags) /QIfist
 
@@ -89,11 +98,4 @@ ldebug = $(ldebug) /DEBUG /PDB:$(PDBDIR)\$(@B).pdb
 cdebug  = -Zi -Od -D DEBUG -D _DEBUG -Gm
 ldebug = /DEBUG /PDB:$(PDBDIR)\$(@B).pdb
 
-!ENDIF
-
-!IF $(vsversion) >= 8 
-cflags = $(cflags) -D _CRT_SECURE_NO_DEPRECATE
-cflags = $(cflags) -D _CRT_NONSTDC_NO_DEPRECATE
-cflags = $(cflags) -D _USE_32BIT_TIME_T
-ldebug = $(ldebug) /MANIFEST
 !ENDIF

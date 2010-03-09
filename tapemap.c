@@ -1,14 +1,14 @@
-/* TAPEMAP.C   (c) Copyright Jay Maynard, 2000-2007                  */
+/* TAPEMAP.C   (c) Copyright Jay Maynard, 2000-2009                  */
 /*              Map AWSTAPE format tape image                        */
 
-// $Id: tapemap.c,v 1.27 2008/11/04 04:50:46 fish Exp $
+// $Id: tapemap.c 5127 2009-01-23 13:25:01Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* This program reads an AWSTAPE format tape image file and produces */
 /* a map of the tape, printing any standard label records it finds.  */
 /*-------------------------------------------------------------------*/
 
-// $Log: tapemap.c,v $
+// $Log$
 // Revision 1.27  2008/11/04 04:50:46  fish
 // Ensure consistent utility startup
 //

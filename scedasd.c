@@ -1,43 +1,7 @@
 /* SCEDASD.C    (c) Copyright Jan Jaeger, 1999-2009                  */
 /*              Service Control Element DASD I/O functions           */
 
-// $Id: scedasd.c,v 1.10 2009/01/07 07:16:33 jj Exp $
-
-// $Log: scedasd.c,v $
-// Revision 1.10  2009/01/07 07:16:33  jj
-// Allow for DOS formatted .ins files
-//
-// Revision 1.9  2009/01/04 20:51:26  jj
-// typo
-//
-// Revision 1.8  2009/01/04 20:10:24  jj
-// Return error on HMC dasd write error
-//
-// Revision 1.7  2009/01/03 20:25:20  jj
-// Ensure file is properly rewritten if it already exists (Add O_TRUNC)
-//
-// Revision 1.6  2009/01/03 10:58:58  jj
-// Fix storage reference
-// Update path length to 1024
-// Enable SCEDIO in ESA/390 mode
-//
-// Revision 1.5  2009/01/02 23:03:08  rbowler
-// scedasd.c(221) : error C2065 : 'S_IROTH' : undeclared identifier
-//
-// Revision 1.4  2009/01/02 22:44:06  rbowler
-// scedasd.c(115) : warning C4013: 'assert' undefined
-//
-// Revision 1.3  2009/01/02 19:21:52  jj
-// DVD-RAM IPL
-// RAMSAVE
-// SYSG Integrated 3270 console fixes
-//
-// Revision 1.2  2008/12/29 16:13:37  jj
-// Make sce_base_dir externally available
-//
-// Revision 1.1  2008/12/29 11:03:11  jj
-// Move HMC disk I/O functions to scedasd.c
-//
+// $Id: scedasd.c 5306 2009-04-03 17:57:43Z rbowler $
 
 #include "hstdinc.h"
 
@@ -51,27 +15,111 @@
 
 static TID     scedio_tid;             /* Thread id of the i/o driver
                                                                      */
-static char sce_base_dir[1024];
+static char *sce_basedir = NULL;
 
 
-static char *set_base_dir(char *path)
+char *get_sce_dir()
 {
-char *base_dir;
+    return sce_basedir;
+}
 
-    strlcpy(sce_base_dir,path,sizeof(sce_base_dir));
 
-    if((base_dir = strrchr(sce_base_dir,'/')))
+void set_sce_dir(char *path)
+{
+char realdir[MAX_PATH];
+char tempdir[MAX_PATH];
+
+    if(sce_basedir)
     {
-        *(++base_dir) = '\0';
-        return strrchr(path,'/') + 1;
+        free(sce_basedir);
+        sce_basedir = NULL;
+    }
+
+    if(!path)
+        sce_basedir = NULL;
+    else
+        if(!realpath(path,tempdir))
+        {
+            logmsg(_("HHCSC011E set_sce_dir: %s: %s\n"),path,strerror(errno));
+            sce_basedir = NULL;
+        }
+        else
+        {
+            hostpath(realdir, tempdir, sizeof(realdir));
+            strlcat(realdir,"/",sizeof(realdir));
+            sce_basedir = strdup(realdir);
+        }
+}
+
+
+static char *set_sce_basedir(char *path)
+{
+char *basedir;
+char realdir[MAX_PATH];
+char tempdir[MAX_PATH];
+
+    if(sce_basedir)
+    {
+        free(sce_basedir);
+        sce_basedir = NULL;
+    }
+
+    if(!realpath(path,tempdir))
+    {
+        logmsg(_("HHCSC012E set_sce_basedir: %s: %s\n"),path,strerror(errno));
+        sce_basedir = NULL;
+        return NULL;
+    }
+    hostpath(realdir, tempdir, sizeof(realdir));
+
+    if((basedir = strrchr(realdir,'/')))
+    {
+        *(++basedir) = '\0';
+        sce_basedir = strdup(realdir);
+        return (basedir = strrchr(path,'/')) ? ++basedir : path;
     }
     else
     {
-        *sce_base_dir = '\0';
+        sce_basedir = NULL; 
         return path;
     }
 }
 
+
+static char *check_sce_filepath(const char *path, char *fullpath)
+{
+char temppath[MAX_PATH];
+char tempreal[MAX_PATH];
+
+    /* Return file access error if no basedir has been set */
+    if(!sce_basedir)
+    {
+        strlcpy(fullpath,path,sizeof(temppath));
+        errno = EACCES;
+        return NULL;
+    }
+
+    /* Establish the full path of the file we are trying to access */
+    strlcpy(temppath,sce_basedir,sizeof(temppath));
+    strlcat(temppath,path,sizeof(temppath));
+    
+    if(!realpath(temppath,tempreal))
+    {
+        hostpath(fullpath, tempreal, sizeof(temppath));
+        if(strncmp( sce_basedir, fullpath, strlen(sce_basedir)))
+            errno = EACCES;
+        return NULL;
+    }
+    
+    hostpath(fullpath, tempreal, sizeof(temppath));
+    if(strncmp( sce_basedir, fullpath, strlen(sce_basedir)))
+    {
+        errno = EACCES;
+        return NULL;
+    }
+
+    return fullpath;
+}
 
 #endif /* !defined(_SCEDASD_C) */
 
@@ -99,10 +147,10 @@ int ARCH_DEP(load_hmc) (char *fname, int cpu, int clear)
 {
 REGS   *regs;                           /* -> Regs                   */
 FILE   *fp;
-char    inputbuff[1024];
+char    inputbuff[MAX_PATH];
 char   *inputline;
-char    filename[1024];                 /* filename of image file    */
-char    pathname[1024];                 /* pathname of image file    */
+char    filename[MAX_PATH];                 /* filename of image file    */
+char    pathname[MAX_PATH];                 /* pathname of image file    */
 U32     fileaddr;
 int     rc = 0;                         /* Return codes (work)       */
 
@@ -117,19 +165,22 @@ int     rc = 0;                         /* Return codes (work)       */
     if(fname == NULL)                   /* Default ipl from DASD     */
         fname = "HERCULES.ins";         /*   from HERCULES.ins       */
 
-    hostpath(pathname, fname, sizeof(filename));
+    hostpath(pathname, fname, sizeof(pathname));
 
-    fname = set_base_dir(pathname);
+    if(!(fname = set_sce_basedir(pathname)))
+        return -1;
 
-    /* reconstruct full name */
-    strlcpy(filename,sce_base_dir,sizeof(filename));
-    strlcat(filename,fname,sizeof(filename));
-
-    hostpath(pathname, filename, sizeof(filename));
-    fp = fopen(pathname, "r");
+    /* Construct and check full pathname */
+    if(!check_sce_filepath(fname,filename))
+    {
+        logmsg(_("HHCSC001E Load from %s failed: %s\n"),fname,strerror(errno));
+        return -1;
+    }
+    
+    fp = fopen(filename, "r");
     if(fp == NULL)
     {
-        logmsg(_("HHCCP031E Load from %s failed: %s\n"),fname,strerror(errno));
+        logmsg(_("HHCSC002E Load from %s failed: %s\n"),fname,strerror(errno));
         return -1;
     }
 
@@ -144,8 +195,7 @@ int     rc = 0;                         /* Return codes (work)       */
 
         if(inputline)
         {
-            rc = sscanf(inputline,"%1024s %i",pathname,&fileaddr);
-            hostpath(filename, pathname, sizeof(filename));
+            rc = sscanf(inputline,"%" MSTRING(MAX_PATH) "s %i",filename,&fileaddr);
         }
 
         /* If no load address was found load to location zero */
@@ -154,23 +204,16 @@ int     rc = 0;                         /* Return codes (work)       */
 
         if(inputline && rc > 0 && *filename != '*' && *filename != '#')
         {
-            /* Prepend the directory name if one was found
-               and if no full pathname was specified */
-            if(
-#ifndef WIN32
-                filename[0] != '/'
-#else // WIN32
-                filename[1] != ':'
-#endif // !WIN32
-            )
-            {
-                strlcpy(pathname,sce_base_dir,sizeof(pathname));
-                strlcat(pathname,filename,sizeof(pathname));
-            }
-            else
-                strlcpy(pathname,filename,sizeof(pathname));
+            hostpath(pathname, filename, sizeof(pathname));
 
-            if( ARCH_DEP(load_main) (pathname, fileaddr) < 0 )
+            /* Construct and check full pathname */
+            if(!check_sce_filepath(pathname,filename))
+            {
+                logmsg(_("HHCSC003E Load from %s failed: %s\n"),pathname,strerror(errno));
+                return -1;
+            }
+
+            if( ARCH_DEP(load_main) (filename, fileaddr) < 0 )
             {
                 fclose(fp);
                 HDC1(debug_cpu_state, regs);
@@ -197,14 +240,12 @@ int len;
 int rc = 0;
 RADR pageaddr;
 U32  pagesize;
-char pathname[MAX_PATH];
 
-    hostpath(pathname, fname, sizeof(pathname));
-
-    fd = open (pathname, O_RDONLY|O_BINARY);
+    fd = open (fname, O_RDONLY|O_BINARY);
     if (fd < 0)
     {
-        logmsg(_("HHCCP033E load_main: %s: %s\n"), fname, strerror(errno));
+        if(errno != ENOENT)
+            logmsg(_("HHCSC031E load_main: %s: %s\n"), fname, strerror(errno));
         return fd;
     }
 
@@ -214,7 +255,7 @@ char pathname[MAX_PATH];
     for( ; ; ) {
         if (pageaddr >= sysblk.mainsize)
         {
-            logmsg(_("HHCCP034W load_main: terminated at end of mainstor\n"));
+            logmsg(_("HHCSC032W load_main: terminated at end of mainstor\n"));
             close(fd);
             return rc;
         }
@@ -258,7 +299,7 @@ U64 totwrite = 0;
 #endif
     if (fd < 0)
     {
-        logmsg ("HHCRD001I %s open error: %s\n", fname, strerror(errno));
+        logmsg (_("HHCSC041E %s open error: %s\n"), fname, strerror(errno));
         return -1;
     }
 
@@ -357,7 +398,7 @@ U64 totread = 0;
     if (fd < 0)
     {
         if(errno != ENOENT)
-            logmsg ("HHCRD002I %s open error: %s\n", fname, strerror(errno));
+            logmsg (_("HHCSC051E %s open error: %s\n"), fname, strerror(errno));
         return -1;
     }
 
@@ -443,73 +484,148 @@ eof:
 }
 
 
-/*-------------------------------------------------------------------*/
-/* Thread to perform service processor I/O functions                 */
-/*-------------------------------------------------------------------*/
-static void ARCH_DEP(scedio_thread)(SCCB_SCEDIO_BK *scedio_bk)
+static int ARCH_DEP(scedio_ior)(SCCB_SCEDIOR_BK *scedior_bk)
+{
+U32  origin;
+char image[9];
+S32  size;
+unsigned int i;
+char filename[MAX_PATH];
+
+    FETCH_FW(origin,scedior_bk->origin);
+
+    /* Convert image filename to null terminated ascii string */
+    for(i = 0; i < sizeof(image)-1 && scedior_bk->image[i] != 0x40; i++)
+        image[i] = guest_to_host((int)scedior_bk->image[i]);
+    image[i] = '\0';
+
+    /* Ensure file access is allowed and within specified directory */
+    if(!check_sce_filepath(image,filename))
+    {
+        if(errno != ENOENT)
+            logmsg (_("HHCSC101E access error: %s: %s\n"), image, strerror(errno));
+        return FALSE;
+    }
+
+    size = ARCH_DEP(load_main)(filename,origin);
+
+    return (size >= 0) ? TRUE : FALSE;
+}
+
+
+static int ARCH_DEP(scedio_iov)(SCCB_SCEDIOV_BK *scediov_bk)
 {
 S64     seek;
 S64     length;
 S64     totread, totwrite;
 U64     sto;
-char    fname[1024];
+char    fname[MAX_PATH];
 
-    switch(scedio_bk->type) {
+    switch(scediov_bk->type) {
 
-    case SCCB_SCEDIO_TYPE_INIT:
-        scedio_bk->flag3 |= SCCB_SCEDIO_FLG3_COMPLETE;
+    case SCCB_SCEDIOV_TYPE_INIT:
+        return TRUE;
         break;
 
 
-    case SCCB_SCEDIO_TYPE_READ:
-        strlcpy(fname,sce_base_dir,sizeof(fname));
-        strlcat(fname,(char *)scedio_bk->filename,sizeof(fname));
-        FETCH_DW(sto,scedio_bk->sto);
-        FETCH_DW(seek,scedio_bk->seek);
-        FETCH_DW(length,scedio_bk->length);
+    case SCCB_SCEDIOV_TYPE_READ:
+        /* Ensure file access is allowed and within specified directory */
+        if(!check_sce_filepath((char*)scediov_bk->filename,fname))
+        {
+            if(errno != ENOENT)
+                logmsg (_("HHCSC201E access error: %s: %s\n"), fname, strerror(errno));
+            return FALSE;
+        }
+        FETCH_DW(sto,scediov_bk->sto);
+        FETCH_DW(seek,scediov_bk->seek);
+        FETCH_DW(length,scediov_bk->length);
 
         totread = ARCH_DEP(read_file)(fname, sto, seek, length);
 
         if(totread > 0)
         {
-            STORE_DW(scedio_bk->length,totread);
+            STORE_DW(scediov_bk->length,totread);
 
             if(totread == length)
-                STORE_DW(scedio_bk->ncomp,0);
+                STORE_DW(scediov_bk->ncomp,0);
             else
-                STORE_DW(scedio_bk->ncomp,seek+totread);
+                STORE_DW(scediov_bk->ncomp,seek+totread);
 
-            scedio_bk->flag3 |= SCCB_SCEDIO_FLG3_COMPLETE;
+            return TRUE;
         }
         else
-            scedio_bk->flag3 &= ~SCCB_SCEDIO_FLG3_COMPLETE;
+            return FALSE;
 
         break;
 
 
-    case SCCB_SCEDIO_TYPE_CREATE:
-    case SCCB_SCEDIO_TYPE_APPEND:
-        strlcpy(fname,sce_base_dir,sizeof(fname));
-        strlcat(fname,(char *)scedio_bk->filename,sizeof(fname));
-        FETCH_DW(sto,scedio_bk->sto);
-        FETCH_DW(seek,scedio_bk->seek);
-        FETCH_DW(length,scedio_bk->length);
+    case SCCB_SCEDIOV_TYPE_CREATE:
+    case SCCB_SCEDIOV_TYPE_APPEND:
+        /* Ensure file access is allowed and within specified directory */
+        if(!check_sce_filepath((char*)scediov_bk->filename,fname))
+        {
+            if(errno != ENOENT)
+                logmsg (_("HHCSC202I access error: %s: %s\n"), fname, strerror(errno));
+
+            /* A file not found error may be expected for a create request */
+            if(!(errno == ENOENT && scediov_bk->type == SCCB_SCEDIOV_TYPE_CREATE))
+                return FALSE;
+        }
+        FETCH_DW(sto,scediov_bk->sto);
+        FETCH_DW(seek,scediov_bk->seek);
+        FETCH_DW(length,scediov_bk->length);
 
         totwrite = ARCH_DEP(write_file)(fname,
-          ((scedio_bk->type == SCCB_SCEDIO_TYPE_CREATE) ? (O_CREAT|O_TRUNC) : O_APPEND), sto, length);
+          ((scediov_bk->type == SCCB_SCEDIOV_TYPE_CREATE) ? (O_CREAT|O_TRUNC) : O_APPEND), sto, length);
 
         if(totwrite >= 0)
         {
-            STORE_DW(scedio_bk->ncomp,totwrite);
-            scedio_bk->flag3 |= SCCB_SCEDIO_FLG3_COMPLETE;
+            STORE_DW(scediov_bk->ncomp,totwrite);
+            return TRUE;
         }
+        else
+            return FALSE;
+        break;
+
+
+    default:
+        PTT(PTT_CL_ERR,"*SERVC",(U32)scediov_bk->type,(U32)scediov_bk->flag1,scediov_bk->flag2);
+        return FALSE;
+
+    }
+}
+
+
+/*-------------------------------------------------------------------*/
+/* Thread to perform service processor I/O functions                 */
+/*-------------------------------------------------------------------*/
+static void ARCH_DEP(scedio_thread)(SCCB_SCEDIO_BK *scedio_bk)
+{
+SCCB_SCEDIOV_BK *scediov_bk;
+SCCB_SCEDIOR_BK *scedior_bk;
+
+    switch(scedio_bk->flag1) {
+
+    case SCCB_SCEDIO_FLG1_IOV:
+        scediov_bk = (SCCB_SCEDIOV_BK*)(scedio_bk + 1);
+        if( ARCH_DEP(scedio_iov)(scediov_bk) )
+            scedio_bk->flag3 |= SCCB_SCEDIO_FLG3_COMPLETE;
+        else
+            scedio_bk->flag3 &= ~SCCB_SCEDIO_FLG3_COMPLETE;
+        break;
+
+    case SCCB_SCEDIO_FLG1_IOR:
+        scedior_bk = (SCCB_SCEDIOR_BK*)(scedio_bk + 1);
+        if( ARCH_DEP(scedio_ior)(scedior_bk) )
+            scedio_bk->flag3 |= SCCB_SCEDIO_FLG3_COMPLETE;
         else
             scedio_bk->flag3 &= ~SCCB_SCEDIO_FLG3_COMPLETE;
         break;
 
     default:
-        scedio_bk->flag3 &= ~SCCB_SCEDIO_FLG3_COMPLETE;
+        PTT(PTT_CL_ERR,"*SERVC",(U32)scedio_bk->flag0,(U32)scedio_bk->flag1,scedio_bk->flag3);
     }
+
 
     OBTAIN_INTLOCK(NULL);
 
@@ -531,14 +647,27 @@ char    fname[1024];
 /*-------------------------------------------------------------------*/
 /* Function to interface with the service processor I/O thread       */
 /*-------------------------------------------------------------------*/
-static int ARCH_DEP(scedio_request)(U32 sclp_command, SCCB_SCEDIO_BK *scedio_bk)
+static int ARCH_DEP(scedio_request)(U32 sclp_command, SCCB_EVD_HDR *evd_hdr)
 {
-static SCCB_SCEDIO_BK static_scedio_bk;
+SCCB_SCEDIO_BK  *scedio_bk = (SCCB_SCEDIO_BK*)(evd_hdr + 1);
+SCCB_SCEDIOV_BK *scediov_bk;
+SCCB_SCEDIOR_BK *scedior_bk;
+
+
+static struct {
+    SCCB_SCEDIO_BK scedio_bk;
+    union {
+        SCCB_SCEDIOV_BK v;
+        SCCB_SCEDIOR_BK r;
+        } io;
+    } static_scedio_bk ;
+
 static int scedio_pending;
 
     if(sclp_command == SCLP_READ_EVENT_DATA)
     {
     int pending_req = scedio_pending;
+    U16 evd_len;
 
         /* Return no data if the scedio thread is still active */
         if(scedio_tid)
@@ -546,7 +675,38 @@ static int scedio_pending;
 
         /* Update the scedio_bk copy in the SCCB */
         if(scedio_pending)
-            *scedio_bk = static_scedio_bk;
+        {
+            /* Zero all fields */
+            memset (evd_hdr, 0, sizeof(SCCB_EVD_HDR));
+
+            /* Set type in event header */
+            evd_hdr->type = SCCB_EVD_TYPE_SCEDIO;
+
+            /* Store scedio header */
+            *scedio_bk = static_scedio_bk.scedio_bk;
+
+            /* Calculate event response length */
+            evd_len = sizeof(SCCB_EVD_HDR) + sizeof(SCCB_SCEDIO_BK);
+
+            switch(scedio_bk->flag1) {
+            case SCCB_SCEDIO_FLG1_IOR:
+                scedior_bk = (SCCB_SCEDIOR_BK*)(scedio_bk + 1);
+                *scedior_bk = static_scedio_bk.io.r;
+                evd_len += sizeof(SCCB_SCEDIOR_BK);
+                break;
+            case SCCB_SCEDIO_FLG1_IOV:
+                scediov_bk = (SCCB_SCEDIOV_BK*)(scedio_bk + 1);
+                *scediov_bk = static_scedio_bk.io.v ;
+                evd_len += sizeof(SCCB_SCEDIOV_BK);
+                break;
+            default:
+                PTT(PTT_CL_ERR,"*SERVC",(U32)evd_hdr->type,(U32)scedio_bk->flag1,scedio_bk->flag3);
+            }
+
+            /* Set length in event header */
+            STORE_HW(evd_hdr->totlen, evd_len);
+        }
+
 
         /* Reset the pending flag */
         scedio_pending = 0;
@@ -558,24 +718,40 @@ static int scedio_pending;
     else
     {
 #if !defined(NO_SIGABEND_HANDLER)
-        switch(scedio_bk->type) {
-
-            case SCCB_SCEDIO_TYPE_INIT:
-                /* Kill the scedio thread if it is active */
-                if( scedio_tid )
-                {
-                    OBTAIN_INTLOCK(NULL);
-                    signal_thread(scedio_tid, SIGKILL);
-                    scedio_tid = 0;
-                    scedio_pending = 0;
-                    RELEASE_INTLOCK(NULL);
+        switch(scedio_bk->flag1) {
+            case SCCB_SCEDIO_FLG1_IOV:
+                scediov_bk = (SCCB_SCEDIOV_BK*)(scedio_bk + 1);
+                switch(scediov_bk->type) {
+                    case SCCB_SCEDIOV_TYPE_INIT:
+                        /* Kill the scedio thread if it is active */
+                        if( scedio_tid )
+                        {
+                            OBTAIN_INTLOCK(NULL);
+                            signal_thread(scedio_tid, SIGKILL);
+                            scedio_tid = 0;
+                            scedio_pending = 0;
+                            RELEASE_INTLOCK(NULL);
+                        }
+                        break;
                 }
                 break;
         }
 #endif
 
         /* Take a copy of the scedio_bk in the SCCB */
-        static_scedio_bk = *scedio_bk;
+        static_scedio_bk.scedio_bk = *scedio_bk;
+        switch(scedio_bk->flag1) {
+        case SCCB_SCEDIO_FLG1_IOR:
+            scedior_bk = (SCCB_SCEDIOR_BK*)(scedio_bk + 1);
+            static_scedio_bk.io.r = *scedior_bk;
+            break;
+        case SCCB_SCEDIO_FLG1_IOV:
+            scediov_bk = (SCCB_SCEDIOV_BK*)(scedio_bk + 1);
+            static_scedio_bk.io.v = *scediov_bk;
+            break;
+        default:
+            PTT(PTT_CL_ERR,"*SERVC",(U32)evd_hdr->type,(U32)scedio_bk->flag1,scedio_bk->flag3);
+        }
 
         /* Create the scedio thread */
         if( create_thread(&scedio_tid, &sysblk.detattr,
@@ -596,9 +772,8 @@ static int scedio_pending;
 void ARCH_DEP(sclp_scedio_request) (SCCB_HEADER *sccb)
 {
 SCCB_EVD_HDR    *evd_hdr = (SCCB_EVD_HDR*)(sccb + 1);
-SCCB_SCEDIO_BK  *scedio_bk = (SCCB_SCEDIO_BK*)(evd_hdr + 1);
 
-    if( ARCH_DEP(scedio_request)(SCLP_WRITE_EVENT_DATA, scedio_bk) )
+    if( ARCH_DEP(scedio_request)(SCLP_WRITE_EVENT_DATA, evd_hdr) )
     {
         /* Set response code X'0040' in SCCB header */
         sccb->reas = SCCB_REAS_NONE;
@@ -623,26 +798,15 @@ SCCB_SCEDIO_BK  *scedio_bk = (SCCB_SCEDIO_BK*)(evd_hdr + 1);
 void ARCH_DEP(sclp_scedio_event) (SCCB_HEADER *sccb)
 {
 SCCB_EVD_HDR    *evd_hdr = (SCCB_EVD_HDR*)(sccb + 1);
-SCCB_SCEDIO_BK  *scedio_bk = (SCCB_SCEDIO_BK*)(evd_hdr+1);
-U32 sccb_len;
-U32 evd_len;
+U16 sccb_len;
+U16 evd_len;
 
-    if( ARCH_DEP(scedio_request)(SCLP_READ_EVENT_DATA, scedio_bk) )
+    if( ARCH_DEP(scedio_request)(SCLP_READ_EVENT_DATA, evd_hdr) )
     {
-        /* Zero all fields */
-        memset (evd_hdr, 0, sizeof(SCCB_EVD_HDR));
-
-        /* Set length in event header */
-        evd_len = sizeof(SCCB_EVD_HDR) + sizeof(SCCB_SCEDIO_BK);
-        STORE_HW(evd_hdr->totlen, evd_len);
-
-        /* Set type in event header */
-        evd_hdr->type = SCCB_EVD_TYPE_SCEDIO;
-
         /* Update SCCB length field if variable request */
         if (sccb->type & SCCB_TYPE_VARIABLE)
         {
-            /* Set new SCCB length */
+            FETCH_HW(evd_len, evd_hdr->totlen);
             sccb_len = evd_len + sizeof(SCCB_HEADER);
             STORE_HW(sccb->length, sccb_len);
             sccb->type &= ~SCCB_TYPE_VARIABLE;

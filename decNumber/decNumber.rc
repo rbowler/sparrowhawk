@@ -1,13 +1,10 @@
-/* $Id: decNumber.rc,v 1.2 2006/12/30 18:31:08 rbowler Exp $
+/* $Id: decNumber.rc 4175 2006-12-30 18:31:08Z rbowler $
  * Resource-definition script file for decNumber DLL (MSVC)
  *
  * This file was added by the Hercules project.
  * It is not part of the original decNumber distribution.
  *
- * $Log: decNumber.rc,v $
- * Revision 1.2  2006/12/30 18:31:08  rbowler
- * Add description and changelog
- *
+ * $Log$
  *
  */
 

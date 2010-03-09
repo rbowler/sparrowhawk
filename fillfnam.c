@@ -1,9 +1,6 @@
-// $Id: fillfnam.c,v 1.12 2008/08/29 07:07:08 fish Exp $
+// $Id: fillfnam.c 4857 2008-08-29 07:07:08Z fish $
 //
-// $Log: fillfnam.c,v $
-// Revision 1.12  2008/08/29 07:07:08  fish
-// remove unnecessary blank line following directory report
-//
+// $Log$
 // Revision 1.11  2008/02/18 22:57:08  rbowler
 // Disable filename completion for Solaris 2.9 due to missing scandir function
 //

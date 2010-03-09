@@ -1,7 +1,7 @@
 /*
 || ----------------------------------------------------------------------------
 ||
-|| HETLIB.C     (c) Copyright Leland Lucius, 2000-2007
+|| HETLIB.C     (c) Copyright Leland Lucius, 2000-2009
 ||              Released under terms of the Q Public License.
 ||
 || Library for managing Hercules Emulated Tapes.
@@ -9,9 +9,9 @@
 || ----------------------------------------------------------------------------
 */
 
-// $Id: hetlib.c,v 1.34 2007/11/21 23:30:41 fish Exp $
+// $Id: hetlib.c 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: hetlib.c,v $
+// $Log$
 // Revision 1.34  2007/11/21 23:30:41  fish
 // (comment change only)
 //

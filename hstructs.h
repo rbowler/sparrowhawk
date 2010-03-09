@@ -1,4 +1,4 @@
-/* HSTRUCTS.H   (c) Copyright Roger Bowler, 1999-2007                */
+/* HSTRUCTS.H   (c) Copyright Roger Bowler, 1999-2009                */
 /*              Hercules Structure Definitions                       */
 
 //      This header auto-#included by 'hercules.h'...
@@ -6,163 +6,30 @@
 //      The <config.h> header and other required headers are
 //      presumed to have already been #included ahead of it...
 
-// $Id: hstructs.h,v 1.98 2009/01/07 16:00:26 bernard Exp $
-//
-// $Log: hstructs.h,v $
-// Revision 1.98  2009/01/07 16:00:26  bernard
-// add msghldsec command
-//
-// Revision 1.97  2008/12/27 23:34:37  rbowler
-// Integrated 3270 (SYSG) console send command
-//
-// Revision 1.96  2008/11/24 14:52:21  jj
-// Add PTYP=IFL
-// Change SCPINFO processing to check on ptyp for IFL specifics
-//
-// Revision 1.95  2008/11/04 05:56:31  fish
-// Put ensure consistent create_thread ATTR usage change back in
-//
-// Revision 1.94  2008/11/03 15:31:54  rbowler
-// Back out consistent create_thread ATTR modification
-//
-// Revision 1.93  2008/10/18 09:32:21  fish
-// Ensure consistent create_thread ATTR usage
-//
-// Revision 1.92  2008/10/14 20:56:21  rbowler
-// Propagate processor type from sysblk
-//
-// Revision 1.91  2008/08/21 18:34:47  fish
-// Fix i/o-interrupt-queue race condition
-//
-// Revision 1.90  2008/07/24 14:44:14  bernard
-// cmdtgt version 2
-//
-// Revision 1.89  2008/07/20 12:11:11  bernard
-// OPTION_CMDTGT
-//
-// Revision 1.88  2008/07/08 05:35:51  fish
-// AUTOMOUNT redesign: support +allowed/-disallowed dirs
-// and create associated 'automount' panel command - Fish
-//
-// Revision 1.87  2008/05/28 16:46:29  fish
-// Misleading VTAPE support renamed to AUTOMOUNT instead and fixed and enhanced so that it actually WORKS now.
-//
-// Revision 1.86  2008/05/25 06:36:43  fish
-// VTAPE automount support (0x4B + 0xE4)
-//
-// Revision 1.85  2008/05/22 21:34:22  fish
-// Attempt to fix my *nix SCSI tape BSR over tapemark bug identified by Bob Schneider [bschneider@pingdata.net]
-//
-// Revision 1.84  2008/04/08 17:13:47  bernard
-// Added execute relative long instruction
-//
-// Revision 1.83  2008/03/30 02:51:33  fish
-// Fix SCSI tape EOV (end of volume) processing
-//
-// Revision 1.82  2008/03/29 08:36:46  fish
-// More complete/extensive 3490/3590 tape support
-//
-// Revision 1.81  2008/03/28 02:09:42  fish
-// Add --blkid-24 option support, poserror flag renamed to fenced,
-// added 'generic', 'readblkid' and 'locateblk' tape media handler
-// call vectors.
-//
-// Revision 1.80  2008/03/04 01:10:29  ivan
-// Add LEGACYSENSEID config statement to allow X'E4' Sense ID on devices
-// that originally didn't support it. Defaults to off for compatibility reasons
-//
-// Revision 1.79  2008/02/29 15:53:10  rbowler
-// Instruction decoder for C4xx and C6xx instructions
-//
-// Revision 1.78  2008/01/04 02:28:52  gsmith
-// sf commands update
-//
-// Revision 1.77  2007/12/10 23:12:02  gsmith
-// Tweaks to OPTION_MIPS_COUNTING processing
-//
-// Revision 1.76  2007/12/02 16:22:09  rbowler
-// Enable B9xx,EBxx opcodes in S/370 mode for ETF2
-//
-// Revision 1.75  2007/11/21 00:31:38  gsmith
-// LRE support (try #1)
-//
-// Revision 1.74  2007/11/18 22:18:51  rbowler
-// Permit FEATURE_IMMEDIATE_AND_RELATIVE to be activated in S/370 mode
-//
-// Revision 1.73  2007/09/05 00:24:18  gsmith
-// Use integer arithmetic calculating cpupct
-//
-// Revision 1.72  2007/08/06 22:12:49  gsmith
-// cpu thread exitjmp
-//
-// Revision 1.71  2007/08/06 16:48:20  ivan
-// Implement "PARM" option for IPL command (same as VM IPL PARM XXX)
-// Also add command helps for ipl, iplc, sysclear, sysreset
-//
-// Revision 1.70  2007/07/24 22:39:35  fish
-// (align a single comment; no code was changed)
-//
-// Revision 1.69  2007/06/23 00:04:11  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.68  2007/06/06 22:14:58  gsmith
-// Fix SYNCHRONIZE_CPUS when numcpu > number of host processors - Greg
-//
-// Revision 1.67  2007/03/22 11:56:19  rbowler
-// Remove double hyphen option from print-to-pipe feature
-//
-// Revision 1.66  2007/03/15 20:57:55  gsmith
-// Fix fba when the fba device is > 4G
-//
-// Revision 1.65  2007/03/13 15:55:29  fish
-// Backward-compatible fix of print-to-pipe to accept parameters.  :)
-//
-// Revision 1.64  2007/03/05 14:44:17  rbowler
-// Restore original print-to-pipe parameter-passing
-//
-// Revision 1.63  2007/02/26 15:35:07  fish
-// Fix print-to-pipe to accept paramters
-//
-// Revision 1.62  2007/02/03 18:58:06  gsmith
-// Fix MVT tape CMDREJ error
-//
-// Revision 1.61  2007/01/31 00:48:03  kleonard
-// Add logopt config statement and panel command
-//
-// Revision 1.60  2007/01/11 19:54:34  fish
-// Addt'l keep-alive mods: create associated supporting config-file stmt and panel command where individual customer-preferred values can be specified and/or dynamically modified.
-//
-// Revision 1.59  2007/01/07 11:25:33  rbowler
-// Instruction tracing regsfirst and noregs modes
-//
-// Revision 1.58  2007/01/06 09:05:18  gsmith
-// Enable display_inst to display traditionally too
-//
-// Revision 1.57  2007/01/04 23:12:04  gsmith
-// remove thunk calls for program_interrupt
-//
-// Revision 1.56  2007/01/04 01:08:41  gsmith
-// 03 Jan 2007 single_cpu_dw fetch/store patch for ia32
-//
-// Revision 1.55  2006/12/21 22:39:39  gsmith
-// 21 Dec 2006 Range for s+, t+ - Greg Smith
-//
-// Revision 1.54  2006/12/20 04:26:20  gsmith
-// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
-//
-// Revision 1.53  2006/12/11 11:39:17  ivan
-// Set tape blockid type to U32 in devblk instead of long that becomes 64 bit wide
-// on 64 bit systems. Suggested by rod/zazubek on main list
-//
-// Revision 1.52  2006/12/08 09:43:28  jj
-// Add CVS message log
-//
+// $Id: hstructs.h 5622 2010-02-09 00:32:03Z fish $
 
 #ifndef _HSTRUCTS_H
 #define _HSTRUCTS_H
 
 #include "hercules.h"
 #include "opcode.h"
+
+/*-------------------------------------------------------------------*/
+/* Typedefs for CPU bitmap fields                                    */
+/*                                                                   */
+/* A CPU bitmap contains one bit for each processing engine.         */
+/* The width of the bitmap depends on the maximum number of          */
+/* processing engines which was selected at build time.              */
+/*-------------------------------------------------------------------*/
+#if MAX_CPU_ENGINES <= 32
+    typedef U32                 CPU_BITMAP;
+    #define F_CPU_BITMAP        "%8.8"I32_FMT"X"
+#elif MAX_CPU_ENGINES <= 64
+    typedef U64                 CPU_BITMAP;
+    #define F_CPU_BITMAP        "%16.16"I64_FMT"X"
+#else
+ #error MAX_CPU_ENGINES cannot exceed 64
+#endif
 
 /*-------------------------------------------------------------------*/
 /* Structure definition for CPU register context                     */
@@ -188,11 +55,9 @@ struct REGS {                           /* Processor registers       */
 
         DW      gr[16];                 /* General registers         */
 
-        DW      cr_special[1];          /* Negative Index into cr    */
-#define CR_ASD_REAL     -1
-        DW      cr[16];                 /* Control registers         */
-#define CR_ALB_OFFSET   16
-        DW      alb[16];                /* Accesslist Lookaside cr   */
+        DW      cr[16+16+1];            /* 16 Control registers      */
+#define CR_ALB_OFFSET   16              /* 16 Accesslist lookaside   */
+#define CR_ASD_REAL     32              /*  1 Real asd register      */
 
         U32     ar[16];                 /* Access registers          */
         U32     fpr[32];                /* Floating point registers  */
@@ -338,7 +203,7 @@ struct REGS {                           /* Processor registers       */
         BYTE    peraid;                 /* PER access id             */
 // #endif /*defined(FEATURE_PER)*/
 
-        U32     cpubit;
+        CPU_BITMAP cpubit;              /* Only this CPU's bit is 1  */
         U32     ints_state;             /* CPU Interrupts Status     */
         U32     ints_mask;              /* Respective Interrupts Mask*/
      /*
@@ -378,12 +243,12 @@ struct REGS {                           /* Processor registers       */
 
         BYTE    aea_mode;               /* aea addressing mode       */
 
-        int     aea_ar_special[5];      /* Negative index into ar    */
-        int     aea_ar[16];             /* arn to cr number          */
+        int     aea_ar[16+5];           /* arn to cr number          */
+                                        /* 5 Special registers       */
 
-        BYTE    aea_common_special[1];  /* real asd                  */
-        BYTE    aea_common[16];         /* 1=asd is not private      */
-        BYTE    aea_common_alb[16];     /* alb pseudo registers      */
+        BYTE    aea_common[16+16+1];    /* 1=asd is not private      */
+                                        /* 16 Accesslist lookaside   */
+                                        /*  1 Real asd register      */
 
         BYTE    aea_aleprot[16];        /* ale protected             */
 
@@ -405,19 +270,25 @@ struct REGS {                           /* Processor registers       */
                 s370_opcode_a7xx[256],
                 s370_opcode_b2xx[256],
                 s370_opcode_b9xx[256],
+                s370_opcode_c0xx[256],                          /*@N3*/
+                s370_opcode_e3xx[256],                          /*@N3*/
                 s370_opcode_ebxx[256],
  #else
                *s370_opcode_a7xx,
                *s370_opcode_b2xx,
                *s370_opcode_b9xx,
+               *s370_opcode_c0xx,                               /*@N3*/
+               *s370_opcode_e3xx,                               /*@N3*/
                *s370_opcode_ebxx,
  #endif
+               *s370_opcode_b3xx,                               /*FPE*/
                *s370_opcode_c2xx,                               /*208*/
                *s370_opcode_c4xx,                               /*208*/
                *s370_opcode_c6xx,                               /*208*/
                *s370_opcode_e4xx,
                *s370_opcode_e5xx,
                *s370_opcode_e6xx,
+               *s370_opcode_ecxx,                               /*@N3*/
                *s370_opcode_edxx;
 
         FUNC    s390_opcode_table[256];
@@ -517,20 +388,24 @@ struct ZPBLK {
 /* System configuration block                                        */
 /*-------------------------------------------------------------------*/
 struct SYSBLK {
-#define HDL_VERS_SYSBLK   "3.05"        /* Internal Version Number   */
+#define HDL_VERS_SYSBLK   "3.06"        /* Internal Version Number   */
 #define HDL_SIZE_SYSBLK   sizeof(SYSBLK)
+        time_t  impltime;               /* TOD system was IMPL'ed    */
         int     arch_mode;              /* Architecturual mode       */
-                                        /* 0 == S/370                */
-                                        /* 1 == ESA/390              */
-                                        /* 2 == ESAME                */
+                                        /* 0 == S/370   (ARCH_370)   */
+                                        /* 1 == ESA/390 (ARCH_390)   */
+                                        /* 2 == ESAME   (ARCH_900)   */
         int     arch_z900;              /* 1 == ESAME supported      */
         RADR    mainsize;               /* Main storage size (bytes) */
         BYTE   *mainstor;               /* -> Main storage           */
         BYTE   *storkeys;               /* -> Main storage key array */
         U32     xpndsize;               /* Expanded size (4K pages)  */
         BYTE   *xpndstor;               /* -> Expanded storage       */
+        U64     todstart;               /* Time of initialisation    */
         U64     cpuid;                  /* CPU identifier for STIDP  */
         TID     wdtid;                  /* Thread-id for watchdog    */
+        U16     lparnuml;               /* #digits (0-2) in lparnum  */
+        U16     lparnum;                /* LPAR identification number*/
         U16     ipldev;                 /* IPL device                */
         int     iplcpu;                 /* IPL cpu                   */
         int     ipllcss;                /* IPL lcss                  */
@@ -540,6 +415,8 @@ struct SYSBLK {
         int     cpus;                   /* Number CPUs configured    */
         int     hicpu;                  /* Hi cpu + 1 configured     */
         int     sysepoch;               /* TOD clk epoch (1900/1960) */
+        int     topchnge;               /* 1 = Topology Change Report
+                                           pending (CPU cfg on/off)  */
         COND    cpucond;                /* CPU config/deconfig cond  */
         LOCK    cpulock[MAX_CPU_ENGINES];  /* CPU lock               */
         TID     cputid[MAX_CPU_ENGINES];   /* CPU thread identifiers */
@@ -592,6 +469,8 @@ struct SYSBLK {
         int     mbm;                    /* Measurement block mode    */
         int     mbd;                    /* Device connect time mode  */
         int     diag8cmd;               /* Allow diagnose 8 commands */
+#define DIAG8CMD_ECHO     0x80          /* Echo command to console   */
+#define DIAG8CMD_ENABLE   0x01          /* Enable DIAG8 interface    */
         BYTE    shcmdopt;               /* 'sh'ell command option    */
 #define SHCMDOPT_DISABLE  0x80          /* Globally disable 'sh' cmd */
 #define SHCMDOPT_NODIAG8  0x40          /* Disallow only for DIAG8   */
@@ -628,6 +507,14 @@ struct SYSBLK {
         int     devtunavail;            /* Count thread unavailable  */
 #endif // !defined(OPTION_FISHIO)
         RADR    addrlimval;             /* Address limit value (SAL) */
+#if defined(FEATURE_VM_BLOCKIO)
+        U16     servcode;               /* External interrupt code   */
+        BYTE    biosubcd;               /* Block I/O sub int. code   */
+        BYTE    biostat;                /* Block I/O status          */
+        U64     bioparm;                /* Block I/O interrupt parm  */
+        DEVBLK  *biodev;                /* Block I/O device          */
+        /* Note: biodev is only used to detect BIO interrupt tracing */
+#endif /* defined(FEATURE_VM_BLOCKIO) */
         U32     servparm;               /* Service signal parameter  */
         unsigned int                    /* Flags                     */
                 daemon_mode:1,          /* Daemon mode active        */
@@ -651,9 +538,9 @@ struct SYSBLK {
 #endif
                 logoptnotime:1;         /* 1 = don't timestamp log   */
         U32     ints_state;             /* Common Interrupts Status  */
-        U32     config_mask;            /* Configured CPUs           */
-        U32     started_mask;           /* Started CPUs              */
-        U32     waiting_mask;           /* Waiting CPUs              */
+        CPU_BITMAP config_mask;         /* Configured CPUs           */
+        CPU_BITMAP started_mask;        /* Started CPUs              */
+        CPU_BITMAP waiting_mask;        /* Waiting CPUs              */
         U64     traceaddr[2];           /* Tracing address range     */
         U64     stepaddr[2];            /* Stepping address range    */
 #if defined(OPTION_IPLPARM)
@@ -687,7 +574,7 @@ struct SYSBLK {
 #endif
      /* Fields used by SYNCHRONIZE_CPUS */
         int     syncing;                /* 1=Sync in progress        */
-        U32     sync_mask;              /* CPU mask for syncing CPUs */
+        CPU_BITMAP sync_mask;           /* CPU mask for syncing CPUs */
         COND    sync_cond;              /* COND for syncing CPU      */
         COND    sync_bc_cond;           /* COND for other CPUs       */
 #if defined(_FEATURE_ASN_AND_LX_REUSE)
@@ -721,6 +608,7 @@ struct SYSBLK {
 #endif
 
 #if defined(OPTION_INSTRUCTION_COUNTING)
+        LOCK  icount_lock;
 #define IMAP_FIRST sysblk.imap01
         U64 imap01[256];
         U64 imapa4[256];
@@ -942,8 +830,8 @@ struct DEVBLK {                         /* Device configuration block*/
         int     ioactive;               /* System Id active on device*/
 #define DEV_SYS_NONE    0               /* No active system on device*/
 #define DEV_SYS_LOCAL   0xffff          /* Local system active on dev*/
-        BYTE    drvpwd[11];             /* Password for drive        */   
-        BYTE    reserved3;              /* (pad/align/unused/avail)  */   
+        BYTE    drvpwd[11];             /* Password for drive        */
+        BYTE    reserved3;              /* (pad/align/unused/avail)  */
 
         /*  control flags...                                         */
 
@@ -996,6 +884,11 @@ struct DEVBLK {                         /* Device configuration block*/
         /*  External GUI fields                                      */
         GUISTAT* pGUIStat;              /* EXTERNALGUI Dev Stat Ctl  */
 #endif
+
+#if defined(FEATURE_VM_BLOCKIO)
+        /* VM DIAGNOSE X'250' Emulation Environment                  */
+        struct VMBIOENV *vmd250env;     /* Established environment   */
+#endif /* defined(FEATURE_VM_BLOCKIO) */
 
         /*  Fields for remote devices                                */
 
@@ -1075,6 +968,7 @@ struct DEVBLK {                         /* Device configuration block*/
         u_int   fold:1;                 /* 1=Fold to upper case      */
         u_int   ispiped:1;              /* 1=Piped device            */
         u_int   stopprt:1;              /* 1=stopped; 0=started      */
+        u_int   notrunc:1;              /* 1=do not truncate at open */
 
         /*  Device dependent fields for tapedev                      */
 
@@ -1305,11 +1199,7 @@ struct DEVGRP {                         /* Device Group Structure    */
         int     members;                /* #of member devices in grp */
         int     acount;                 /* #allocated members in grp */
         void   *grp_data;               /* Group dep data (generic)  */
-#ifdef C99_FLEXIBLE_ARRAYS
-        DEVBLK *memdev[];               /* Member devices            */
-#else
-        DEVBLK *memdev[0];              /* Member devices            */
-#endif
+        DEVBLK *memdev[FLEXIBLE_ARRAY]; /* Member devices            */
 };
 
 
@@ -1643,5 +1533,6 @@ struct GUISTAT
     char    szStatStrBuff2[GUI_STATSTR_BUFSIZ];
 };
 #endif // EXTERNALGUI
+
 
 #endif // _HSTRUCTS_H

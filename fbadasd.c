@@ -1,7 +1,7 @@
-/* FBADASD.C    (c) Copyright Roger Bowler, 1999-2007                */
+/* FBADASD.C    (c) Copyright Roger Bowler, 1999-2009                */
 /*              ESA/390 FBA Direct Access Storage Device Handler     */
 
-// $Id: fbadasd.c,v 1.48 2007/11/21 22:54:14 fish Exp $
+// $Id: fbadasd.c 5460 2009-09-15 07:47:32Z hsg001 $
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
@@ -13,7 +13,10 @@
 /*      0671 device support by Jay Maynard                           */
 /*-------------------------------------------------------------------*/
 
-// $Log: fbadasd.c,v $
+// $Log$
+// Revision 1.49  2009/01/23 11:53:48  bernard
+// copyright notice
+//
 // Revision 1.48  2007/11/21 22:54:14  fish
 // Use new BEGIN_DEVICE_CLASS_QUERY macro
 //
@@ -522,7 +525,7 @@ off_t           offset;                 /* File offsets              */
         dev->bufupd = 0;
 
         /* Seek to the old block group offset */
-        offset = (off_t)((dev->bufcur * FBA_BLKGRP_SIZE) + dev->bufupdlo);
+        offset = (off_t)(((S64)dev->bufcur * FBA_BLKGRP_SIZE) + dev->bufupdlo);
         offset = lseek (dev->fd, offset, SEEK_SET);
         if (offset < 0)
         {
@@ -632,7 +635,7 @@ fba_read_blkgrp_retry:
     cache_unlock (CACHE_DEVBUF);
 
     /* Get offset and length */
-    offset = (off_t)(blkgrp * FBA_BLKGRP_SIZE);
+    offset = (off_t)((S64)blkgrp * FBA_BLKGRP_SIZE);
     len = fba_blkgrp_len (dev, blkgrp);
 
     logdevtr (dev, _("HHCDA074I read blkgrp %d offset %" I64_FMT "d len %d\n"),
@@ -1323,6 +1326,84 @@ int     repcnt;                         /* Replication count         */
 } /* end function fbadasd_execute_ccw */
 
 /*-------------------------------------------------------------------*/
+/* Read Standard Block (used by Diagnose instructions)               */
+/*-------------------------------------------------------------------*/
+DLL_EXPORT void fbadasd_read_block 
+      ( DEVBLK *dev, int blknum, int blksize, int blkfactor, 
+        BYTE *iobuf, BYTE *unitstat, U16 *residual )
+{
+int     rc;                             /* Return code               */
+int     sector;       /* First sector being read                     */
+
+    /* Unit check if block number is invalid */
+    sector = blknum * blkfactor;
+    if (sector >= dev->fbanumblk)
+    {
+        dev->sense[0] = SENSE_CR;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return;
+    }
+
+    /* Seek to start of desired block */
+    dev->fbarba = ( dev->fbaorigin + sector ) * dev->fbablksiz;
+
+    /* Read block into I/O buffer */
+    rc = fba_read (dev, iobuf, blksize, unitstat);
+    if (rc < blksize)
+    {
+       dev->sense[0] = SENSE_CR;
+       *unitstat = CSW_CE | CSW_DE | CSW_UC;
+       return;
+    }
+
+    /* Return unit status and residual byte count */
+    *unitstat = CSW_CE | CSW_DE;
+    *residual = 0;
+
+} /* end function fbadasd_read_block */
+
+/*-------------------------------------------------------------------*/
+/* Write Standard Block (used by Diagnose instructions)              */
+/*-------------------------------------------------------------------*/
+DLL_EXPORT void fbadasd_write_block ( 
+        DEVBLK *dev, int blknum, int blksize, int blkfactor, 
+        BYTE *iobuf, BYTE *unitstat, U16 *residual )
+{
+int     rc;           /* Return code from write function             */
+int     sector;       /* First sector being read                     */
+#if 0
+U64     rba;          /* Large file size offset                      */
+#endif
+                                           
+    /* Unit check if block number is invalid */
+    sector = blknum * blkfactor;
+    if (sector >= dev->fbanumblk || sector < 0 )
+    {
+        dev->sense[0] = SENSE_CR;
+        *unitstat = CSW_CE | CSW_DE | CSW_UC;
+        return;
+    }
+
+    /* Seek to start of desired block */
+    dev->fbarba = (off_t)(( dev->fbaorigin + sector ) * dev->fbablksiz);
+
+    /* Read block into I/O buffer */
+    rc = fba_write (dev, iobuf, blksize, unitstat);
+    if (rc < blksize)
+    {
+       dev->sense[0] = SENSE_CR;
+       *unitstat = CSW_CE | CSW_DE | CSW_UC;
+       return;
+    }
+
+    /* Return unit status and residual byte count */
+    *unitstat = CSW_CE | CSW_DE;
+    *residual = 0;
+
+} /* end function fbadasd_write_block */
+
+/* Deprecated: Will be replaced by fbadasd_read/write_block functions */
+/*-------------------------------------------------------------------*/
 /* Synchronous Fixed Block I/O (used by Diagnose instruction)        */
 /*-------------------------------------------------------------------*/
 DLL_EXPORT void fbadasd_syncblk_io ( DEVBLK *dev, BYTE type, int blknum,
@@ -1418,7 +1499,8 @@ int fbadasd_hsuspend(DEVBLK *dev, void *file) {
 /*-------------------------------------------------------------------*/
 int fbadasd_hresume(DEVBLK *dev, void *file)
 {
-size_t  rc, key, len;
+int     rc;
+size_t  key, len;
 BYTE byte;
 
     do {

@@ -1,48 +1,7 @@
 /* SERVICE.H    (c) Copyright Jan Jaeger, 1999-2009                  */
 /*              Service Processor Architectured fields               */
 
-// $Id: service.h,v 1.22 2009/01/02 19:21:52 jj Exp $
-//
-// $Log: service.h,v $
-// Revision 1.22  2009/01/02 19:21:52  jj
-// DVD-RAM IPL
-// RAMSAVE
-// SYSG Integrated 3270 console fixes
-//
-// Revision 1.21  2008/12/28 15:30:09  jj
-// SYSG and SYSA mods
-//
-// Revision 1.20  2008/12/24 22:35:53  rbowler
-// Framework for integrated 3270 and ASCII console features
-//
-// Revision 1.19  2008/12/24 15:42:14  jj
-// Add debug entry point for sclp event masks
-//
-// Revision 1.18  2008/12/22 11:13:46  jj
-// Do not issue syscons active message on non-syscons type SCLP send/recv
-//
-// Revision 1.17  2008/12/20 23:38:51  ivan
-// Fill SCP_INFO SCCB config byte 11 with PER3 and List Directed IPL capability flags
-//
-// Revision 1.16  2008/12/18 00:25:38  ivan
-// Set SCCB Processor Type for IFL to 3, not 4
-//
-// Revision 1.15  2008/12/05 10:54:58  jj
-// Correct system console message highlight
-//
-// Revision 1.14  2008/11/24 14:52:21  jj
-// Add PTYP=IFL
-// Change SCPINFO processing to check on ptyp for IFL specifics
-//
-// Revision 1.13  2008/10/12 21:43:27  rbowler
-// SCCB SCPINFO updates from GA22-7584-10
-//
-// Revision 1.12  2007/06/23 00:04:15  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.11  2006/12/08 09:43:30  jj
-// Add CVS message log
-//
+// $Id: service.h 5452 2009-08-12 09:53:50Z rbowler $
 
 #if !defined(_SERVICE_H)
 
@@ -285,6 +244,7 @@ typedef struct _SCCB_CPU_INFO {
 #define SCCB_PTYP_IFA                                   2
 #define SCCB_PTYP_IFL                                   3
 #define SCCB_PTYP_SUP                                   5
+#define SCCB_PTYP_MAX                                   5 /*(maximum value)*/
 
 /* Definitions for crypto unit identifier */
 #define SCCB_KSID_CRYPTO_UNIT_ID                        0x01
@@ -514,19 +474,23 @@ typedef struct _SCCB_XST_MAP {
 typedef struct _SCCB_SCEDIO_BK {
         BYTE    flag0;
         BYTE    flag1;
+#define SCCB_SCEDIO_FLG1_IOR       0x03
+#define SCCB_SCEDIO_FLG1_IOV       0x04
         BYTE    flag2;
         BYTE    flag3;
 #define SCCB_SCEDIO_FLG3_COMPLETE  0x80
 
-        BYTE    type;
-#define SCCB_SCEDIO_TYPE_INIT      0x00  
-#define SCCB_SCEDIO_TYPE_READ      0x01   
-#define SCCB_SCEDIO_TYPE_CREATE    0x02 
-#define SCCB_SCEDIO_TYPE_APPEND    0x03 
-        BYTE    flag5;
-        BYTE    flag6;
-        BYTE    flag7;
+    } SCCB_SCEDIO_BK;
 
+typedef struct _SCCB_SCEDIOV_BK {
+        BYTE    type;
+#define SCCB_SCEDIOV_TYPE_INIT     0x00  
+#define SCCB_SCEDIOV_TYPE_READ     0x01   
+#define SCCB_SCEDIOV_TYPE_CREATE   0x02 
+#define SCCB_SCEDIOV_TYPE_APPEND   0x03 
+        BYTE    flag1;
+        BYTE    flag2;
+        BYTE    flag3;
         DBLWRD  seek;
         DBLWRD  ncomp;
         DBLWRD  length;
@@ -534,7 +498,21 @@ typedef struct _SCCB_SCEDIO_BK {
         DBLWRD  resv3;
         DBLWRD  sto;
         BYTE    filename[256];
-    } SCCB_SCEDIO_BK;
+    } SCCB_SCEDIOV_BK;
+
+typedef struct _SCCB_SCEDIOR_BK {
+        BYTE    type;
+#define SCCB_SCEDIOR_TYPE_INIT     0x00  
+#define SCCB_SCEDIOR_TYPE_READ     0x01   
+        BYTE    flag1;
+        BYTE    flag2;
+        BYTE    flag3;
+        FWORD   origin;
+        FWORD   resv1;
+        FWORD   resv2;
+        BYTE    image[8];
+    } SCCB_SCEDIOR_BK;
+        
 // #endif /*defined(FEATURE_SCEDIO )*/
 
 #endif /*!defined(_SERVICE_H)*/

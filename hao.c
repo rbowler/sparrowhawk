@@ -6,14 +6,14 @@
 /* Jan Jaeger, who always has an answer to any question. Thanks for the      */
 /* regex advice!                                                             */
 /*                                                                           */
-/*                            (c) Copyright Bernard van der Helm, 2002-2007  */
+/*                            (c) Copyright Bernard van der Helm, 2002-2009  */
 /*                            Noordwijkerhout, The Netherlands.              */
 /*                                                                           */
 /*---------------------------------------------------------------------------*/
 
-// $Id: hao.c,v 1.15 2008/11/30 09:12:41 bernard Exp $
+// $Id: hao.c 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: hao.c,v $
+// $Log$
 // Revision 1.15  2008/11/30 09:12:41  bernard
 // End the licensed OS experiment
 //

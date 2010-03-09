@@ -7,49 +7,7 @@
 //      The <config.h> header and other required headers are
 //      presumed to have already been #included ahead of it...
 
-// $Id: hmacros.h,v 1.27 2008/11/29 21:28:01 rbowler Exp $
-//
-// $Log: hmacros.h,v $
-// Revision 1.27  2008/11/29 21:28:01  rbowler
-// Fix warnings C4267 because win64 declares send length as int not size_t
-//
-// Revision 1.26  2008/11/04 04:50:46  fish
-// Ensure consistent utility startup
-//
-// Revision 1.25  2008/09/02 06:09:01  fish
-// Have TRACE macro call DebugTrace function for MSVC DEBUG builds
-//
-// Revision 1.24  2008/08/21 18:34:45  fish
-// Fix i/o-interrupt-queue race condition
-//
-// Revision 1.23  2008/07/16 11:01:41  fish
-// Create "sizeof_member" macro
-//
-// Revision 1.22  2008/06/26 14:00:06  rbowler
-// CAP_SYS_NICE undeclared  when -DNO_SETUID
-//
-// Revision 1.21  2008/05/22 21:17:29  fish
-// Tape file extension neutrality support
-//
-// Revision 1.20  2008/02/19 11:49:19  ivan
-// - Move setting of CPU priority after spwaning timer thread
-// - Added support for Posix 1003.1e capabilities
-//
-// Revision 1.19  2008/01/23 00:47:40  rbowler
-// Modifications for VS9 C++ 2008 Express by Charlie Brint
-//
-// Revision 1.18  2007/12/10 23:12:02  gsmith
-// Tweaks to OPTION_MIPS_COUNTING processing
-//
-// Revision 1.17  2007/06/06 22:14:57  gsmith
-// Fix SYNCHRONIZE_CPUS when numcpu > number of host processors - Greg
-//
-// Revision 1.16  2007/01/04 23:12:04  gsmith
-// remove thunk calls for program_interrupt
-//
-// Revision 1.15  2006/12/08 09:43:26  jj
-// Add CVS message log
-//
+// $Id: hmacros.h 5602 2010-01-16 12:15:16Z fish $
 
 #ifndef _HMACROS_H
 #define _HMACROS_H
@@ -78,7 +36,7 @@
 #endif
 
 #ifdef _MSVC_
-  #define  create_pipe(a)       socketpair(AF_INET,IPPROTO_IP,SOCK_STREAM,a)
+  #define  create_pipe(a)       socketpair(AF_INET,SOCK_STREAM,IPPROTO_IP,a)
   #define  read_pipe(f,b,n)     recv(f,b,n,0)
   #define  write_pipe(f,b,n)    send(f,b,(int)n,0)
   #define  close_pipe(f)        closesocket(f)
@@ -120,7 +78,7 @@
   #define  fdatasync            _commit
   #define  atoll                _atoi64
 #else
-  #if (!defined(HAVE_FDATASYNC)) && ((!defined(_POSIX_SYNCHRONIZED_IO)) || (_POSIX_SYNCHRONIZED_IO < 0))
+  #if !defined(HAVE_FDATASYNC_SUPPORTED)
     #ifdef HAVE_FSYNC
       #define  fdatasync        fsync
     #else
@@ -358,7 +316,7 @@ typedef U64  (*z900_trace_br_func) (int amode,  U64 ia, REGS *regs);
   (sysblk.regs[(_cpu)] != NULL)
 
 #if defined(_FEATURE_CPU_RECONFIG)
- #define MAX_CPU MAX_CPU_ENGINES
+ #define MAX_CPU sysblk.maxcpu
 #else
  #define MAX_CPU sysblk.numcpu
 #endif
@@ -432,12 +390,12 @@ typedef U64  (*z900_trace_br_func) (int amode,  U64 ia, REGS *regs);
 #define SYNCHRONIZE_CPUS(_regs) \
  do { \
    int _i, _n = 0; \
-   U32 _mask = sysblk.started_mask \
+   CPU_BITMAP _mask = sysblk.started_mask \
              ^ (sysblk.waiting_mask | (_regs)->hostregs->cpubit); \
    for (_i = 0; _mask && _i < sysblk.hicpu; _i++) { \
-     if ((_mask & BIT(_i))) { \
+     if ((_mask & CPU_BIT(_i))) { \
        if (sysblk.regs[_i]->intwait || sysblk.regs[_i]->syncio) \
-         _mask ^= BIT(_i); \
+         _mask ^= CPU_BIT(_i); \
        else { \
          ON_IC_INTERRUPT(sysblk.regs[_i]); \
          if (SIE_MODE(sysblk.regs[_i])) \
@@ -454,8 +412,8 @@ typedef U64  (*z900_trace_br_func) (int amode,  U64 ia, REGS *regs);
          else \
            usleep(1); \
          for (_i = 0; _i < sysblk.hicpu; _i++) \
-           if ((_mask & BIT(_i)) && sysblk.regs[_i]->intwait) \
-             _mask ^= BIT(_i); \
+           if ((_mask & CPU_BIT(_i)) && sysblk.regs[_i]->intwait) \
+             _mask ^= CPU_BIT(_i); \
        } \
      } else { \
        sysblk.sync_mask = sysblk.started_mask \
@@ -482,7 +440,7 @@ typedef U64  (*z900_trace_br_func) (int amode,  U64 ia, REGS *regs);
 #define WAKEUP_CPU_MASK(_mask) \
  do { \
    int i; \
-   U32 mask = (_mask); \
+   CPU_BITMAP mask = (_mask); \
    for (i = 0; mask; i++) { \
      if (mask & 1) \
      { \
@@ -496,7 +454,7 @@ typedef U64  (*z900_trace_br_func) (int amode,  U64 ia, REGS *regs);
 #define WAKEUP_CPUS_MASK(_mask) \
  do { \
    int i; \
-   U32 mask = (_mask); \
+   CPU_BITMAP mask = (_mask); \
    for (i = 0; mask; i++) { \
      if (mask & 1) \
        signal_condition(&sysblk.regs[i]->intcond); \
@@ -652,6 +610,7 @@ typedef U64  (*z900_trace_br_func) (int amode,  U64 ia, REGS *regs);
   do { \
     if (argc >= 1 && strncmp(argv[argc-1],"EXTERNALGUI",11) == 0) { \
         extgui = 1; \
+        argv[argc-1] = NULL; \
         argc--; \
         setvbuf(stderr, NULL, _IONBF, 0); \
         setvbuf(stdout, NULL, _IONBF, 0); \
@@ -797,5 +756,19 @@ do { \
 #define DROP_ALL_CAPS()
 
 #endif /* !defined(NO_SETUID) */
+
+/* min/max macros */
+
+#if !defined(MIN)
+#define MIN(_x,_y) ( ( ( _x ) < ( _y ) ) ? ( _x ) : ( _y ) )
+#endif /*!defined(MIN)*/
+
+#if !defined(MAX)
+#define MAX(_x,_y) ( ( ( _x ) > ( _y ) ) ? ( _x ) : ( _y ) )
+#endif /*!defined(MAX)*/
+
+#if !defined(MINMAX)
+#define  MINMAX(_x,_y,_z)  ((_x) = MIN(MAX((_x),(_y)),(_z)))
+#endif /*!defined(MINMAX)*/
 
 #endif // _HMACROS_H

@@ -1,10 +1,10 @@
-/* VSTORE.H     (c) Copyright Roger Bowler, 1999-2007                */
+/* VSTORE.H     (c) Copyright Roger Bowler, 1999-2009                */
 /*              ESA/390 Virtual Storage Functions                    */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: vstore.h,v 1.83 2008/04/02 21:52:19 rbowler Exp $
+// $Id: vstore.h 5401 2009-06-08 03:54:27Z fish $
 
 /*-------------------------------------------------------------------*/
 /* This module contains various functions which store, fetch, and    */
@@ -34,7 +34,13 @@
 /* wvalidate_operand                                                 */
 /*-------------------------------------------------------------------*/
 
-// $Log: vstore.h,v $
+// $Log$
+// Revision 1.85  2009/01/23 13:13:46  bernard
+// copyright notice
+//
+// Revision 1.84  2009/01/17 17:02:15  jj
+// Fix change recording on page crossing first op of MVC - Reported by Greg Price
+//
 // Revision 1.83  2008/04/02 21:52:19  rbowler
 // Fix PIC4 when MVCOS operand finishes on page boundary
 //
@@ -366,6 +372,9 @@ _VSTORE_C_STATIC void ARCH_DEP(vstore4) (U32 value, VADR addr, int arn,
 /*      A program check may be generated if the logical address      */
 /*      causes an addressing, translation, or protection             */
 /*      exception, and in this case the function does not return.    */
+/*                                                                   */
+/*      NOTE that vstore8_full should only be invoked when a page    */
+/*           boundary IS going to be crossed.                        */
 /*-------------------------------------------------------------------*/
 _VSTORE_FULL_C_STATIC void ARCH_DEP(vstore8_full)(U64 value, VADR addr,
                                               int arn, REGS *regs)
@@ -389,9 +398,11 @@ BYTE    temp[8];                        /* Copied value              */
 _VSTORE_C_STATIC void ARCH_DEP(vstore8) (U64 value, VADR addr, int arn,
                                                             REGS *regs)
 {
-    /* Most common case : Aligned & not crossing page boundary */
-    if(likely(!((VADR_L)addr & 0x07)) || (((VADR_L)addr & 0x7ff) <= 0x7f8))
+    /* Check alignement. If aligned then we are guaranteed
+       not to cross a page boundary */
+    if(likely(!((VADR_L)addr & 0x07)))
     {
+        /* Most common case : Aligned */
         U64 *mn;
         mn = (U64*)MADDR(addr,arn,regs,ACCTYPE_WRITE,regs->psw.pkey);
 #if defined(OPTION_SINGLE_CPU_DW) && defined(ASSIST_STORE_DW)
@@ -400,10 +411,27 @@ _VSTORE_C_STATIC void ARCH_DEP(vstore8) (U64 value, VADR addr, int arn,
         else
 #endif
         STORE_DW(mn, value);
-        ITIMER_UPDATE(addr,8-1,regs);
     }
     else
-        ARCH_DEP(vstore8_full)(value,addr,arn,regs);
+    {
+        /* We're not aligned. So we have to check whether we are
+           crossing a page boundary. This cannot be the same
+           code as above because casting U64 * to a non aligned
+           pointer may break on those architectures mandating
+           strict alignement */
+        if((((VADR_L)addr & 0x7ff) <= 0x7f8))
+        {
+            /* Non aligned but not crossing page boundary */
+            BYTE *mn;
+            mn = MADDR(addr,arn,regs,ACCTYPE_WRITE,regs->psw.pkey);
+            /* invoking STORE_DW ensures endianness correctness */
+            STORE_DW(mn,value);
+        }
+        else
+            /* Crossing page boundary */
+            ARCH_DEP(vstore8_full)(value,addr,arn,regs);
+    }
+    ITIMER_UPDATE(addr,8-1,regs);
 }
 
 /*-------------------------------------------------------------------*/
@@ -587,9 +615,10 @@ BYTE    temp[16];                       /* Copy destination          */
 
 _VSTORE_C_STATIC U64 ARCH_DEP(vfetch8) (VADR addr, int arn, REGS *regs)
 {
-    if(likely(!((VADR_L)addr & 0x07)) || (((VADR_L)addr & 0x7ff) <= 0x7f8 ))
+    if(likely(!((VADR_L)addr & 0x07)))
     {
-    U64 *mn;
+        /* doubleword aligned fetch */
+        U64 *mn;
         ITIMER_SYNC(addr,8-1,regs);
         mn=(U64*)MADDR (addr, arn, regs, ACCTYPE_READ, regs->psw.pkey);
 #if defined(OPTION_SINGLE_CPU_DW) && defined(ASSIST_FETCH_DW)
@@ -598,6 +627,18 @@ _VSTORE_C_STATIC U64 ARCH_DEP(vfetch8) (VADR addr, int arn, REGS *regs)
 #endif
         return fetch_dw(mn);
     }
+    else
+    {
+        if((((VADR_L)addr & 0x7ff) <= 0x7f8 ))
+        {
+            /* unaligned, non-crossing doubleword fetch */
+            BYTE *mn;
+            ITIMER_SYNC(addr,8-1,regs);
+            mn=MADDR (addr, arn, regs, ACCTYPE_READ, regs->psw.pkey);
+            return fetch_dw(mn);
+        }
+    }
+    /* page crossing doubleword fetch */
     return ARCH_DEP(vfetch8_full)(addr,arn,regs);
 }
 #endif
@@ -771,8 +812,17 @@ static __inline__ void concpy (REGS *regs, void *d, void *s, int n)
      || (dest <= src  && dest + 8 > src)
      || (src  <= dest && src  + 8 > dest))
     {
-        for ( ; n; n--)
-            *(dest++) = *(src++);
+        /* use memset directly when the copy's effect is to
+           propagate a byte over an area - like in MVC 1(255,2),0(2) */
+        if(dest==src+1)
+        {
+            memset(dest,*src,n);
+        }
+        else
+        {
+            for ( ; n; n--)
+                *(dest++) = *(src++);
+        }
         return;
     }
 
@@ -782,25 +832,40 @@ static __inline__ void concpy (REGS *regs, void *d, void *s, int n)
     for ( ; n2; n2--)
         *(dest++) = *(src++);
 
-#if defined(SIZEOF_LONG) && SIZEOF_LONG == 8 && !defined(OPTION_STRICT_ALIGNMENT)
+#if !defined(OPTION_STRICT_ALIGNMENT) && \
+    ((!defined(_MSVC_) && defined(SIZEOF_LONG)  && SIZEOF_LONG  >= 8) || \
+     ( defined(_MSVC_) && defined(SIZEOF_INT_P) && SIZEOF_INT_P >= 8))
+
+    /* Below for 64-bit BUILDS ONLY, since the below C code
+       does NOT generate atomic 64-bit load/store assembler
+       code sequence compatible with Concurrent Block Update
+       except when building for 64-bit systems...
+    */
     UNREFERENCED(regs);
+
     /* copy 8 bytes at a time */
     for ( ; n >= 8; n -= 8, dest += 8, src += 8)
         *(U64 *)dest = *(U64 *)src;
-#else
+
+#else /* 32-bit builds... */
+
  #if !defined(OPTION_STRICT_ALIGNMENT)
+
     /* copy 4 bytes at a time if only one cpu started */
     if (regs->cpubit == regs->sysblk->started_mask)
         for ( ; n >= 4; n -= 4, dest += 4, src += 4)
             *(U32 *)dest = *(U32 *)src;
     else
- #else
+
+ #else /* defined(OPTION_STRICT_ALIGNMENT) */
     UNREFERENCED(regs);
  #endif
+
     /* else copy 8 bytes at a time concurrently */
         for ( ; n >= 8; n -= 8, dest += 8, src += 8)
             store_dw_noswap(dest,fetch_dw_noswap(src));
-#endif
+
+#endif /* (64-bit builds test...) */
 
     /* copy leftovers */
     for ( ; n; n--)
@@ -868,7 +933,8 @@ int     len2, len3;                     /* Lengths to copy           */
 
     /* Translate addresses of leftmost operand bytes */
     source1 = MADDR (addr2, arn2, regs, ACCTYPE_READ, key2);
-    dest1 = MADDR (addr1, arn1, regs, ACCTYPE_WRITE, key1);
+    dest1 = MADDR (addr1, arn1, regs, ACCTYPE_WRITE_SKP, key1);
+    sk1 = regs->dat.storkey;
 
     /* There are several scenarios (in optimal order):
      * (1) dest boundary and source boundary not crossed
@@ -898,13 +964,10 @@ int     len2, len3;                     /* Lengths to copy           */
             concpy (regs, dest1, source1, len2);
             concpy (regs, dest1 + len2, source2, len - len2 + 1);
         }
+        *sk1 |= (STORKEY_REF | STORKEY_CHANGE);
     }
     else
     {
-        dest1 = MADDR (addr1, arn1, regs, ACCTYPE_WRITE_SKP, key1);
-        sk1 = regs->dat.storkey;
-        source1 = MADDR (addr2, arn2, regs, ACCTYPE_READ, key2);
-
         /* First operand crosses a boundary */
         len2 = 0x800 - (addr1 & 0x7FF);
         dest2 = MADDR ((addr1 + len2) & ADDRESS_MAXWRAP(regs),
@@ -944,6 +1007,8 @@ int     len2, len3;                     /* Lengths to copy           */
                 concpy (regs, dest2, source2 + len2 - len3, len - len2 + 1);
             }
         }
+        *sk1 |= (STORKEY_REF | STORKEY_CHANGE);
+        *sk2 |= (STORKEY_REF | STORKEY_CHANGE);
     }
     ITIMER_UPDATE(addr1,len,regs);
 

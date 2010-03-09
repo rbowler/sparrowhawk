@@ -1,7 +1,7 @@
-/* DMAP2HRC.C   (c) Copyright Jay Maynard, 2001-2007                 */
+/* DMAP2HRC.C   (c) Copyright Jay Maynard, 2001-2009                 */
 /*              Convert P/390 DEVMAP to Hercules config file         */
 
-// $Id: dmap2hrc.c,v 1.21 2008/11/04 04:50:46 fish Exp $
+// $Id: dmap2hrc.c 5125 2009-01-23 12:01:44Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* This program reads a P/390 DEVMAP file and extracts the device    */
@@ -9,7 +9,7 @@
 /* the format Hercules uses for its .cnf file.                       */
 /*-------------------------------------------------------------------*/
 
-// $Log: dmap2hrc.c,v $
+// $Log$
 // Revision 1.21  2008/11/04 04:50:46  fish
 // Ensure consistent utility startup
 //

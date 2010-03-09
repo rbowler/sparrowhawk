@@ -3,67 +3,113 @@
 # --------------------------------------------------------------------------
 # (c) Copyright Roger Bowler, 2005-2007
 # --------------------------------------------------------------------------
-# $Id: VERSION.msvc,v 1.6 2009/01/09 16:31:25 jmaynard Exp $
+# $Id: VERSION.msvc 5635 2010-02-15 16:36:26Z rbowler $
 #
 #  Handles defining the product VERSION strings
 #
-#
-#                           CHANGE HISTORY
-# $Log: VERSION.msvc,v $
-# Revision 1.6  2009/01/09 16:31:25  jmaynard
-# 3.06 version number change.
-#
-# Revision 1.5  2008/01/31 22:45:17  rbowler
-# Fix LNK4010: invalid subsystem version number 4.0
-#
-# DD/MM/YY Description
-#
-# 26/12/06 Fish: created by extraction from existing makefile-dllmod.msvc
-# 11/02/07 Fish: Change default VERSION to value that starts with a number.
-#
 # ***************************************************************************
 
+!UNDEF fna
 !IFNDEF VERSION
 
-#   >>>  Jay!  <<<  Be sure to change the below V1/V2/V3/V4 values to match!
-#
-#   >>> Fish!! <<<  If you move this again, please change the comment in
-#                   configure.ac so I can find it again! :-)
+# The following logic determines the Hercules version number and SVN 
+# revision number and sets variables VERSION,V1,V2,V3,V4 when VERSION
+# is not already set by makefile.bat
 
-VERSION = \"3.06\"
+# First extract the Hercules version number from the configure.ac file.
+# We scan the file looking for AM_INIT_AUTOMAKE=(hercules,x.y[.z]) # 
+# and we create a temporary file containing statements V1=x V2=y V3=z
+# Finally we include the temporary file to set the variables V1,V2,V3
+opt = "tokens=1-5 delims=(),. "
+fna = $(TEMP)\hercver$(BUILD_TYPE).txt
+cmd = @echo V1=%c >$(fna) && @echo V2=%d >>$(fna) && @echo V3=%e >>$(fna)
+!IF ["for /f $(opt) %a in (configure.ac) do @if %a==AM_INIT_AUTOMAKE $(cmd)"] == 0
+!INCLUDE $(fna)
+!ELSE
+V1 = 0
+V2 = 0
+!ENDIF
 
-# The below VERSION digits values SHOULD match the ABOVE VERSION number.
-#
-# Windows uses 4-digit version numbers: V1.V2.V3.V4. The first three are
-# your standard major/intermediate/minor version level, and the last digit
-# is the "build number". Normally your basic "version number" value (major
-# intermediate, minor) is maintained manually, whereas the "build number"
-# is automatically incremented each time you do a build. Thus the "build
-# number" provides for a guaranteed unique "version#" which may not always
-# be the case when you don't change the major/inter/minor values (or forget
-# to do so) during development and/or fix releases.
-#
-# I plan to try and "automate" the incrementing of the "build count" value
-# (actually it's ALREADY automated on my own system), but it can remain 0
-# for now since at the moment we only support the major/inter/minor scheme.
-#
-# Note: The Hercules intermediate version is the second component of the
-# version number. Version 2.17 was the 17th intermediate release of version
-# 2. Assigning one digit to each of V1-V4 intermixes the build number in
-# V4 with the minor release, and would cause problems with two or more
-# minor releases of the same intermediate release. This is similar to the
-# RPM version numbering scheme; the build number corresponds to the RPM build
-# number (what comes after the - in the version number; 3.03-2 would
-# correspond to V1=3, V2=03, V3=0, V4=2). -- JRM, 12 Feb 06
+# If svn.exe exists in the path, use the 'svn info' command to find the
+# subversion revision number, and write V4=nnnn to the temporary file.
+# Then include the temporary file to set the variable V4
+opt="tokens=1-2 usebackq"
+cmd = for /f $(opt) %a in (`svn info`) do @if %a==Revision: @echo V4=%b>$(fna)
+!IF ["for %I in (svn.exe) do @if exist %~$$PATH:I $(cmd)"] == 0
+!INCLUDE $(fna)
+!ENDIF
 
-V1 = 3
-V2 = 06
-V3 = 0
+# If V4 is not set, use the TortoiseSVN program subwcrev (if it exists in the path)
+# to find the subversion revision number, and write V4=nnnn to the temporary file.
+# Then include the temporary file to set the variable V4
+!IF !DEFINED(V4) || "$(V4)" == ""
+opt="tokens=1-5 usebackq"
+cmd = for /f $(opt) %a in (`subwcrev .`) do @if %a%b==Lastcommitted @echo V4=%e>$(fna)
+!IF ["for %I in (subwcrev.exe) do @if exist %~$$PATH:I $(cmd)"] == 0
+!INCLUDE $(fna)
+!ENDIF
+!ENDIF
+
+# If V4 is still not set, then set it to zero 
+!IF !DEFINED(V4) || "$(V4)" == ""
 V4 = 0
+!ENDIF
+
+# Set the version string x.y or x.y.z
+sharp = ^#
+!IF !DEFINED(V3) || "$(V3)" == "" || "$(V3)" == "$(sharp)"
+VERSION = $(V1).$(V2)
+V3 = 0
+!ELSE
+VERSION = $(V1).$(V2).$(V3)
+!ENDIF
+
+# Append the subversion revision number to the version string
+!IF "$(V4)" != "0"
+VERSION = $(VERSION)-svn-$(V4)
+!ENDIF
+
+!MESSAGE Hercules version number is $(VERSION) ($(V1).$(V2).$(V3).$(V4))
+VERSION = \"$(VERSION)\"
+
+!ELSE
+
+!IF !DEFINED(VERSION) || !DEFINED(V1) || !DEFINED(V2) || !DEFINED(V3) || !DEFINED(V4)
+!  ERROR 'VERSION=', 'V1=', 'V2=', 'V3=', and/or V4=' are undefined. Either build Hercules using the supplied 'makefile.bat' or set the variables manually yourself before invoking nmake.
+!ENDIF
+
+!MESSAGE VERSION = $(VERSION) ($(V1).$(V2).$(V3).$(V4))
 
 !ENDIF
 
-!IF $(vsversion) < 9 
+!IF DEFINED(CUSTOM_BUILD_STRING)
+!MESSAGE CUSTOM_BUILD_STRING = $(CUSTOM_BUILD_STRING)
+!ENDIF
+
+!MESSAGE
+
+#  The following logic determines the minimum version of Windows on which
+#  the application can run. The minimum version depends on both the target
+#  architecture and the version of Visual Studio used for the build. The
+#  APPVER and TARGETOS variables are set as required by Win32.Mak (SDK)
+
+# 
+#  32 bit : 
+#      VS < 9 : Win NT 4 & Win 9X (APPVER 4.0, TARGETOS BOTH)
+#      VS >= 9 : Win 2K (APPVER 5.0, TARGETOS WINNT)
+#  64 bit :
+#      Win 2K3 (APPVER 5.02, TARGETOS WINNT)
+# 
+
+
+!IF (("$(CPU)" == "AMD64") || ("$(CPU)" == "IA64"))
+
+APPVER   = 5.02
+TARGETOS = WINNT
+
+!ELSE # 32 bit build
+
+!IF $(vsversion) < 9
 
 APPVER   = 4.0
 TARGETOS = BOTH
@@ -73,5 +119,6 @@ TARGETOS = BOTH
 APPVER   = 5.0
 TARGETOS = WINNT
 
-!ENDIF
+!ENDIF # vsversion test
 
+!ENDIF # 32/64 bit test

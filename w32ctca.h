@@ -1,13 +1,13 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //    w32ctca.h    CTCI-W32 (Channel to Channel link to Win32 TCP/IP stack)
 ////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2002-2007. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2002-2009. Released under the Q Public License
 // (http://www.hercules-390.org/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: w32ctca.h,v 1.16 2007/11/30 14:54:33 jmaynard Exp $
+// $Id: w32ctca.h 5368 2009-06-02 03:58:49Z fish $
 //
-// $Log: w32ctca.h,v $
+// $Log$
 // Revision 1.16  2007/11/30 14:54:33  jmaynard
 // Changed conmicro.cx to hercules-390.org or conmicro.com, as needed.
 //
@@ -23,11 +23,13 @@
 
 #if defined(OPTION_W32_CTCI)
 
+#include "tt32api.h"                            // (#define TUNTAP32_DLLNAME)
+
 #define MAX_TT32_DLLNAMELEN  (512)
-#define DEF_TT32_DLLNAME     "TunTap32.dll"
+#define DEF_TT32_DLLNAME     TUNTAP32_DLLNAME   // (from tt32api.h)
 
 #ifndef   MODULESDIR
-  #define MODULESDIR         "."           // (i.e. "Current Directory")
+  #define MODULESDIR         "."                // (i.e. "Current Directory")
 #endif
 
 extern char   g_tt32_dllname   [MAX_TT32_DLLNAMELEN];

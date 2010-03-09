@@ -1,19 +1,7 @@
-/* LOSC.C       (c) Copyright Jan Jaeger, 2008                       */
+/* LOSC.C       (c) Copyright Jan Jaeger, 2009                       */
 /*              Hercules Licensed Operating System Check             */
 
-// $Id: losc.c,v 1.3 2008/12/13 19:05:21 jj Exp $
-//
-// $Log: losc.c,v $
-// Revision 1.3  2008/12/13 19:05:21  jj
-// Only use generic names in license check
-//
-// Revision 1.2  2008/12/03 16:27:40  jj
-// Fix deadly intlock embrace
-//
-// Revision 1.1  2008/12/01 18:41:28  jj
-// Add losc.c license checking module
-//
-//
+// $Id: losc.c 5551 2009-12-17 13:32:54Z rbowler $
 
 #include "hstdinc.h"
 
@@ -53,7 +41,7 @@ void losc_check(char *ostype)
 {
 char **lictype;
 int i;
-U32 mask;
+CPU_BITMAP mask;
 
     if(check_done) 
         return;
@@ -66,20 +54,17 @@ U32 mask;
         {
             if(os_licensed == PGM_PRD_OS_LICENSED)
             {
-                logmsg(_("\n\n"
-                KEEPMSG "HHCCF039W                  PGMPRDOS LICENSED specified.\n"
-                KEEPMSG "\n"
-                KEEPMSG "                A licensed program product operating system is running.\n"
-                KEEPMSG "                You are responsible for meeting all conditions of your\n"
-                KEEPMSG "                                software licenses.\n"
-                KEEPMSG "\n"
-                "\n"));
+                logmsg(_(
+                KEEPMSG "HHCCF039W PGMPRDOS LICENSED specified.\n"
+                KEEPMSG "          A licensed program product operating system is running.\n"
+                KEEPMSG "          You are responsible for meeting all conditions of your\n"
+                KEEPMSG "          software licenses.\n"));
             }
             else
             {
-                logmsg(_("\n\n"
-                KEEPMSG "HHCCF079A A licensed program product operating system has been detected.\n"
-                "\n"));
+                logmsg(_(
+                KEEPMSG "HHCCF079A A licensed program product operating system has been\n"
+                KEEPMSG "          detected. All processors have been stopped.\n"));
                 mask = sysblk.started_mask;
                 for (i = 0; mask; i++)
                 {

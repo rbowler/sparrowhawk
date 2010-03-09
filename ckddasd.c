@@ -1,7 +1,7 @@
-/* CKDDASD.C    (c) Copyright Roger Bowler, 1999-2007                */
+/* CKDDASD.C    (c) Copyright Roger Bowler, 1999-2009                */
 /*              ESA/390 CKD Direct Access Storage Device Handler     */
 
-// $Id: ckddasd.c,v 1.95 2008/12/01 21:31:02 rbowler Exp $
+// $Id: ckddasd.c 5337 2009-05-03 23:54:05Z kleonard $
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
@@ -18,7 +18,10 @@
 /*        Pogonchenko and Volker Bandke             V1.71 16/01/2001 */
 /*-------------------------------------------------------------------*/
 
-// $Log: ckddasd.c,v $
+// $Log$
+// Revision 1.96  2009/01/23 11:43:35  bernard
+// copyright notice
+//
 // Revision 1.95  2008/12/01 21:31:02  rbowler
 // Show filename in msg HHCDA002E by enrico sorichetti
 //
@@ -1257,7 +1260,8 @@ int ckddasd_hsuspend(DEVBLK *dev, void *file) {
 /*-------------------------------------------------------------------*/
 int ckddasd_hresume(DEVBLK *dev, void *file)
 {
-size_t  rc, key, len;
+u_int   rc;
+size_t  key, len;
 BYTE byte;
 
     do {
@@ -5634,6 +5638,16 @@ BYTE            trk_ovfl;               /* == 1 if track ovfl write  */
     /*---------------------------------------------------------------*/
     /* SENSE ID                                                      */
     /*---------------------------------------------------------------*/
+
+        /* If numdevid is 0, then 0xE4 Sense ID is not supported */
+        if (dev->numdevid == 0)
+        {
+            ckd_build_sense (dev, SENSE_CR, 0, 0,
+                            FORMAT_0, MESSAGE_1);
+            *unitstat = CSW_CE | CSW_DE | CSW_UC;
+            break;
+        }
+
         /* Command reject if within the domain of a Locate Record */
         if (dev->ckdlcount > 0)
         {

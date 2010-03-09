@@ -1,15 +1,15 @@
 /********************************************************/
 /* HEXTAPI.H : Definition of Hercules External (public) */
 /*             APIs                                     */
-/*  (c) Copyright 2005-2007 Roger Bowler & Others       */
+/*  (c) Copyright 2005-2009 Roger Bowler & Others       */
 /*  This file originally written by Ivan Warren         */
 /*  THE STATE OF THIS API IS NOT YET FINALIZED          */
 /*  AND THEREFORE, THE INTERFACE MAY CHANGE             */
 /********************************************************/
 
-// $Id: hextapi.h,v 1.5 2007/06/23 00:04:11 ivan Exp $
+// $Id: hextapi.h 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: hextapi.h,v $
+// $Log$
 // Revision 1.5  2007/06/23 00:04:11  ivan
 // Update copyright notices to include current year (2007)
 //

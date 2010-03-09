@@ -1,10 +1,10 @@
-/* TAPECOPY.C   (c) Copyright Roger Bowler, 1999-2007                */
+/* TAPECOPY.C   (c) Copyright Roger Bowler, 1999-2010                */
 /*              Convert SCSI tape into AWSTAPE format                */
 
-// $Id: tapecopy.c,v 1.44 2008/11/04 04:50:46 fish Exp $
+// $Id: tapecopy.c 5593 2010-01-05 14:25:19Z rbowler $
 
 /*              Read from AWSTAPE and write to SCSI tape mods        */
-/*              Copyright 2005-2007 James R. Maynard III             */
+/*              Copyright 2005-2009 James R. Maynard III             */
 
 /*-------------------------------------------------------------------*/
 /* This program reads a SCSI tape and produces a disk file with      */
@@ -12,22 +12,6 @@
 /* If no disk file name is supplied, then the program simply         */
 /* prints a summary of the tape files and blocksizes.                */
 /*-------------------------------------------------------------------*/
-
-// $Log: tapecopy.c,v $
-// Revision 1.44  2008/11/04 04:50:46  fish
-// Ensure consistent utility startup
-//
-// Revision 1.43  2008/06/22 05:54:30  fish
-// Fix print-formatting issue (mostly in tape modules)
-// that can sometimes, in certain circumstances,
-// cause herc to crash.  (%8.8lx --> I32_FMTX, etc)
-//
-// Revision 1.42  2007/06/23 00:04:17  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.41  2006/12/08 09:43:30  jj
-// Add CVS message log
-//
 
 #include "hstdinc.h"
 
@@ -151,21 +135,21 @@ void delayed_exit (int exit_code)
 /*-------------------------------------------------------------------*/
 static void print_status (char *devname, long stat)
 {
-    char statmsg[128]; statmsg[0]=0;
+    printf (_("HHCTC015I %s status: %8.8lX"), devname, stat);
 
-    if (GMT_EOF    ( stat )) strlcat( statmsg, " EOF",     sizeof(statmsg) );
-    if (GMT_BOT    ( stat )) strlcat( statmsg, " BOT",     sizeof(statmsg) );
-    if (GMT_EOT    ( stat )) strlcat( statmsg, " EOT",     sizeof(statmsg) );
-    if (GMT_SM     ( stat )) strlcat( statmsg, " SETMARK", sizeof(statmsg) );
-    if (GMT_EOD    ( stat )) strlcat( statmsg, " EOD",     sizeof(statmsg) );
-    if (GMT_WR_PROT( stat )) strlcat( statmsg, " WRPROT",  sizeof(statmsg) );
-    if (GMT_ONLINE ( stat )) strlcat( statmsg, " ONLINE",  sizeof(statmsg) );
-    if (GMT_D_6250 ( stat )) strlcat( statmsg, " 6250",    sizeof(statmsg) );
-    if (GMT_D_1600 ( stat )) strlcat( statmsg, " 1600",    sizeof(statmsg) );
-    if (GMT_D_800  ( stat )) strlcat( statmsg, " 800",     sizeof(statmsg) );
-    if (GMT_DR_OPEN( stat )) strlcat( statmsg, " NOTAPE",  sizeof(statmsg) );
+    if (GMT_EOF    ( stat )) printf (" EOF"    );
+    if (GMT_BOT    ( stat )) printf (" BOT"    );
+    if (GMT_EOT    ( stat )) printf (" EOT"    );
+    if (GMT_SM     ( stat )) printf (" SETMARK");
+    if (GMT_EOD    ( stat )) printf (" EOD"    );
+    if (GMT_WR_PROT( stat )) printf (" WRPROT" );
+    if (GMT_ONLINE ( stat )) printf (" ONLINE" );
+    if (GMT_D_6250 ( stat )) printf (" 6250"   );
+    if (GMT_D_1600 ( stat )) printf (" 1600"   );
+    if (GMT_D_800  ( stat )) printf (" 800"    );
+    if (GMT_DR_OPEN( stat )) printf (" NOTAPE" );
 
-    printf (_("HHCTC015I %s status: "I32_FMTX"%s\n"), devname, stat, statmsg);
+    printf ("\n");
 
 } /* end function print_status */
 
@@ -532,8 +516,8 @@ int             is3590 = 0;             /* 1 == 3590, 0 == 3480/3490 */
     }
 
     if (0
-        || ( strlen( argv[1] ) > 5 && strnfilenamecmp( argv[1], "/dev/",       5 ) == 0 )
-        || ( strlen( argv[1] ) > 8 && strnfilenamecmp( argv[1], "\\\\.\\Tape", 8 ) == 0 )
+        || ( strlen( argv[1] ) > 5 && strnfilenamecmp( argv[1], "/dev/",   5 ) == 0 )
+        || ( strlen( argv[1] ) > 4 && strnfilenamecmp( argv[1], "\\\\.\\", 4 ) == 0 )
     )
     {
         devnamein = argv[1];
@@ -551,8 +535,8 @@ int             is3590 = 0;             /* 1 == 3590, 0 == 3480/3490 */
     if (argc > 2 && argv[2] )
     {
         if (0
-            || ( strlen( argv[2] ) > 5 && strnfilenamecmp( argv[2], "/dev/",       5 ) == 0 )
-            || ( strlen( argv[2] ) > 8 && strnfilenamecmp( argv[2], "\\\\.\\Tape", 8 ) == 0 )
+            || ( strlen( argv[2] ) > 5 && strnfilenamecmp( argv[2], "/dev/",   5 ) == 0 )
+            || ( strlen( argv[2] ) > 4 && strnfilenamecmp( argv[2], "\\\\.\\", 4 ) == 0 )
         )
         {
             devnameout = argv[2];
@@ -583,7 +567,7 @@ int             is3590 = 0;             /* 1 == 3590, 0 == 3480/3490 */
         hostpath( pathname, devnamein, sizeof(pathname) );
         devfd = open_tape (pathname, O_RDONLY|O_BINARY);
     }
-    else
+    else // (devnameout)
     {
         hostpath( pathname, devnameout, sizeof(pathname) );
         devfd = open_tape (pathname, O_RDWR|O_BINARY);
@@ -636,7 +620,7 @@ int             is3590 = 0;             /* 1 == 3590, 0 == 3480/3490 */
         printf (_("HHCTC003I %s device type: %s\n"),
             (devnamein ? devnamein : devnameout), tapeinfo[i].t_name);
     else
-        printf (_("HHCTC003I %s device type: 0x%"I32_FMT"X\n"),
+        printf (_("HHCTC003I %s device type: 0x%lX\n"),
             (devnamein ? devnamein : devnameout), mtget.mt_type);
 
     density = (mtget.mt_dsreg & MT_ST_DENSITY_MASK)
@@ -649,7 +633,7 @@ int             is3590 = 0;             /* 1 == 3590, 0 == 3480/3490 */
         printf (_("HHCTC004I %s tape density: %s\n"),
                 (devnamein ? devnamein : devnameout), densinfo[i].t_name);
     else
-        printf (_("HHCTC004I %s tape density code: 0x%"I32_FMT"X\n"),
+        printf (_("HHCTC004I %s tape density code: 0x%lX\n"),
             (devnamein ? devnamein : devnameout), density);
 
     if (mtget.mt_gstat != 0)
@@ -732,9 +716,9 @@ int             is3590 = 0;             /* 1 == 3590, 0 == 3480/3490 */
                 if ( ioctl_tape( devfd, MTIOCPOS, (char*)&mtpos ) == 0 )
                 {
                     if (!is3590)
-                        fprintf( stderr, "BLK=%d\n", (mtpos.mt_blkno >> 24) & 0x0000007F );
+                        fprintf( stderr, "BLK=%ld\n", (mtpos.mt_blkno >> 24) & 0x0000007F );
                     else
-                        fprintf( stderr, "BLK=%d\n", mtpos.mt_blkno );
+                        fprintf( stderr, "BLK=%ld\n", mtpos.mt_blkno );
                 }
             }
         }

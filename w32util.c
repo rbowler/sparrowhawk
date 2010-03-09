@@ -1,7 +1,7 @@
 //////////////////////////////////////////////////////////////////////////////////////////
 //   w32util.c        Windows porting functions
 //////////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2005-2007. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2005-2009. Released under the Q Public License
 // (http://www.hercules-390.org/herclic.html) as modifications to Hercules.
 //////////////////////////////////////////////////////////////////////////////////////////
 //
@@ -12,9 +12,9 @@
 //
 //////////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: w32util.c,v 1.33 2008/11/23 22:27:43 rbowler Exp $
+// $Id: w32util.c 5586 2009-12-31 10:29:11Z rbowler $
 //
-// $Log: w32util.c,v $
+// $Log$
 // Revision 1.33  2008/11/23 22:27:43  rbowler
 // Fix win64 type conversion warnings in w32util.c
 //
@@ -69,7 +69,7 @@
 
 #if defined( _MSVC_ ) && defined( _MSC_VER ) && ( _MSC_VER >= 1400 )
 
-static void DummyCRTInvalidParameterHandler  // (override Microsoft insanity)
+static void DummyCRTInvalidParameterHandler
 (
     const wchar_t*  expression,
     const wchar_t*  function,
@@ -85,12 +85,9 @@ static void DummyCRTInvalidParameterHandler  // (override Microsoft insanity)
 static _invalid_parameter_handler  old_iph  = NULL;
 static int                         prev_rm  = 0;
 
-// This function's sole purpose is to bypass Microsoft's INSANE handling of
+// This function's sole purpose is to bypass Microsoft's default handling of
 // invalid parameters being passed to CRT functions, which ends up causing
-// TWO COMPLETELY DIFFERENT ASSERTION DIALOGS to appear for EACH and EVERY
-// minor little itty-bitty frickin problem, BOTH of which must be separately
-// dismissed each fricking time of course (which can become VERY annoying
-// after about the sixteenth time I can't even begin to tell you!)
+// two completely different assertion dialogs to appear for each problem
 
 DLL_EXPORT void DisableInvalidParameterHandling()
 {
@@ -1856,6 +1853,17 @@ DLL_EXPORT int socketpair( int domain, int type, int protocol, int socket_vector
     struct sockaddr_in  localhost_addr;
     int    len = sizeof(localhost_addr);
 
+    /* FIXME ISW ? In some situations, it seems the sockaddr_in structure */
+    /*         returned by getsockname() isn't appropriate for use        */
+    /*         by connect(). We therefore use another sockaddr_in for the */
+    /*         sole purpose of fetching the automatic port number issued  */
+    /*         during the bind() operation.                               */
+    /* NOTE : This is a workaround. The actual root cause for this        */
+    /*        problem is presently unknown because it is hard to reproduce*/
+
+    struct sockaddr_in tempaddr;
+    int talen = sizeof(tempaddr);
+
     // Technique: create a pair of sockets bound to each other by first creating a
     // temporary listening socket bound to the localhost loopback address (127.0.0.1)
     // and then having the other socket connect to it...
@@ -1864,8 +1872,8 @@ DLL_EXPORT int socketpair( int domain, int type, int protocol, int socket_vector
     //   -1 shall be returned and errno set to indicate the error."
 
     if ( AF_INET     != domain   ) { errno = WSAEAFNOSUPPORT;    return -1; }
-    if ( SOCK_STREAM != protocol ) { errno = WSAEPROTONOSUPPORT; return -1; }
-    if ( IPPROTO_IP  != type     ) { errno = WSAEPROTOTYPE;      return -1; }
+    if ( SOCK_STREAM != type     ) { errno = WSAEPROTONOSUPPORT; return -1; }
+    if ( IPPROTO_IP  != protocol ) { errno = WSAEPROTOTYPE;      return -1; }
 
     socket_vector[0] = socket_vector[1] = INVALID_SOCKET;
 
@@ -1875,7 +1883,8 @@ DLL_EXPORT int socketpair( int domain, int type, int protocol, int socket_vector
         return -1;
     }
 
-    memset( &localhost_addr, 0, len);
+    memset( &localhost_addr, 0, len   );
+    memset( &tempaddr,       0, talen );
 
     localhost_addr.sin_family       = AF_INET;
     localhost_addr.sin_port         = htons( 0 );
@@ -1884,7 +1893,7 @@ DLL_EXPORT int socketpair( int domain, int type, int protocol, int socket_vector
     if (0
         || SOCKET_ERROR   == bind( temp_listen_socket, (SOCKADDR*) &localhost_addr, len )
         || SOCKET_ERROR   == listen( temp_listen_socket, 1 )
-        || SOCKET_ERROR   == getsockname( temp_listen_socket, (SOCKADDR*) &localhost_addr, &len )
+        || SOCKET_ERROR   == getsockname( temp_listen_socket, (SOCKADDR*) &tempaddr, &talen )
         || INVALID_SOCKET == (SOCKET)( socket_vector[1] = socket( AF_INET, SOCK_STREAM, 0 ) )
     )
     {
@@ -1893,6 +1902,11 @@ DLL_EXPORT int socketpair( int domain, int type, int protocol, int socket_vector
         errno = nLastError;
         return -1;
     }
+
+    /* Get the temporary port number assigned automatically */
+    /* by bind(127.0.0.1/0)                                 */
+
+    localhost_addr.sin_port = tempaddr.sin_port;
 
     if (0
         || SOCKET_ERROR   == connect( socket_vector[1], (SOCKADDR*) &localhost_addr, len )
@@ -2917,6 +2931,8 @@ THREADNAME_INFO;
 DLL_EXPORT void w32_set_thread_name( TID tid, char* name )
 {
     THREADNAME_INFO info;
+
+    if (!name) return;              // (ignore premature calls)
 
     info.dwType     = 0x1000;
     info.pszName    = name;         // (should really be LPCTSTR)

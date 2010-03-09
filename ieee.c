@@ -2,7 +2,7 @@
  * Hercules System/370, ESA/390, z/Architecture emulator
  * ieee.c
  * Binary (IEEE) Floating Point Instructions
- * Copyright (c) 2001-2007 Willem Konynenberg <wfk@xos.nl>
+ * Copyright (c) 2001-2009 Willem Konynenberg <wfk@xos.nl>
  * TCEB, TCDB and TCXB contributed by Per Jessen, 20 September 2001.
  * THDER,THDR by Roger Bowler, 19 July 2003.
  * Additional instructions by Roger Bowler, November 2004:
@@ -13,7 +13,7 @@
  * For details, see html/herclic.html
  */
 
-// $Id: ieee.c,v 1.84 2008/04/18 12:13:59 rbowler Exp $
+// $Id: ieee.c 5126 2009-01-23 13:05:56Z bernard $
 
 /*
  * This module implements the ESA/390 Binary (IEEE) Floating Point
@@ -60,7 +60,7 @@
  * long double format will cause loss of precision and range.
  */
 
-// $Log: ieee.c,v $
+// $Log$
 // Revision 1.84  2008/04/18 12:13:59  rbowler
 // Fix incorrect results from THDER,THDR instructions
 //

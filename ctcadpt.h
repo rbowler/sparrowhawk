@@ -2,12 +2,12 @@
 // Hercules Channel to Channel Emulation Support
 // ====================================================================
 //
-// Copyright (C) 2002-2008 by James A. Pierson    (original author)
-// Copyright (C) 2002-2008 by David B. Trout      (current maintainer)
+// Copyright (C) 2002-2009 by James A. Pierson    (original author)
+// Copyright (C) 2002-2009 by David B. Trout      (current maintainer)
 
-// $Id: ctcadpt.h,v 1.27 2008/08/19 21:36:37 fish Exp $
+// $Id: ctcadpt.h 5497 2009-10-27 20:17:03Z fish $
 //
-// $Log: ctcadpt.h,v $
+// $Log$
 // Revision 1.27  2008/08/19 21:36:37  fish
 // Init LCS interface ASAP to fix wrong MAC being used
 //
@@ -144,12 +144,7 @@ struct _ETHFRM
     MAC         bDestMAC;                // 0x00
     MAC         bSrcMAC;                 // 0x06
     HWORD       hwEthernetType;          // 0x0C  (see below #defines)
-
-#ifdef C99_FLEXIBLE_ARRAYS
-    BYTE        bData[];                 // 0x0E
-#else
-    BYTE        bData[0];                // 0x0E
-#endif
+    BYTE        bData[FLEXIBLE_ARRAY];   // 0x0E
 } ATTRIBUTE_PACKED;
 
 
@@ -178,12 +173,7 @@ struct  _IP4FRM
     HWORD       hwChecksum;              // 0x0A
     U32         lSrcIP;                  // 0x0C
     U32         lDstIP;                  // 0x10
-
-#ifdef C99_FLEXIBLE_ARRAYS
-    BYTE        bData[];                 // 0x14
-#else
-    BYTE        bData[0];                // 0x14
-#endif
+    BYTE        bData[FLEXIBLE_ARRAY];   // 0x14
 } ATTRIBUTE_PACKED;
 
 
@@ -256,7 +246,7 @@ typedef struct _ARPFRM ARPFRM, *PARPFRM;
 
 #define CTC_READ_TIMEOUT_SECS  (5)          // five seconds
 
-#define CTC_DELAY_USECS        (100000)     // 100 millisecond delay; used
+#define CTC_DELAY_USECS        (100)        // 100 microseconds delay; used
                                             // mostly by enqueue frame buffer
                                             // full delay loop...
 
@@ -328,12 +318,7 @@ struct  _CTCBLK
 struct _CTCIHDR                         // CTCI Block Header
 {
     HWORD   hwOffset;                   // Offset of next block
-
-#ifdef C99_FLEXIBLE_ARRAYS
-    BYTE    bData[];                    // start of data (CTCISEG)
-#else
-    BYTE    bData[0];                   // Start of data (CTCISEG)
-#endif
+    BYTE    bData[FLEXIBLE_ARRAY];      // start of data (CTCISEG)
 } ATTRIBUTE_PACKED;
 
 
@@ -347,12 +332,7 @@ struct _CTCISEG                         // CTCI Segment Header
                                         //   this header
     HWORD   hwType;                     // Ethernet packet type
     HWORD   _reserved;                  // Unused, set to zeroes
-
-#ifdef C99_FLEXIBLE_ARRAYS
-    BYTE    bData[];                    // Start of data (IP pakcet)
-#else
-    BYTE    bData[0];                   // Start of data (IP pakcet)
-#endif
+    BYTE    bData[FLEXIBLE_ARRAY];      // Start of data (IP pakcet)
 } ATTRIBUTE_PACKED;
 
 
@@ -592,12 +572,7 @@ struct _LCSSTDFRM
     HWORD       hwParameterCount;
     BYTE        bOperatorFlags[3];
     BYTE        _reserved[3];
-
-#ifdef C99_FLEXIBLE_ARRAYS
-    BYTE        bData[];
-#else
-    BYTE        bData[0];
-#endif
+    BYTE        bData[FLEXIBLE_ARRAY];
 } ATTRIBUTE_PACKED;
 
 
@@ -693,12 +668,7 @@ struct  _LCSIPMFRM
 struct  _LCSETHFRM
 {
     LCSHDR      bLCSHdr;                // LCS Frame header
-
-#ifdef C99_FLEXIBLE_ARRAYS
-    BYTE        bData[];                // Ethernet Frame
-#else
-    BYTE        bData[0];               // Ethernet Frame
-#endif
+    BYTE        bData[FLEXIBLE_ARRAY];  // Ethernet Frame
 } ATTRIBUTE_PACKED;
 
 

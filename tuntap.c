@@ -2,8 +2,8 @@
 // Hercules - TUN/TAP Abstraction Layer
 // ====================================================================
 //
-// Copyright (C) 2002-2007 by James A. Pierson
-//           (C) 2002-2006 by "Fish" (David B. Trout)
+// Copyright (C) 2002-2009 by James A. Pierson
+//           (C) 2002-2009 by "Fish" (David B. Trout)
 //
 // TUN/TAP implementations differ among platforms. Linux and FreeBSD
 // offer much the same functionality but with differing semantics.
@@ -15,9 +15,9 @@
 // that works on all platforms with (hopefully) equal results.
 //
 
-// $Id: tuntap.c,v 1.46 2008/02/07 00:29:04 rbowler Exp $
+// $Id: tuntap.c 5127 2009-01-23 13:25:01Z bernard $
 //
-// $Log: tuntap.c,v $
+// $Log$
 // Revision 1.46  2008/02/07 00:29:04  rbowler
 // Solaris build support by Jeff Savit
 //

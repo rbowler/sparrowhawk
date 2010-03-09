@@ -1,7 +1,7 @@
-/* DASDTAB.H    (c) Copyright Roger Bowler, 1999-2007                */
+/* DASDTAB.H    (c) Copyright Roger Bowler, 1999-2009                */
 /*              DASD table structures                                */
 
-// $Id: dasdtab.h,v 1.14 2007/06/23 00:04:08 ivan Exp $
+// $Id: dasdtab.h 5444 2009-08-09 16:36:42Z hsg001 $
 
 /*-------------------------------------------------------------------*/
 /* This header file contains defines the table entries that          */
@@ -9,7 +9,7 @@
 /* It also contains function prototypes for the DASD table utilities.*/
 /*-------------------------------------------------------------------*/
 
-// $Log: dasdtab.h,v $
+// $Log$
 // Revision 1.14  2007/06/23 00:04:08  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -118,12 +118,40 @@ typedef struct _FBADEV {                /* FBA Device entry          */
       } FBADEV;
 #define FBADEV_SIZE sizeof(FBADEV)
 
+#if defined(FEATURE_VM_BLOCKIO)
+/*-------------------------------------------------------------------*/
+/* Device Standard Block Size Information Table                      */
+/*-------------------------------------------------------------------*/
+typedef struct _BLKTAB {
+        char  *name;         /* Device name                          */
+        U16    devt;         /* Hercules supported device Type       */
+        int    darch;        /* FBA (0) or CKD (1) device            */
+#define VMDEVFBA 0           /* Fixed-Block Architecture device      */
+#define VMDEVCKD 1           /* (Extended-)Count-Key-Data device     */
+   /* sectors per block or blocks per track for standardblock sizes  */
+        int    phys512;      /* Block size 512  */
+        int    phys1024;     /* Block size 1024 */
+        int    phys2048;     /* Block size 2048 */
+        int    phys4096;     /* Block size 4096 */
+    } BLKTAB;
+#define BLKTAB_SIZE sizeof(BLKTAB)
+
+/* Macros that define a table entry */
+#define CKDIOT(_name,_type,_bs512,_bs1024,_bs2048,_bs4096) \
+       { _name, _type, 1, _bs512, _bs1024, _bs2048, _bs4906 }
+#define FBAIOT(_name,_type) \
+       { _name, _type, 0, 1, 2, 4, 8 }
+#endif /* defined(FEATURE_VM_BLOCKIO) */
+
 /*-------------------------------------------------------------------*/
 /* Request types for dasd_lookup                                     */
 /*-------------------------------------------------------------------*/
 #define DASD_CKDDEV 1                   /* Lookup CKD device         */
 #define DASD_CKDCU  2                   /* Lookup CKD control unit   */
 #define DASD_FBADEV 3                   /* Lookup FBA device         */
+#if defined(FEATURE_VM_BLOCKIO)
+#define DASD_STDBLK 4       /* Lookup device standard block/physical */
+#endif /* defined(FEATURE_VM_BLOCKIO) */
 
 /*-------------------------------------------------------------------*/
 /* Dasd table function prototypes                                    */

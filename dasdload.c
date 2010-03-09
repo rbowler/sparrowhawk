@@ -1,7 +1,7 @@
-/* DASDLOAD.C   (c) Copyright Roger Bowler, 1999-2007                */
+/* DASDLOAD.C   (c) Copyright Roger Bowler, 1999-2009                */
 /*              Hercules DASD Utilities: DASD image loader           */
 
-// $Id: dasdload.c,v 1.54 2008/11/04 04:50:46 fish Exp $
+// $Id: dasdload.c 5125 2009-01-23 12:01:44Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* This program creates a virtual DASD volume from a list of         */
@@ -14,7 +14,7 @@
 /*      IEBCOPY native dataset support by Ronen Tzur                 */
 /*-------------------------------------------------------------------*/
 
-// $Log: dasdload.c,v $
+// $Log$
 // Revision 1.54  2008/11/04 04:50:46  fish
 // Ensure consistent utility startup
 //

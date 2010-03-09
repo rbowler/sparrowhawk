@@ -2,15 +2,15 @@
 // Hercules IP Channel-to-Channel Support (CTCI)
 // ====================================================================
 //
-// Copyright    (C) Copyright James A. Pierson, 2002-2007
-//              (C) Copyright "Fish" (David B. Trout), 2002-2007
-//              (C) Copyright Roger Bowler, 2000-2007
+// Copyright    (C) Copyright James A. Pierson, 2002-2009
+//              (C) Copyright "Fish" (David B. Trout), 2002-2009
+//              (C) Copyright Roger Bowler, 2000-2009
 //
-// linux 2.4 modifications (c) Copyright Fritz Elfert, 2001-2007
+// linux 2.4 modifications (c) Copyright Fritz Elfert, 2001-2009
 //
-// $Id: ctc_ctci.c,v 1.77 2008/11/04 05:56:31 fish Exp $
+// $Id: ctc_ctci.c 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: ctc_ctci.c,v $
+// $Log$
 // Revision 1.77  2008/11/04 05:56:31  fish
 // Put ensure consistent create_thread ATTR usage change back in
 //

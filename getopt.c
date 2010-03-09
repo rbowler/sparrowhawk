@@ -1,6 +1,6 @@
 /*      $NetBSD: getopt_long.c,v 1.15 2002/01/31 22:43:40 tv Exp $      */
 
-// $Id: getopt.c,v 1.4 2009/01/02 19:21:51 jj Exp $
+// $Id: getopt.c 5013 2009-01-02 19:21:52Z jj $
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.
@@ -38,12 +38,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-// $Log: getopt.c,v $
-// Revision 1.4  2009/01/02 19:21:51  jj
-// DVD-RAM IPL
-// RAMSAVE
-// SYSG Integrated 3270 console fixes
-//
+// $Log$
 // Revision 1.3  2006/12/08 09:43:21  jj
 // Add CVS message log
 //

@@ -1,14 +1,9 @@
-/* HDLMAIN.C    (c) Copyright Jan Jaeger, 2003-2009                  */
+/* HDLMAIN.C    (c) Copyright Jan Jaeger, 2003-2010                  */
 /*              Hercules Dynamic Loader                              */
 
-// $Id: hdlmain.c,v 1.52 2009/01/02 19:21:51 jj Exp $
+// $Id: hdlmain.c 5576 2009-12-29 13:17:11Z bernard $
 //
-// $Log: hdlmain.c,v $
-// Revision 1.52  2009/01/02 19:21:51  jj
-// DVD-RAM IPL
-// RAMSAVE
-// SYSG Integrated 3270 console fixes
-//
+// $Log$
 // Revision 1.51  2008/12/24 15:42:13  jj
 // Add debug entry point for sclp event masks
 //
@@ -113,15 +108,13 @@ HDL_REGISTER_SECTION;
 #if defined(_390_FEATURE_MESSAGE_SECURITY_ASSIST)
     HDL_REGISTER( s390_cipher_message,                      UNRESOLVED );
     HDL_REGISTER( s390_cipher_message_with_chaining,        UNRESOLVED );
-    HDL_REGISTER( s390_compute_intermediate_message_digest, UNRESOLVED );
-    HDL_REGISTER( s390_compute_last_message_digest,         UNRESOLVED );
+    HDL_REGISTER( s390_compute_message_digest,              UNRESOLVED );
     HDL_REGISTER( s390_compute_message_authentication_code, UNRESOLVED );
 #endif /*defined(_390_FEATURE_MESSAGE_SECURITY_ASSIST)*/
 #if defined(_900_FEATURE_MESSAGE_SECURITY_ASSIST)
     HDL_REGISTER( z900_cipher_message,                      UNRESOLVED );
     HDL_REGISTER( z900_cipher_message_with_chaining,        UNRESOLVED );
-    HDL_REGISTER( z900_compute_intermediate_message_digest, UNRESOLVED );
-    HDL_REGISTER( z900_compute_last_message_digest,         UNRESOLVED );
+    HDL_REGISTER( z900_compute_message_digest,              UNRESOLVED );
     HDL_REGISTER( z900_compute_message_authentication_code, UNRESOLVED );
 #endif /*defined(_900_FEATURE_MESSAGE_SECURITY_ASSIST)*/
 
@@ -156,15 +149,13 @@ HDL_RESOLVER_SECTION;
 #if defined(_390_FEATURE_MESSAGE_SECURITY_ASSIST)
     HDL_RESOLVE( s390_cipher_message                      );
     HDL_RESOLVE( s390_cipher_message_with_chaining        );
-    HDL_RESOLVE( s390_compute_intermediate_message_digest );
-    HDL_RESOLVE( s390_compute_last_message_digest         );
+    HDL_RESOLVE( s390_compute_message_digest              );
     HDL_RESOLVE( s390_compute_message_authentication_code );
 #endif /*defined(_390_FEATURE_MESSAGE_SECURITY_ASSIST)*/
 #if defined(_900_FEATURE_MESSAGE_SECURITY_ASSIST)
     HDL_RESOLVE( z900_cipher_message                      );
     HDL_RESOLVE( z900_cipher_message_with_chaining        );
-    HDL_RESOLVE( z900_compute_intermediate_message_digest );
-    HDL_RESOLVE( z900_compute_last_message_digest         );
+    HDL_RESOLVE( z900_compute_message_digest              );
     HDL_RESOLVE( z900_compute_message_authentication_code );
 #endif /*defined(_900_FEATURE_MESSAGE_SECURITY_ASSIST)*/
 

@@ -18,9 +18,13 @@
 # Makefile for Hercules S/370, ESA/390 and z/Architecture emulator
 # Process this file with 'automake' to produce Makefile.in
 #
-# $Id: Makefile.am,v 1.186 2008/12/29 11:03:10 jj Exp $
+# $Id: Makefile.am 5617 2010-02-09 00:00:41Z fish $
 #
-# $Log: Makefile.am,v $
+# $Log$
+# Revision 1.187  2009/01/18 00:52:19  jmaynard
+# Fix Gentoo reported bug: unable to do multithreaded "make install" reliably
+# if --enable-setuid-hercifc is specified.
+#
 # Revision 1.186  2008/12/29 11:03:10  jj
 # Move HMC disk I/O functions to scedasd.c
 #
@@ -177,8 +181,9 @@ hdt1052c_la_OBJECTS = $(am_hdt1052c_la_OBJECTS)
 @OPTION_DYNAMIC_LOAD_TRUE@am_hdt1052c_la_rpath = -rpath $(modexecdir)
 @OPTION_DYNAMIC_LOAD_TRUE@hdt1403_la_DEPENDENCIES =  \
 @OPTION_DYNAMIC_LOAD_TRUE@	$(am__DEPENDENCIES_2)
-am__hdt1403_la_SOURCES_DIST = printer.c
-@OPTION_DYNAMIC_LOAD_TRUE@am_hdt1403_la_OBJECTS = printer.lo
+am__hdt1403_la_SOURCES_DIST = printer.c sockdev.c
+@OPTION_DYNAMIC_LOAD_TRUE@am_hdt1403_la_OBJECTS = printer.lo \
+@OPTION_DYNAMIC_LOAD_TRUE@	sockdev.lo
 hdt1403_la_OBJECTS = $(am_hdt1403_la_OBJECTS)
 @OPTION_DYNAMIC_LOAD_TRUE@am_hdt1403_la_rpath = -rpath $(modexecdir)
 @OPTION_DYNAMIC_LOAD_TRUE@hdt2703_la_DEPENDENCIES =  \
@@ -231,6 +236,12 @@ am__hdt3525_la_SOURCES_DIST = cardpch.c
 @OPTION_DYNAMIC_LOAD_TRUE@am_hdt3525_la_OBJECTS = cardpch.lo
 hdt3525_la_OBJECTS = $(am_hdt3525_la_OBJECTS)
 @OPTION_DYNAMIC_LOAD_TRUE@am_hdt3525_la_rpath = -rpath $(modexecdir)
+@OPTION_DYNAMIC_LOAD_TRUE@hdt3705_la_DEPENDENCIES =  \
+@OPTION_DYNAMIC_LOAD_TRUE@	$(am__DEPENDENCIES_2)
+am__hdt3705_la_SOURCES_DIST = comm3705.c
+@OPTION_DYNAMIC_LOAD_TRUE@am_hdt3705_la_OBJECTS = comm3705.lo
+hdt3705_la_OBJECTS = $(am_hdt3705_la_OBJECTS)
+@OPTION_DYNAMIC_LOAD_TRUE@am_hdt3705_la_rpath = -rpath $(modexecdir)
 @OPTION_DYNAMIC_LOAD_TRUE@hdteq_la_DEPENDENCIES =  \
 @OPTION_DYNAMIC_LOAD_TRUE@	$(am__DEPENDENCIES_2)
 am__hdteq_la_SOURCES_DIST = hdteq.c
@@ -250,32 +261,33 @@ am__libherc_la_SOURCES_DIST = hconsole.c w32util.c strsignal.c impl.c \
 	dat.c stack.c cpu.c vstore.c general1.c general2.c general3.c \
 	pfpo.c plo.c control.c crypto.c io.c decimal.c service.c \
 	scedasd.c losc.c chsc.c opcode.c diagnose.c diagmssf.c vm.c \
-	channel.c external.c float.c trace.c machchk.c vector.c \
-	xstore.c cmpsc.c sie.c qdio.c clock.c timer.c esame.c ieee.c \
-	dfp.c machdep.h httpserv.c cgibin.c loadparm.c hsccmd.c hao.c \
-	hscmisc.c sr.c w32chan.c commadpt.c console.c cardpch.c \
-	cardrdr.c sockdev.c printer.c tapedev.c tapeccws.c sllib.c \
-	hetlib.c awstape.c faketape.c hettape.c omatape.c scsitape.c \
-	w32stape.c ctc_lcs.c ctc_ctci.c ctcadpt.c w32ctca.c hchan.c \
-	tuntap.c qeth.c con1052c.c ecpsvm.c
+	vmd250.c channel.c external.c float.c trace.c machchk.c \
+	vector.c xstore.c cmpsc.c sie.c qdio.c clock.c timer.c esame.c \
+	ieee.c dfp.c machdep.h httpserv.c cgibin.c loadparm.c hsccmd.c \
+	cmdtab.c hao.c hscmisc.c sr.c w32chan.c commadpt.c comm3705.c \
+	console.c cardpch.c cardrdr.c sockdev.c printer.c tapedev.c \
+	tapeccws.c sllib.c hetlib.c awstape.c faketape.c hettape.c \
+	omatape.c scsitape.c w32stape.c ctc_lcs.c ctc_ctci.c ctcadpt.c \
+	w32ctca.c hchan.c tuntap.c qeth.c con1052c.c ecpsvm.c
 am__objects_1 = w32chan.lo
 @BUILD_FTHREADS_TRUE@am__objects_2 = $(am__objects_1)
-am__objects_3 = commadpt.lo console.lo cardpch.lo cardrdr.lo \
-	sockdev.lo printer.lo tapedev.lo tapeccws.lo sllib.lo \
-	hetlib.lo awstape.lo faketape.lo hettape.lo omatape.lo \
-	scsitape.lo w32stape.lo ctc_lcs.lo ctc_ctci.lo ctcadpt.lo \
-	w32ctca.lo hchan.lo tuntap.lo qeth.lo con1052c.lo
+am__objects_3 = commadpt.lo comm3705.lo console.lo cardpch.lo \
+	cardrdr.lo sockdev.lo printer.lo tapedev.lo tapeccws.lo \
+	sllib.lo hetlib.lo awstape.lo faketape.lo hettape.lo \
+	omatape.lo scsitape.lo w32stape.lo ctc_lcs.lo ctc_ctci.lo \
+	ctcadpt.lo w32ctca.lo hchan.lo tuntap.lo qeth.lo con1052c.lo
 @OPTION_DYNAMIC_LOAD_FALSE@am__objects_4 = $(am__objects_3)
 am_libherc_la_OBJECTS = hconsole.lo w32util.lo strsignal.lo impl.lo \
 	config.lo bldcfg.lo panel.lo history.lo fillfnam.lo ipl.lo \
 	assist.lo dat.lo stack.lo cpu.lo vstore.lo general1.lo \
 	general2.lo general3.lo pfpo.lo plo.lo control.lo crypto.lo \
 	io.lo decimal.lo service.lo scedasd.lo losc.lo chsc.lo \
-	opcode.lo diagnose.lo diagmssf.lo vm.lo channel.lo external.lo \
-	float.lo trace.lo machchk.lo vector.lo xstore.lo cmpsc.lo \
-	sie.lo qdio.lo clock.lo timer.lo esame.lo ieee.lo dfp.lo \
-	httpserv.lo cgibin.lo loadparm.lo hsccmd.lo hao.lo hscmisc.lo \
-	sr.lo $(am__objects_2) $(am__objects_4) ecpsvm.lo
+	opcode.lo diagnose.lo diagmssf.lo vm.lo vmd250.lo channel.lo \
+	external.lo float.lo trace.lo machchk.lo vector.lo xstore.lo \
+	cmpsc.lo sie.lo qdio.lo clock.lo timer.lo esame.lo ieee.lo \
+	dfp.lo httpserv.lo cgibin.lo loadparm.lo hsccmd.lo cmdtab.lo \
+	hao.lo hscmisc.lo sr.lo $(am__objects_2) $(am__objects_4) \
+	ecpsvm.lo
 libherc_la_OBJECTS = $(am_libherc_la_OBJECTS)
 libhercd_la_DEPENDENCIES = $(am__DEPENDENCIES_1) libhercs.la \
 	libhercu.la
@@ -400,38 +412,39 @@ SOURCES = $(dyngui_la_SOURCES) $(dyninst_la_SOURCES) \
 	$(hdt2703_la_SOURCES) $(hdt2880_la_SOURCES) \
 	$(hdt3088_la_SOURCES) $(hdt3270_la_SOURCES) \
 	$(hdt3420_la_SOURCES) $(hdt3505_la_SOURCES) \
-	$(hdt3525_la_SOURCES) $(hdteq_la_SOURCES) \
-	$(hdtqeth_la_SOURCES) $(libherc_la_SOURCES) \
-	$(EXTRA_libherc_la_SOURCES) $(libhercd_la_SOURCES) \
-	$(libhercs_la_SOURCES) $(libherct_la_SOURCES) \
-	$(libhercu_la_SOURCES) $(cckdcdsk_SOURCES) $(cckdcomp_SOURCES) \
-	$(cckddiag_SOURCES) $(cckdswap_SOURCES) $(dasdcat_SOURCES) \
-	$(dasdconv_SOURCES) $(dasdcopy_SOURCES) $(dasdinit_SOURCES) \
-	$(dasdisup_SOURCES) $(dasdload_SOURCES) $(dasdls_SOURCES) \
-	$(dasdpdsu_SOURCES) $(dasdseq_SOURCES) $(dmap2hrc_SOURCES) \
-	$(hercifc_SOURCES) $(herclin_SOURCES) $(hercules_SOURCES) \
-	$(hetget_SOURCES) $(hetinit_SOURCES) $(hetmap_SOURCES) \
-	$(hetupd_SOURCES) $(tapecopy_SOURCES) $(tapemap_SOURCES) \
-	$(tapesplt_SOURCES)
+	$(hdt3525_la_SOURCES) $(hdt3705_la_SOURCES) \
+	$(hdteq_la_SOURCES) $(hdtqeth_la_SOURCES) \
+	$(libherc_la_SOURCES) $(EXTRA_libherc_la_SOURCES) \
+	$(libhercd_la_SOURCES) $(libhercs_la_SOURCES) \
+	$(libherct_la_SOURCES) $(libhercu_la_SOURCES) \
+	$(cckdcdsk_SOURCES) $(cckdcomp_SOURCES) $(cckddiag_SOURCES) \
+	$(cckdswap_SOURCES) $(dasdcat_SOURCES) $(dasdconv_SOURCES) \
+	$(dasdcopy_SOURCES) $(dasdinit_SOURCES) $(dasdisup_SOURCES) \
+	$(dasdload_SOURCES) $(dasdls_SOURCES) $(dasdpdsu_SOURCES) \
+	$(dasdseq_SOURCES) $(dmap2hrc_SOURCES) $(hercifc_SOURCES) \
+	$(herclin_SOURCES) $(hercules_SOURCES) $(hetget_SOURCES) \
+	$(hetinit_SOURCES) $(hetmap_SOURCES) $(hetupd_SOURCES) \
+	$(tapecopy_SOURCES) $(tapemap_SOURCES) $(tapesplt_SOURCES)
 DIST_SOURCES = $(am__dyngui_la_SOURCES_DIST) \
 	$(am__dyninst_la_SOURCES_DIST) $(am__hdt1052c_la_SOURCES_DIST) \
 	$(am__hdt1403_la_SOURCES_DIST) $(am__hdt2703_la_SOURCES_DIST) \
 	$(am__hdt2880_la_SOURCES_DIST) $(am__hdt3088_la_SOURCES_DIST) \
 	$(am__hdt3270_la_SOURCES_DIST) $(am__hdt3420_la_SOURCES_DIST) \
 	$(am__hdt3505_la_SOURCES_DIST) $(am__hdt3525_la_SOURCES_DIST) \
-	$(am__hdteq_la_SOURCES_DIST) $(am__hdtqeth_la_SOURCES_DIST) \
-	$(am__libherc_la_SOURCES_DIST) $(EXTRA_libherc_la_SOURCES) \
-	$(libhercd_la_SOURCES) $(libhercs_la_SOURCES) \
-	$(libherct_la_SOURCES) $(am__libhercu_la_SOURCES_DIST) \
-	$(cckdcdsk_SOURCES) $(cckdcomp_SOURCES) $(cckddiag_SOURCES) \
-	$(cckdswap_SOURCES) $(dasdcat_SOURCES) $(dasdconv_SOURCES) \
-	$(dasdcopy_SOURCES) $(dasdinit_SOURCES) $(dasdisup_SOURCES) \
-	$(dasdload_SOURCES) $(dasdls_SOURCES) $(dasdpdsu_SOURCES) \
-	$(dasdseq_SOURCES) $(dmap2hrc_SOURCES) \
-	$(am__hercifc_SOURCES_DIST) $(am__herclin_SOURCES_DIST) \
-	$(hercules_SOURCES) $(hetget_SOURCES) $(hetinit_SOURCES) \
-	$(hetmap_SOURCES) $(hetupd_SOURCES) $(tapecopy_SOURCES) \
-	$(tapemap_SOURCES) $(tapesplt_SOURCES)
+	$(am__hdt3705_la_SOURCES_DIST) $(am__hdteq_la_SOURCES_DIST) \
+	$(am__hdtqeth_la_SOURCES_DIST) $(am__libherc_la_SOURCES_DIST) \
+	$(EXTRA_libherc_la_SOURCES) $(libhercd_la_SOURCES) \
+	$(libhercs_la_SOURCES) $(libherct_la_SOURCES) \
+	$(am__libhercu_la_SOURCES_DIST) $(cckdcdsk_SOURCES) \
+	$(cckdcomp_SOURCES) $(cckddiag_SOURCES) $(cckdswap_SOURCES) \
+	$(dasdcat_SOURCES) $(dasdconv_SOURCES) $(dasdcopy_SOURCES) \
+	$(dasdinit_SOURCES) $(dasdisup_SOURCES) $(dasdload_SOURCES) \
+	$(dasdls_SOURCES) $(dasdpdsu_SOURCES) $(dasdseq_SOURCES) \
+	$(dmap2hrc_SOURCES) $(am__hercifc_SOURCES_DIST) \
+	$(am__herclin_SOURCES_DIST) $(hercules_SOURCES) \
+	$(hetget_SOURCES) $(hetinit_SOURCES) $(hetmap_SOURCES) \
+	$(hetupd_SOURCES) $(tapecopy_SOURCES) $(tapemap_SOURCES) \
+	$(tapesplt_SOURCES)
 RECURSIVE_TARGETS = all-recursive check-recursive dvi-recursive \
 	html-recursive info-recursive install-data-recursive \
 	install-exec-recursive install-info-recursive \
@@ -635,6 +648,7 @@ dynamic_SRC = dyngui.c   \
                      hdteq.c
 
 dyndev_SRC = commadpt.c  \
+                     comm3705.c  \
                      console.c   \
                      cardpch.c   \
                      cardrdr.c   \
@@ -712,6 +726,7 @@ HERCMODS = dyngui.la   \
              hdteq.la    \
              hdt1403.la  \
              hdt2703.la  \
+             hdt3705.la  \
              hdt3088.la  \
              hdt3270.la  \
              hdt3420.la  \
@@ -742,7 +757,7 @@ lib_LTLIBRARIES = $(HERCLIBS2)
 @OPTION_DYNAMIC_LOAD_TRUE@hdteq_la_SOURCES = hdteq.c
 @OPTION_DYNAMIC_LOAD_TRUE@hdteq_la_LDFLAGS = $(DYNMOD_LD_FLAGS)
 @OPTION_DYNAMIC_LOAD_TRUE@hdteq_la_LIBADD = $(DYNMOD_LD_ADD)
-@OPTION_DYNAMIC_LOAD_TRUE@hdt1403_la_SOURCES = printer.c
+@OPTION_DYNAMIC_LOAD_TRUE@hdt1403_la_SOURCES = printer.c sockdev.c
 @OPTION_DYNAMIC_LOAD_TRUE@hdt1403_la_LDFLAGS = $(DYNMOD_LD_FLAGS)
 @OPTION_DYNAMIC_LOAD_TRUE@hdt1403_la_LIBADD = $(DYNMOD_LD_ADD)
 @OPTION_DYNAMIC_LOAD_TRUE@hdt2880_la_SOURCES = hchan.c
@@ -751,6 +766,9 @@ lib_LTLIBRARIES = $(HERCLIBS2)
 @OPTION_DYNAMIC_LOAD_TRUE@hdt2703_la_SOURCES = commadpt.c
 @OPTION_DYNAMIC_LOAD_TRUE@hdt2703_la_LDFLAGS = $(DYNMOD_LD_FLAGS)
 @OPTION_DYNAMIC_LOAD_TRUE@hdt2703_la_LIBADD = $(DYNMOD_LD_ADD)
+@OPTION_DYNAMIC_LOAD_TRUE@hdt3705_la_SOURCES = comm3705.c
+@OPTION_DYNAMIC_LOAD_TRUE@hdt3705_la_LDFLAGS = $(DYNMOD_LD_FLAGS)
+@OPTION_DYNAMIC_LOAD_TRUE@hdt3705_la_LIBADD = $(DYNMOD_LD_ADD)
 @OPTION_DYNAMIC_LOAD_TRUE@hdt3088_la_SOURCES = ctc_lcs.c ctc_ctci.c ctcadpt.c w32ctca.c tuntap.c
 @OPTION_DYNAMIC_LOAD_TRUE@hdt3088_la_LDFLAGS = $(DYNMOD_LD_FLAGS)
 @OPTION_DYNAMIC_LOAD_TRUE@hdt3088_la_LIBADD = $(DYNMOD_LD_ADD)
@@ -860,6 +878,7 @@ libherc_la_SOURCES = hconsole.c   \
                        diagnose.c   \
                        diagmssf.c   \
                        vm.c         \
+                       vmd250.c     \
                        channel.c    \
                        external.c   \
                        float.c      \
@@ -880,6 +899,7 @@ libherc_la_SOURCES = hconsole.c   \
                        cgibin.c     \
                        loadparm.c   \
                        hsccmd.c     \
+                       cmdtab.c     \
                        hao.c        \
                        hscmisc.c    \
                        sr.c         \
@@ -911,6 +931,7 @@ libherc_la_LIBADD = libhercs.la     \
 @BUILD_SHARED_FALSE@@OPTION_DYNAMIC_LOAD_TRUE@             -dlopen hdt1403.la   \
 @BUILD_SHARED_FALSE@@OPTION_DYNAMIC_LOAD_TRUE@             -dlopen hdt3420.la   \
 @BUILD_SHARED_FALSE@@OPTION_DYNAMIC_LOAD_TRUE@             -dlopen hdt2703.la   \
+@BUILD_SHARED_FALSE@@OPTION_DYNAMIC_LOAD_TRUE@             -dlopen hdt3705.la   \
 @BUILD_SHARED_FALSE@@OPTION_DYNAMIC_LOAD_TRUE@             -dlopen hdt3088.la   \
 @BUILD_SHARED_FALSE@@OPTION_DYNAMIC_LOAD_TRUE@             -dlopen hdt3270.la   \
 @BUILD_SHARED_FALSE@@OPTION_DYNAMIC_LOAD_TRUE@             -dlopen hdt3505.la   \
@@ -932,6 +953,7 @@ libherc_la_LIBADD = libhercs.la     \
 @BUILD_SHARED_FALSE@@OPTION_DYNAMIC_LOAD_TRUE@             hdt1403.la   \
 @BUILD_SHARED_FALSE@@OPTION_DYNAMIC_LOAD_TRUE@             hdt3420.la   \
 @BUILD_SHARED_FALSE@@OPTION_DYNAMIC_LOAD_TRUE@             hdt2703.la   \
+@BUILD_SHARED_FALSE@@OPTION_DYNAMIC_LOAD_TRUE@             hdt3705.la   \
 @BUILD_SHARED_FALSE@@OPTION_DYNAMIC_LOAD_TRUE@             hdt3088.la   \
 @BUILD_SHARED_FALSE@@OPTION_DYNAMIC_LOAD_TRUE@             hdt3270.la   \
 @BUILD_SHARED_FALSE@@OPTION_DYNAMIC_LOAD_TRUE@             hdt3505.la   \
@@ -1040,6 +1062,7 @@ EXTRA_DIST = autoconf/config.rpath \
              cckdfix.c             \
              README.COMMADPT       \
              README.CVS            \
+             README.DYNMOD         \
              README.ECPSVM         \
              README.HAO            \
              README.HDL            \
@@ -1052,6 +1075,8 @@ EXTRA_DIST = autoconf/config.rpath \
              CHANGES               \
              RELEASE.NOTES         \
              README.MSVC           \
+             README.SUN            \
+             _TODO.txt             \
              makefile.msvc         \
              makefile-dllmod.msvc  \
              msvc.makefile.includes/BZIP2_DIR.msvc    \
@@ -1075,6 +1100,7 @@ EXTRA_DIST = autoconf/config.rpath \
              msvc.makefile.includes/ZLIB_FLAGS.msvc   \
              msvc.makefile.includes/ZLIB_RULES.msvc   \
              makefile.bat          \
+             dynmake.bat           \
              Hercules.dsp          \
              Hercules.dsw          \
              Hercules.vcproj       \
@@ -1130,11 +1156,13 @@ noinst_HEADERS = fishhang.h     \
                  scsitape.h     \
                  logger.h       \
                  commadpt.h     \
+                 comm3705.h     \
                  cache.h        \
                  ecpsvm.h       \
                  memrchr.h      \
                  shared.h       \
                  hscutl.h       \
+                 cmdtab.h       \
                  hdl.h          \
                  crypto.h       \
                  sockdev.h      \
@@ -1164,6 +1192,7 @@ noinst_HEADERS = fishhang.h     \
                  hercwind.h     \
                  getopt.h       \
                  w32mtio.h      \
+                 vmd250.h       \
                  $(extra_dynamic_SRC)
 
 all: config.h
@@ -1306,6 +1335,8 @@ hdt3505.la: $(hdt3505_la_OBJECTS) $(hdt3505_la_DEPENDENCIES)
 	$(LINK) $(am_hdt3505_la_rpath) $(hdt3505_la_LDFLAGS) $(hdt3505_la_OBJECTS) $(hdt3505_la_LIBADD) $(LIBS)
 hdt3525.la: $(hdt3525_la_OBJECTS) $(hdt3525_la_DEPENDENCIES) 
 	$(LINK) $(am_hdt3525_la_rpath) $(hdt3525_la_LDFLAGS) $(hdt3525_la_OBJECTS) $(hdt3525_la_LIBADD) $(LIBS)
+hdt3705.la: $(hdt3705_la_OBJECTS) $(hdt3705_la_DEPENDENCIES) 
+	$(LINK) $(am_hdt3705_la_rpath) $(hdt3705_la_LDFLAGS) $(hdt3705_la_OBJECTS) $(hdt3705_la_LIBADD) $(LIBS)
 hdteq.la: $(hdteq_la_OBJECTS) $(hdteq_la_DEPENDENCIES) 
 	$(LINK) $(am_hdteq_la_rpath) $(hdteq_la_LDFLAGS) $(hdteq_la_OBJECTS) $(hdteq_la_LIBADD) $(LIBS)
 hdtqeth.la: $(hdtqeth_la_OBJECTS) $(hdtqeth_la_DEPENDENCIES) 
@@ -1445,8 +1476,10 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/chsc.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ckddasd.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/clock.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cmdtab.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/cmpsc.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/codepage.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/comm3705.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/commadpt.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/con1052c.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/config.Plo@am__quote@
@@ -1553,6 +1586,7 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/vector.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/version.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/vm.Plo@am__quote@
+@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/vmd250.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/vstore.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/w32chan.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/w32ctca.Plo@am__quote@
@@ -2011,16 +2045,11 @@ cckd: cckd2ckd$(EXEEXT)  \
 tar: dist
 
 install-exec-local:
-@SETUID_HERCIFC_TRUE@	chown root $(DESTDIR)$(bindir)/hercifc
-@HERCIFC_GROUPSET_TRUE@@SETUID_HERCIFC_TRUE@	chgrp $(HERCIFC_GROUPNAME) $(DESTDIR)$(bindir)/hercifc
-@SETUID_HERCIFC_TRUE@	chmod 0750 $(DESTDIR)$(bindir)/hercifc
-@SETUID_HERCIFC_TRUE@	chmod +s   $(DESTDIR)$(bindir)/hercifc
-@SETUID_HERCIFC_TRUE@	rm                             hercifc
 
 install-exec-hook:
-	rm -f $(DESTDIR)$(libdir)/libherc*.a
-	rm -f $(DESTDIR)$(modexecdir)/dyn*.a
-	rm -f $(DESTDIR)$(modexecdir)/hdt*.a
+@BUILD_SHARED_TRUE@	rm -f $(DESTDIR)$(libdir)/libherc*.a
+@BUILD_SHARED_TRUE@	rm -f $(DESTDIR)$(modexecdir)/dyn*.a
+@BUILD_SHARED_TRUE@	rm -f $(DESTDIR)$(modexecdir)/hdt*.a
 @BUILD_SHARED_FALSE@	rm -f $(DESTDIR)$(libdir)/libherc*
 #
 # NOTE : symbolic links point to FINAL destination (not to staged install)
@@ -2033,6 +2062,11 @@ install-exec-hook:
 	(cd $(DESTDIR)$(bindir); @LN_S@ ./dasdcopy$(EXEEXT) cfba2fba$(EXEEXT))
 	rm -f $(DESTDIR)$(bindir)/cckd2ckd$(EXEEXT)
 	(cd $(DESTDIR)$(bindir); @LN_S@ ./dasdcopy$(EXEEXT) cckd2ckd$(EXEEXT))
+@SETUID_HERCIFC_TRUE@	chown root $(DESTDIR)$(bindir)/hercifc
+@HERCIFC_GROUPSET_TRUE@@SETUID_HERCIFC_TRUE@	chgrp $(HERCIFC_GROUPNAME) $(DESTDIR)$(bindir)/hercifc
+@SETUID_HERCIFC_TRUE@	chmod 0750 $(DESTDIR)$(bindir)/hercifc
+@SETUID_HERCIFC_TRUE@	chmod +s   $(DESTDIR)$(bindir)/hercifc
+@SETUID_HERCIFC_TRUE@	rm                             hercifc
 
 uninstall-local:
 

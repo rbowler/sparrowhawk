@@ -1,10 +1,10 @@
-/* HSCMISC.C    (c) Copyright Roger Bowler, 1999-2007                */
-/*              (c) Copyright Jan Jaeger, 1999-2007                  */
+/* HSCMISC.C    (c) Copyright Roger Bowler, 1999-2009                */
+/*              (c) Copyright Jan Jaeger, 1999-2009                  */
 /*              Miscellaneous System Command Routines                */
 
-// $Id: hscmisc.c,v 1.68 2008/11/04 05:56:31 fish Exp $
+// $Id: hscmisc.c 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: hscmisc.c,v $
+// $Log$
 // Revision 1.68  2008/11/04 05:56:31  fish
 // Put ensure consistent create_thread ATTR usage change back in
 //

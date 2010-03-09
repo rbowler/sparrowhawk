@@ -1,11 +1,11 @@
-/* QDIO.C       (c) Copyright Jan Jaeger, 2003-2007                  */
+/* QDIO.C       (c) Copyright Jan Jaeger, 2003-2009                  */
 /*              Queued Direct Input Output                           */
 
-// $Id: qdio.c,v 1.23 2007/06/23 00:04:15 ivan Exp $
+// $Id: qdio.c 5243 2009-03-06 06:33:40Z jj $
 
 /*      This module contains the Signal Adapter instruction          */
 
-// $Log: qdio.c,v $
+// $Log$
 // Revision 1.23  2007/06/23 00:04:15  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -35,6 +35,10 @@
 
 #include "inline.h"
 
+#undef PTIO
+ #define PTIO(_class, _name) \
+ PTT(PTT_CL_ ## _class,_name,regs->GR_L(1),(U32)(effective_addr2 & 0xffffffff),regs->psw.IA_L)
+
 #if defined(FEATURE_QUEUED_DIRECT_IO)
 
 /*-------------------------------------------------------------------*/
@@ -51,6 +55,8 @@ DEVBLK *dev;                            /* -> device block           */
     PRIV_CHECK(regs);
 
     SIE_INTERCEPT(regs);
+
+    PTIO(IO,"SIGA");
 
     /* Specification exception if invalid function code */
     if(regs->GR_L(0) > SIGA_FC_MAX)
@@ -69,6 +75,7 @@ DEVBLK *dev;                            /* -> device block           */
         || (dev->pmcw.flag5 & PMCW5_E) == 0
         || (dev->pmcw.flag4 & PMCW4_Q) == 0)
     {
+        PTIO(ERR,"*SIGA");
 #if defined(_FEATURE_QUEUED_DIRECT_IO_ASSIST)
         SIE_INTERCEPT(regs);
 #endif
@@ -82,6 +89,7 @@ DEVBLK *dev;                            /* -> device block           */
     /* Check that device is QDIO active */
     if ((dev->scsw.flag2 & SCSW2_Q) == 0)
     {
+        PTIO(ERR,"*SIGA");
         release_lock (&dev->lock);
         regs->psw.cc = 1;
         return;
@@ -93,14 +101,20 @@ DEVBLK *dev;                            /* -> device block           */
     if(dev->hnd->siga_r)
             regs->psw.cc = (dev->hnd->siga_r) (dev, regs->GR_L(2) );
         else
+        {
+            PTIO(ERR,"*SIGA");
             regs->psw.cc = 3;
+        }
         break;
 
     case SIGA_FC_W:
     if(dev->hnd->siga_w)
             regs->psw.cc = (dev->hnd->siga_w) (dev, regs->GR_L(2) );
         else
+        {
+            PTIO(ERR,"*SIGA");
             regs->psw.cc = 3;
+        }
         break;
 
     case SIGA_FC_S:
@@ -108,6 +122,9 @@ DEVBLK *dev;                            /* -> device block           */
            a real machine */
         regs->psw.cc = 0;
         break;
+
+    default:
+        PTIO(ERR,"*SIGA");
 
     }
 

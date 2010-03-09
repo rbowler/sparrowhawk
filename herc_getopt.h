@@ -1,9 +1,6 @@
-// $Id: herc_getopt.h,v 1.4 2006/12/08 09:43:25 jj Exp $
+// $Id: herc_getopt.h 4102 2006-12-08 09:43:35Z jj $
 //
-// $Log: herc_getopt.h,v $
-// Revision 1.4  2006/12/08 09:43:25  jj
-// Add CVS message log
-//
+// $Log$
 
 #if !defined(__HERC_GETOPT_H__)
 #    define  __HERC_GETOPT_H__

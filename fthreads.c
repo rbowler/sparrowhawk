@@ -1,13 +1,13 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //         fthreads.c           Fish's WIN32 version of pthreads
 ////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2001-2007. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2001-2009. Released under the Q Public License
 // (http://www.hercules-390.org/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: fthreads.c,v 1.30 2007/11/30 14:54:32 jmaynard Exp $
+// $Id: fthreads.c 5620 2010-02-09 00:24:03Z fish $
 //
-// $Log: fthreads.c,v $
+// $Log$
 // Revision 1.30  2007/11/30 14:54:32  jmaynard
 // Changed conmicro.cx to hercules-390.org or conmicro.com, as needed.
 //
@@ -664,7 +664,7 @@ static int  QueueTransmission
     // then it simply gets lost (i.e. a "missed signal" situation has essenti-
     // ally occurred), but then that's not our concern here; our only concern
     // here is to transmit the signal (transmission) and nothing more. Tough
-    // beans is there's no one listening to receive it... <shrug>
+    // beans if there's no one listening to receive it... <shrug>
 
     if ( pFT_COND_VAR->nNumWaiting )                    // (anyone interested?)
     {

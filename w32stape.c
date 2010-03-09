@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////////
 // W32STAPE.C   --   Hercules Win32 SCSI Tape handling module
 //
-// (c) Copyright "Fish" (David B. Trout), 2005-2007. Released under
+// (c) Copyright "Fish" (David B. Trout), 2005-2009. Released under
 // the Q Public License (http://www.hercules-390.org/herclic.html)
 // as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
@@ -14,9 +14,12 @@
 //
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: w32stape.c,v 1.18 2008/03/31 06:36:49 fish Exp $
+// $Id: w32stape.c 5365 2009-06-02 03:10:33Z fish $
 //
-// $Log: w32stape.c,v $
+// $Log$
+// Revision 1.19  2009/01/23 13:17:44  bernard
+// copyright notice
+//
 // Revision 1.18  2008/03/31 06:36:49  fish
 // (untab)
 //
@@ -48,7 +51,7 @@
 #include "w32stape.h"
 #include "tapedev.h"        // (need IS_TAPE_BLKID_BOT)
 
-#ifdef WIN32
+#ifdef _MSVC_
 
 ////////////////////////////////////////////////////////////////////////////////////
 // Global data...
@@ -192,11 +195,14 @@ ufd_t w32_open_tape ( const char* path, int oflag, ... )
     // If they specified a Windows device name,
     // use it as-is.
 
-    if ( strnfilenamecmp( path, "\\\\.\\Tape", 8 ) == 0 )
+    if (1
+        && strnfilenamecmp( path, "\\\\.\\", 4 ) == 0
+        &&                  path            [4]  != 0
+    )
     {
         strlcpy( szTapeDeviceName, path, sizeof(szTapeDeviceName) );
     }
-    else // (not a Window device name)
+    else // (not a Windows device name)
     {
         // The device name is a Cygwin/*nix device name.
         // Name must be either "/dev/nst0" or "/dev/st0"
@@ -212,6 +218,8 @@ ufd_t w32_open_tape ( const char* path, int oflag, ... )
             &&  isdigit(*pszTapeDevNum)
         )
         {
+            // Change it to a Windows device name (e.g. \\.\Tape0)
+
             strlcpy( szTapeDeviceName, WIN32_TAPE_DEVICE_NAME, sizeof(szTapeDeviceName) );
             szTapeDeviceName[8] = *pszTapeDevNum;
             szTapeDeviceName[9] = 0;
@@ -630,7 +638,7 @@ ssize_t  w32_read_tape ( ufd_t ufd, void* buf, size_t nbyte )
     do
     {
         dwBytesRead = 0;
-        bSuccess    = ReadFile( hFile, buf, nbyte, &dwBytesRead, NULL );
+        bSuccess    = ReadFile( hFile, buf, (DWORD)nbyte, &dwBytesRead, NULL );
         errno       = (dwLastError = GetLastError());
         errno       = w32_internal_rc ( pStat );
     }
@@ -704,7 +712,7 @@ ssize_t  w32_write_tape ( ufd_t ufd, const void* buf, size_t nbyte )
     do
     {
         dwBytesWritten = 0;
-        bSuccess       = WriteFile( hFile, buf, nbyte, &dwBytesWritten, NULL );
+        bSuccess       = WriteFile( hFile, buf, (DWORD)nbyte, &dwBytesWritten, NULL );
         errno          = (dwLastError = GetLastError());
         errno          = w32_internal_rc ( pStat );
     }
@@ -1238,4 +1246,4 @@ int  w32_internal_mtpos ( HANDLE hFile, U32* pStat, DWORD* pdwLogPos,
 
 ////////////////////////////////////////////////////////////////////////////////////
 
-#endif /* WIN32 */
+#endif /* _MSVC_ */

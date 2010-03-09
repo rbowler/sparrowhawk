@@ -1,7 +1,7 @@
 /*
 || ----------------------------------------------------------------------------
 ||
-|| HETINIT.C    (c) Copyright Leland Lucius, 2000-2007
+|| HETINIT.C    (c) Copyright Leland Lucius, 2000-2009
 ||              Released under terms of the Q Public License.
 ||
 || Creates IEHINITT or NL format Hercules Emulated Tapes.
@@ -9,9 +9,9 @@
 || ----------------------------------------------------------------------------
 */
 
-// $Id: hetinit.c,v 1.25 2008/11/04 04:50:46 fish Exp $
+// $Id: hetinit.c 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: hetinit.c,v $
+// $Log$
 // Revision 1.25  2008/11/04 04:50:46  fish
 // Ensure consistent utility startup
 //

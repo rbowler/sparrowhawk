@@ -1,7 +1,7 @@
 /*
 || ----------------------------------------------------------------------------
 ||
-|| SLLIB.C      (c) Copyright Leland Lucius, 2000-2007
+|| SLLIB.C      (c) Copyright Leland Lucius, 2000-2009
 ||              Released under terms of the Q Public License.
 ||
 || Library for managing Standard Label tapes.
@@ -9,15 +9,7 @@
 || ----------------------------------------------------------------------------
 */
 
-// $Id: sllib.c,v 1.16 2007/06/23 00:04:15 ivan Exp $
-//
-// $Log: sllib.c,v $
-// Revision 1.16  2007/06/23 00:04:15  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.15  2006/12/08 09:43:30  jj
-// Add CVS message log
-//
+// $Id: sllib.c 5313 2009-04-06 23:13:26Z rbowler $
 
 #include "hstdinc.h"
 
@@ -918,7 +910,7 @@ sl_vol( SLLABEL *lab,
         char *volser,
         char *owner )
 {
-    int len;
+    size_t len;
 
     /*
     || Initialize
@@ -944,7 +936,7 @@ sl_vol( SLLABEL *lab,
     }
 
     len = strlen( volser );
-    if( ( len > 6 ) || ( (int)strspn( volser, sl_cset ) != len ) )
+    if( ( len > 6 ) || ( strspn( volser, sl_cset ) != len ) )
     {
         return( SLE_VOLSER );
     }
@@ -1071,8 +1063,8 @@ sl_ds1( SLLABEL *lab,
         int blocks )
 {
     int gdg;
-    int len;
-    int ndx;
+    size_t len;
+    size_t ndx;
     char wbuf[ 80 ];
 
     /*
@@ -1324,7 +1316,7 @@ sl_ds2( SLLABEL *lab,
         char *trtch )
 {
     int i;
-    int len;
+    size_t len;
     char wbuf[ 80 ];
 
     /*
@@ -1612,7 +1604,7 @@ sl_usr( SLLABEL *lab,
         int num,
         char *data )
 {
-    int len;
+    size_t len;
 
     /*
     || Initialize

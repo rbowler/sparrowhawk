@@ -8,12 +8,9 @@
 /* z/Architecture emulator                                           */
 /*********************************************************************/
 
-// $Id: hscutl.c,v 1.29 2008/11/29 21:28:01 rbowler Exp $
+// $Id: hscutl.c 5177 2009-02-13 20:41:07Z jj $
 //
-// $Log: hscutl.c,v $
-// Revision 1.29  2008/11/29 21:28:01  rbowler
-// Fix warnings C4267 because win64 declares send length as int not size_t
-//
+// $Log$
 // Revision 1.28  2008/07/10 18:29:02  fish
 // Fix crash in 'resolve_symbol_string' when incomplete symbol passed
 // (e.g. "$(x" for example)
@@ -294,9 +291,6 @@ typedef struct _SYMBOL_TOKEN
 static SYMBOL_TOKEN **symbols=NULL;
 static int symbol_count=0;
 static int symbol_max=0;
-#if !defined(MIN)
-#define MIN(_x,_y) ( ( ( _x ) < ( _y ) ) ? ( _x ) : ( _y ) )
-#endif /* !defined(MIN) */
 
 /* This function retrieves or allocates a new SYMBOL_TOKEN */
 static SYMBOL_TOKEN *get_symbol_token(const char *sym,int alloc)

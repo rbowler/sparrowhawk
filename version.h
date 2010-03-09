@@ -1,7 +1,7 @@
-/*  VERSION.H   (c) Copyright Roger Bowler, 1999-2007            */
+/*  VERSION.H   (c) Copyright Roger Bowler, 1999-2009            */
 /*      ESA/390 Emulator Version definition                      */
 
-// $Id: version.h,v 1.18 2007/06/23 00:04:19 ivan Exp $
+// $Id: version.h 5604 2010-02-05 14:07:42Z jmaynard $
 
 /*-------------------------------------------------------------------*/
 /* Header file defining the Hercules version number.                 */
@@ -10,7 +10,7 @@
 /* number, it's in configure.ac, near the top.                       */
 /*-------------------------------------------------------------------*/
 
-// $Log: version.h,v $
+// $Log$
 // Revision 1.18  2007/06/23 00:04:19  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -51,5 +51,5 @@ VER_DLL_IMPORT void display_version_2(FILE *f, char *prog, const char verbose,in
 VER_DLL_IMPORT int get_buildinfo_strings(const char*** pppszBldInfoStr);
 
 #define HERCULES_COPYRIGHT \
-       "(c)Copyright 1999-2007 by Roger Bowler, Jan Jaeger, and others"
+       "(c)Copyright 1999-2010 by Roger Bowler, Jan Jaeger, and others"
 #endif // _HERCULES_H_

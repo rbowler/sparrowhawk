@@ -7,24 +7,7 @@
 //      The <config.h> header and other required headers are
 //      presumed to have already been #included ahead of it...
 
-// $Id: hconsts.h,v 1.10 2008/05/28 16:36:17 fish Exp $
-//
-// $Log: hconsts.h,v $
-// Revision 1.10  2008/05/28 16:36:17  fish
-// #define PATH_SEP constant
-//
-// Revision 1.9  2008/03/16 00:04:37  rbowler
-// Replace ACC_ARMODE by USE_ARMODE for LPTEA
-//
-// Revision 1.8  2007/03/20 22:23:33  gsmith
-// Redefine ACC_ and ACCTYPE_ macros
-//
-// Revision 1.7  2007/01/11 19:54:33  fish
-// Addt'l keep-alive mods: create associated supporting config-file stmt and panel command where individual customer-preferred values can be specified and/or dynamically modified.
-//
-// Revision 1.6  2006/12/08 09:43:25  jj
-// Add CVS message log
-//
+// $Id: hconsts.h 5522 2009-12-11 15:25:15Z bernard $
 
 #ifndef _HCONSTS_H
 #define _HCONSTS_H
@@ -36,7 +19,11 @@
 /*-------------------------------------------------------------------*/
 
 #ifndef     MAX_PATH
-  #define   MAX_PATH          PATH_MAX
+  #ifdef    PATH_MAX
+    #define MAX_PATH          PATH_MAX
+  #else
+    #define MAX_PATH          4096
+  #endif
 #endif
 
 #ifndef     PATH_SEP
@@ -237,10 +224,11 @@
 
 /* Definitions for OS tailoring - msb eq mon event, lsb eq oper exc. */
 #define OS_NONE         0x7FFFFFFFF7DE7FFFULL   /* No spec OS tail.  */
-#define OS_OS390        0x7FF673FFF7DE7FFFULL   /* OS/390            */
+#define OS_OS390        0x7FF673FFF7DE7FFDULL   /* OS/390            */
 #define OS_ZOS          0x7B7673FFF7DE7FB7ULL   /* z/OS              */
 #define OS_VSE          0x7FF673FFF7DE7FFFULL   /* VSE               */
 #define OS_VM           0x7FFFFFFFF7DE7FFCULL   /* VM                */
+#define OS_OPENSOLARIS  0xF8FFFFFFFFDE7FF7ULL   /* OpenSolaris       */
 #if !defined(NO_IEEE_SUPPORT)
 #define OS_LINUX        0x78FFFFFFF7DE7FF7ULL   /* Linux             */
 #else
@@ -280,12 +268,13 @@
 #define ACCTYPE_STRAG      0               /* STRAG instruction      */
 #define ACCTYPE_LPTEA     (ACC_LPTEA|ACC_NOTLB) /* LPTEA instruction */
 
-/* Special value for arn parameter for translate functions in dat.c */
-#define USE_INST_SPACE          (-1)    /* Instruction space virtual */
-#define USE_REAL_ADDR           (-2)    /* Real address              */
-#define USE_PRIMARY_SPACE       (-3)    /* Primary space virtual     */
-#define USE_SECONDARY_SPACE     (-4)    /* Secondary space virtual   */
-#define USE_HOME_SPACE          (-5)    /* Home space virtual        */
+/* Special value for arn parameter for translate functions in dat.c  */
+/* _USE_... values for killing the "array subscript" warnings        */
+#define USE_INST_SPACE          20      /* Instruction space virtual */
+#define USE_REAL_ADDR           19      /* Real address              */
+#define USE_PRIMARY_SPACE       18      /* Primary space virtual     */
+#define USE_SECONDARY_SPACE     17      /* Secondary space virtual   */
+#define USE_HOME_SPACE          16      /* Home space virtual        */
 #define USE_ARMODE              16      /* OR with access register
                                            number to force AR mode   */
 

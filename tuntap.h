@@ -2,13 +2,13 @@
 // Hercules - TUN/TAP Abstraction Layer
 // ====================================================================
 //
-// Copyright (C) 2002-2007 by James A. Pierson
-//           (C) 2002-2006 by "Fish" (David B. Trout)
+// Copyright (C) 2002-2009 by James A. Pierson
+//           (C) 2002-2009 by "Fish" (David B. Trout)
 //
 
-// $Id: tuntap.h,v 1.12 2007/06/23 00:04:19 ivan Exp $
+// $Id: tuntap.h 5127 2009-01-23 13:25:01Z bernard $
 //
-// $Log: tuntap.h,v $
+// $Log$
 // Revision 1.12  2007/06/23 00:04:19  ivan
 // Update copyright notices to include current year (2007)
 //

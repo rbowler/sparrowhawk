@@ -1,6 +1,6 @@
 /* vector.c     S/370 and ESA/390 Vector Operations                  */
 
-// $Id: vector.c,v 1.21 2007/06/23 00:04:19 ivan Exp $
+// $Id: vector.c 5127 2009-01-23 13:25:01Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* This module implements the Vector Facility instruction execution  */
@@ -10,11 +10,11 @@
 /*                                             28/05/2000 Jan Jaeger */
 /*                                                                   */
 /* Instruction decoding rework                 09/07/2000 Jan Jaeger */
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 /*-------------------------------------------------------------------*/
 
-// $Log: vector.c,v $
+// $Log$
 // Revision 1.21  2007/06/23 00:04:19  ivan
 // Update copyright notices to include current year (2007)
 //

@@ -1,11 +1,11 @@
 /*********************************************************************/
-/* HDL.H        (c) Copyright Jan Jaeger, 2003-2007                  */
+/* HDL.H        (c) Copyright Jan Jaeger, 2003-2009                  */
 /*              Hercules Dynamic Loader                              */
 /*********************************************************************/
 
-// $Id: hdl.h,v 1.34 2007/06/23 00:04:10 ivan Exp $
+// $Id: hdl.h 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: hdl.h,v $
+// $Log$
 // Revision 1.34  2007/06/23 00:04:10  ivan
 // Update copyright notices to include current year (2007)
 //

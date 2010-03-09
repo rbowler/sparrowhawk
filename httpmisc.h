@@ -1,9 +1,9 @@
-/* HTTPMISC.C   (c)Copyright Jan Jaeger, 2002-2007                   */
+/* HTTPMISC.C   (c)Copyright Jan Jaeger, 2002-2009                   */
 /*              HTTP Server                                          */
 
-// $Id: httpmisc.h,v 1.26 2007/06/23 00:04:12 ivan Exp $
+// $Id: httpmisc.h 5126 2009-01-23 13:05:56Z bernard $
 //
-// $Log: httpmisc.h,v $
+// $Log$
 // Revision 1.26  2007/06/23 00:04:12  ivan
 // Update copyright notices to include current year (2007)
 //

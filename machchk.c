@@ -1,9 +1,9 @@
-/* MACHCHK.C    (c) Copyright Jan Jaeger, 2000-2007                  */
+/* MACHCHK.C    (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              ESA/390 Machine Check Functions                      */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: machchk.c,v 1.50 2007/06/23 00:04:14 ivan Exp $
+// $Id: machchk.c 5126 2009-01-23 13:05:56Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* The machine check function supports dynamic I/O configuration.    */
@@ -19,7 +19,10 @@
 /* external interrupt as defined in the architecture. - 6/8/01 *JJ   */
 /*-------------------------------------------------------------------*/
 
-// $Log: machchk.c,v $
+// $Log$
+// Revision 1.51  2009/01/15 17:36:44  jj
+// Change http server startup
+//
 // Revision 1.50  2007/06/23 00:04:14  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -298,7 +301,8 @@ int i;
     {
     DEVBLK *dev;
         if ( equal_threads( tid, sysblk.cnsltid ) ||
-             equal_threads( tid, sysblk.socktid ) )
+             equal_threads( tid, sysblk.socktid ) ||
+             equal_threads( tid, sysblk.httptid ) )
             return;
         for (dev = sysblk.firstdev; dev != NULL; dev = dev->nextdev)
             if ( equal_threads( dev->tid, tid ) ||

@@ -1,13 +1,13 @@
-/* CCKDSWAP.C   (c) Copyright Roger Bowler, 1999-2007                */
+/* CCKDSWAP.C   (c) Copyright Roger Bowler, 1999-2009                */
 /*       Swap the `endianess' of a compressed CKD file.              */
 
-// $Id: cckdswap.c,v 1.22 2008/11/04 04:50:45 fish Exp $
+// $Id: cckdswap.c 5125 2009-01-23 12:01:44Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* This module changes the `endianess' of a compressed CKD file.     */
 /*-------------------------------------------------------------------*/
 
-// $Log: cckdswap.c,v $
+// $Log$
 // Revision 1.22  2008/11/04 04:50:45  fish
 // Ensure consistent utility startup
 //

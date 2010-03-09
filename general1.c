@@ -1,13 +1,13 @@
-/* GENERAL1.C   (c) Copyright Roger Bowler, 1994-2007                */
+/* GENERAL1.C   (c) Copyright Roger Bowler, 1994-2009                */
 /*              ESA/390 CPU Emulator                                 */
 /*              Instructions A-M                                     */
 
-/*              (c) Copyright Peter Kuschnerus, 1999-2007 (UPT & CFC)*/
+/*              (c) Copyright Peter Kuschnerus, 1999-2009 (UPT & CFC)*/
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: general1.c,v 1.170 2008/12/24 07:50:16 ivan Exp $
+// $Id: general1.c 5220 2009-03-01 09:46:32Z jj $
 
 /*-------------------------------------------------------------------*/
 /* This module implements all general instructions of the            */
@@ -31,7 +31,36 @@
 /*      Clear TEA on data exception - Peter Kuschnerus           v209*/
 /*-------------------------------------------------------------------*/
 
-// $Log: general1.c,v $
+// $Log$
+// Revision 1.178  2009/02/07 22:54:06  ivan
+// Define MIN() macro for MVCLE use in case it isn't defined
+//
+// Revision 1.177  2009/02/07 22:49:38  ivan
+// Use concpy in MVCL to maintain Concurrent Block Update Consistency
+// Use concpy in MVCLE to maintain Concurrent Block Update Consistency
+// Enhance performances for MVCLE
+//
+// Revision 1.176  2009/02/04 18:09:39  ivan
+// Temporary fixes for 'potentially uninitialized variables' by GCC.
+// To me, it's bogus. Look for MVCL in general1.c & zmoncode in cpu.c
+// and read FIXME.
+//
+// Revision 1.175  2009/02/04 12:22:37  ivan
+// Fix issue with unaligned LM/STM when running on a host architecture that
+// enforces alignment
+//
+// Revision 1.174  2009/01/31 21:37:50  rbowler
+// Adopt general coding style - No functional changes
+//
+// Revision 1.173  2009/01/31 17:49:17  ivan
+// Ensure proper nullification of MVCL if an access exception occurs during the 1st unit of operation
+//
+// Revision 1.172  2009/01/23 11:55:54  bernard
+// copyright notice
+//
+// Revision 1.171  2009/01/11 20:28:33  ivan
+// Remove dead code
+//
 // Revision 1.170  2008/12/24 07:50:16  ivan
 // CSST Fix - Parm 2 alignement check error
 //
@@ -1164,8 +1193,8 @@ U32     n;                              /* 32-bit operand values     */
 
 /*-------------------------------------------------------------------*/
 /* B21A CFC   - Compare and Form Codeword                        [S] */
-/*              (c) Copyright Peter Kuschnerus, 1999-2007            */
-/*              (c) Copyright "Fish" (David B. Trout), 2005-2007     */
+/*              (c) Copyright Peter Kuschnerus, 1999-2009            */
+/*              (c) Copyright "Fish" (David B. Trout), 2005-2009     */
 /*-------------------------------------------------------------------*/
 
 DEF_INST(compare_and_form_codeword)
@@ -1358,6 +1387,7 @@ U32     old;                            /* old value                 */
 
     if (regs->psw.cc == 1)
     {
+        PTT(PTT_CL_CSF,"*CS",regs->GR_L(r1),regs->GR_L(r3),(U32)(addr2 & 0xffffffff));
         regs->GR_L(r1) = CSWAP32(old);
 #if defined(_FEATURE_SIE)
         if(SIE_STATB(regs, IC0, CS1))
@@ -1421,6 +1451,7 @@ U64     old, new;                       /* old, new values           */
 
     if (regs->psw.cc == 1)
     {
+        PTT(PTT_CL_CSF,"*CDS",regs->GR_L(r1),regs->GR_L(r3),(U32)(addr2 & 0xffffffff));
         regs->GR_L(r1) = CSWAP64(old) >> 32;
         regs->GR_L(r1+1) = CSWAP64(old) & 0xffffffff;
 #if defined(_FEATURE_SIE)
@@ -3461,16 +3492,7 @@ U32    *p;                              /* Mainstor pointer          */
 
     /* Load R1 register from second operand */
 
-    /* FOLLOWING BLOCK COMMENTED OUT ISW 20060119 */
-#if 0
-    if ((effective_addr2 & 3) == 0)
-    {
-        p = (U32*)MADDR(effective_addr2, b2, regs, ACCTYPE_READ, regs->psw.pkey);
-        regs->GR_L(r1) = fetch_fw(p);
-    }
-    else
-#endif
-        regs->GR_L(r1) = ARCH_DEP(vfetch4) ( effective_addr2, b2, regs );
+    regs->GR_L(r1) = ARCH_DEP(vfetch4) ( effective_addr2, b2, regs );
 
 } /* end DEF_INST(load) */
 
@@ -3672,6 +3694,7 @@ int     b2;                             /* effective address base    */
 VADR    effective_addr2;                /* effective address         */
 int     i, m, n;                        /* Integer work areas        */
 U32    *p1, *p2;                        /* Mainstor pointers         */
+BYTE   *bp1;                            /* Unaligned maintstor ptr   */
 
     RS(inst, regs, r1, r3, b2, effective_addr2);
 
@@ -3682,14 +3705,27 @@ U32    *p1, *p2;                        /* Mainstor pointers         */
     m = 0x800 - ((VADR_L)effective_addr2 & 0x7ff);
 
     /* Address of operand beginning */
-    p1 = (U32*)MADDR(effective_addr2, b2, regs, ACCTYPE_READ, regs->psw.pkey);
+    bp1 = (BYTE*)MADDR(effective_addr2, b2, regs, ACCTYPE_READ, regs->psw.pkey);
+    p1=(U32*)bp1;
 
     if (likely(n <= m))
     {
         /* Boundary not crossed */
         n >>= 2;
-        for (i = 0; i < n; i++, p1++)
-            regs->GR_L((r1 + i) & 0xF) = fetch_fw (p1);
+#if defined(OPTION_STRICT_ALIGNMENT)
+        if(likely(!(((uintptr_t)effective_addr2)&0x03)))
+        {
+#endif
+            for (i = 0; i < n; i++, p1++)
+                regs->GR_L((r1 + i) & 0xF) = fetch_fw (p1);
+#if defined(OPTION_STRICT_ALIGNMENT)
+        }
+        else
+        {
+            for (i = 0; i < n; i++, bp1+=4)
+                regs->GR_L((r1 + i) & 0xF) = fetch_fw (bp1);
+        }
+#endif
     }
     else
     {
@@ -3913,9 +3949,7 @@ int     orglen1;                        /* Original dest length      */
 
     /* Determine the destination and source addresses */
     addr1 = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
-    SET_GR_A(r1, regs,addr1);
     addr2 = regs->GR(r2) & ADDRESS_MAXWRAP(regs);
-    SET_GR_A(r2, regs,addr2);
 
 
     /* Load padding byte from bits 0-7 of R2+1 register */
@@ -3955,9 +3989,6 @@ int     orglen1;                        /* Original dest length      */
         }
     }
 
-    /* Set the condition code according to the lengths */
-    regs->psw.cc = (len1 < len2) ? 1 : (len1 > len2) ? 2 : 0;
-
     /* Initialize source and dest addresses */
     if (len1)
     {
@@ -3971,6 +4002,22 @@ int     orglen1;                        /* Original dest length      */
         }
         dest = MADDR (addr1, r1, regs, ACCTYPE_WRITE, regs->psw.pkey);
     }
+    else
+    {
+        /* FIXME : We shouldn't have to do that - just to prevent potentially
+           uninitialized variable warning in GCC.. Can't see where it is getting
+           this diagnostic from. ISW 2009/02/04 */
+        source=NULL;
+        dest=NULL;
+    }
+
+    /* Set the condition code according to the lengths */
+    regs->psw.cc = (len1 < len2) ? 1 : (len1 > len2) ? 2 : 0;
+
+    /* Set the registers *after* translating - so that the instruction is properly
+       nullified when there is an access exception on the 1st unit of operation */
+    SET_GR_A(r1, regs,addr1);
+    SET_GR_A(r2, regs,addr2);
 
     while (len1)
     {
@@ -3985,7 +4032,8 @@ int     orglen1;                        /* Original dest length      */
             len3 = NOCROSS2KL(addr1,len1) ? len1 : (int)(0x800 - (addr1 & 0x7FF));
             len4 = NOCROSS2KL(addr2,len2) ? len2 : (int)(0x800 - (addr2 & 0x7FF));
             len = len3 < len4 ? len3 : len4;
-            memcpy (dest, source, len);
+            /* Use concpy to ensure Concurrent block update consistency */
+            concpy (regs, dest, source, len);
         }
 
         /* Check for storage alteration PER event */
@@ -4059,13 +4107,14 @@ DEF_INST(move_long_extended)
 int     r1, r3;                         /* Register numbers          */
 int     b2;                             /* effective address base    */
 VADR    effective_addr2;                /* effective address         */
-int     i;                              /* Loop counter              */
 int     cc;                             /* Condition code            */
 VADR    addr1, addr2;                   /* Operand addresses         */
 GREG    len1, len2;                     /* Operand lengths           */
-BYTE    obyte;                          /* Operand byte              */
 BYTE    pad;                            /* Padding byte              */
-int     cpu_length;                     /* cpu determined length     */
+size_t  cpu_length;                     /* cpu determined length     */
+size_t  copylen;                        /* Length to copy            */
+BYTE    *dest;                          /* Maint storage pointers    */
+size_t  dstlen,srclen;                  /* Page wide src/dst lengths */
 
     RS(inst, regs, r1, r3, b2, effective_addr2);
 
@@ -4088,43 +4137,58 @@ int     cpu_length;                     /* cpu determined length     */
     else
         cpu_length = 0x1000 - (addr2 & 0xFFF);
 
+    dstlen=MIN(cpu_length,len1);
+    srclen=MIN(cpu_length,len2);
+    copylen=MIN(dstlen,srclen);
+
     /* Set the condition code according to the lengths */
     cc = (len1 < len2) ? 1 : (len1 > len2) ? 2 : 0;
 
-    /* Process operands from left to right */
-    for (i = 0; len1 > 0; i++)
+    /* Obtain destination pointer */
+    if(len1==0)
     {
-        /* If cpu determined length has been moved, exit with cc=3 */
-        if (i >= cpu_length)
-        {
-            cc = 3;
-            break;
-        }
+        /* bail out if nothing to do */
+        regs->psw.cc = cc;
+        return;
+    }
 
-        /* Fetch byte from source operand, or use padding byte */
-        if (len2 > 0)
-        {
-            obyte = ARCH_DEP(vfetchb) ( addr2, r3, regs );
-            addr2++;
-            addr2 &= ADDRESS_MAXWRAP(regs);
-            len2--;
-        }
-        else
-            obyte = pad;
+    dest = MADDR (addr1, r1, regs, ACCTYPE_WRITE, regs->psw.pkey);
+    if(copylen!=0)
+    {
+        /* here if we need to copy data */
+        BYTE *source;
+        /* get source frame and copy concurrently */
+        source = MADDR (addr2, r3, regs, ACCTYPE_READ, regs->psw.pkey);
+        concpy(regs,dest,source,copylen);
+        /* Adjust operands */
+        addr2+=copylen;
+        len2-=copylen;
+        addr1+=copylen;
+        len1-=copylen;
 
-        /* Store the byte in the destination operand */
-        ARCH_DEP(vstoreb) ( obyte, addr1, r1, regs );
-        addr1++;
-        addr1 &= ADDRESS_MAXWRAP(regs);
-        len1--;
+        /* Adjust length & pointers for this cycle */
+        dest+=copylen;
+        dstlen-=copylen;
+        srclen-=copylen;
+    }
+    if(srclen==0 && dstlen!=0)
+    {
+        /* here if we need to pad the destination */
+        memset(dest,pad,dstlen);
 
-        /* Update the registers */
-        SET_GR_A(r1, regs,addr1);
-        SET_GR_A(r1+1, regs,len1);
-        SET_GR_A(r3, regs,addr2);
-        SET_GR_A(r3+1, regs,len2);
+        /* Adjust destination operands */
+        addr1+=dstlen;
+        len1-=dstlen;
+    }
 
-    } /* end for(i) */
+    /* Update the registers */
+    SET_GR_A(r1, regs,addr1);
+    SET_GR_A(r1+1, regs,len1);
+    SET_GR_A(r3, regs,addr2);
+    SET_GR_A(r3+1, regs,len2);
+    /* if len1 != 0 then set CC to 3 to indicate 
+       we have reached end of CPU dependent length */
+    if(len1>0) cc=3;
 
     regs->psw.cc = cc;
 

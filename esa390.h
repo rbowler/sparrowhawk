@@ -1,63 +1,10 @@
-/* ESA390.H     (c) Copyright Roger Bowler, 1994-2007                */
+/* ESA390.H     (c) Copyright Roger Bowler, 1994-2010                */
 /*              ESA/390 Data Areas                                   */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: esa390.h,v 1.103 2008/12/25 21:30:31 ivan Exp $
-//
-// $Log: esa390.h,v $
-// Revision 1.103  2008/12/25 21:30:31  ivan
-// STSI Update part II : Add secondary CPU capacity in 1.2.2 SYSIB
-//
-// Revision 1.102  2008/12/25 21:14:31  ivan
-// STSI Update part 1 : add CPU Type percentage fields in 1.1.1 SYSIB
-//
-// Revision 1.101  2008/12/22 16:31:49  jj
-// *** empty log message ***
-//
-// Revision 1.100  2008/12/22 16:30:47  jj
-// Fix EDAT typo
-//
-// Revision 1.99  2008/12/22 16:22:19  jj
-// EDAT definitions
-//
-// Revision 1.98  2008/12/22 15:20:12  jj
-// Some EDAT definitions
-//
-// Revision 1.97  2008/12/08 20:38:20  ivan
-// Fix SIE DAT Issue with ESA/390 Guest on z/Arch host with >2GB of storage
-//
-// Revision 1.96  2008/03/04 17:09:14  rbowler
-// Add CRT,CGRT,CIT,CGIT,CLRT,CLGRT,CLFIT,CLGIT instructions
-//
-// Revision 1.95  2008/02/28 10:11:50  rbowler
-// STFL bit settings for new features in zPOP-06
-//
-// Revision 1.94  2007/06/23 00:04:09  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.93  2007/06/02 16:23:33  rbowler
-// IUCV external interrupt code and submask definitions
-//
-// Revision 1.92  2007/04/27 10:50:40  rbowler
-// STFL bit 27 for MVCOS
-//
-// Revision 1.91  2007/04/26 22:27:48  rbowler
-// Conditional SSKE feature (non SIE-mode)
-//
-// Revision 1.90  2007/04/24 16:34:41  rbowler
-// Define feature macros and STFL bit settings for new features in zPOP-05
-//
-// Revision 1.89  2007/02/01 16:53:51  rbowler
-// Additional STFL bit definitions
-//
-// Revision 1.88  2006/12/20 04:26:19  gsmith
-// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
-//
-// Revision 1.87  2006/12/08 09:43:20  jj
-// Add CVS message log
-//
+// $Id: esa390.h 5631 2010-02-14 22:26:40Z rbowler $
 
 #ifndef _ESA390_H
 #define _ESA390_H
@@ -662,7 +609,7 @@ typedef struct _LSED {
 #define CC_CLOCK_SET    0               /* Clock in set state        */
 #define CC_CLOCK_NOTSET 1               /* Clock in not-set state    */
 #define CC_CLOCK_ERROR  2               /* Clock in error state      */
-#define CC_CLOCK_STOP   3               /* Clock in stopped state or 
+#define CC_CLOCK_STOP   3               /* Clock in stopped state or
                                            not-operational state     */
 
 /* SIGP order codes */
@@ -1000,6 +947,9 @@ typedef struct _PSA_900 {               /* Prefixed storage area     */
 #define EXT_IUCV_INTERRUPT                              0x4000
 #if defined(FEATURE_ECPSVM)
 #define EXT_VINTERVAL_TIMER_INTERRUPT                   0x0100
+#endif
+#if defined(FEATURE_VM_BLOCKIO)
+#define EXT_BLOCKIO_INTERRUPT                           0x2603
 #endif
 
 /* Macros for classifying CCW operation codes */
@@ -1339,6 +1289,7 @@ typedef struct _MBK {
 #define PLO_CSTSTX              23      /* C/S/TS              ESAME */
 
 /* Bit definitions for Store Facilities List instruction */
+/* Byte STFL_0: STFL/STFLE bits 0-7 */
 #define STFL_0_N3               0x80    /* Instructions marked N3 in
                                            the reference summary are
                                            available in ESA/390 mode */
@@ -1355,6 +1306,7 @@ typedef struct _MBK {
                                            is installed              */
 #define STFL_0_STFL_EXTENDED    0x01    /* Store facility list    @Z9
                                            extended is installed  @Z9*/
+/* Byte STFL_1: STFL/STFLE bits 8-15 */
 #define STFL_1_ENHANCED_DAT     0x80    /* Enhanced-DAT facility  208
                                            is installed           208*/
 #define STFL_1_SENSE_RUN_STATUS 0x40    /* Sense running status   @Z9
@@ -1363,6 +1315,7 @@ typedef struct _MBK {
                                            is installed           407*/
 #define STFL_1_CONFIG_TOPOLOGY  0x10    /* STSI-enhancement for
                                            configuration topology    */
+/* Byte STFL_2: STFL/STFLE bits 16-23 */
 #define STFL_2_TRAN_FAC2        0x80    /* Extended translation
                                            facility 2 is installed   */
 #define STFL_2_MSG_SECURITY     0x40    /* Message security assist
@@ -1379,6 +1332,7 @@ typedef struct _MBK {
                                            facility 3 is installed   */
 #define STFL_2_HFP_UNNORM_EXT   0x01    /* HFP unnormalized extension
                                            facility is installed  @Z9*/
+/* Byte STFL_3: STFL/STFLE bits 24-31 */
 #define STFL_3_ETF2_ENHANCEMENT 0x80    /* Extended translation   @Z9
                                            facility 2 enhancement @Z9*/
 #define STFL_3_STORE_CLOCK_FAST 0x40    /* Store clock fast       @Z9
@@ -1393,6 +1347,7 @@ typedef struct _MBK {
                                            facility 3 enhancement @Z9*/
 #define STFL_3_EXTRACT_CPU_TIME 0x01    /* Extract CPU time facility
                                            is installed           407*/
+/* Byte STFL_4: STFLE bits 32-39 */
 #define STFL_4_CSSF             0x80    /* Compare-and-Swap-and-Store
                                            facility is installed     */
 #define STFL_4_CSSF2            0x40    /* Compare-and-Swap-and-Store
@@ -1401,7 +1356,10 @@ typedef struct _MBK {
                                            facility is installed  208*/
 #define STFL_4_EXECUTE_EXTN     0x10    /* Execute-Extensions     208
                                            facility is installed  208*/
-#define STFL_5_FPS_ENHANCEMENT  0x40    /* Floating point support    
+/* Byte STFL_5: STFLE bits 40-47 */
+#define STFL_5_SET_PROG_PARAM   0x80    /* 40:Set-Program-Parameter
+                                           facility installed (ESAME)*/
+#define STFL_5_FPS_ENHANCEMENT  0x40    /* Floating point support
                                            enhancements (FPR-GR-loading
                                            FPS-sign-handling, and
                                            DFP-rounding) installed   */
@@ -1409,6 +1367,13 @@ typedef struct _MBK {
                                            (DFP) facility            */
 #define STFL_5_DFP_HPERF        0x10    /* DFP has high performance  */
 #define STFL_5_PFPO             0x08    /* PFPO instruction installed*/
+/* Byte STFL_6: STFLE bits 48-55 */
+/* Byte STFL_7: STFLE bits 56-63 */
+/* Byte STFL_8: STFLE bits 64-71 */
+#define STFL_8_CPU_MEAS_COUNTER 0x10    /* 67:CPU-measurement counter
+                                           facility installed (ESAME)*/
+#define STFL_8_CPU_MEAS_SAMPLNG 0x08    /* 68:CPU-measurement sampling
+                                           facility installed (ESAME)*/
 
 /* Bit definitions for the Vector Facility */
 #define VSR_M    0x0001000000000000ULL  /* Vector mask mode bit      */
@@ -1913,10 +1878,11 @@ typedef struct _ZPB2 {
 #define LKPG_GPR0_RESV          0x0000FD00
 
 #define STSI_GPR0_FC_MASK       0xF0000000
-#define STSI_GPR0_FC_CURRENT    0x00000000
+#define STSI_GPR0_FC_CURRNUM    0x00000000
 #define STSI_GPR0_FC_BASIC      0x10000000
 #define STSI_GPR0_FC_LPAR       0x20000000
 #define STSI_GPR0_FC_VM         0x30000000
+#define STSI_GPR0_FC_CURRINFO   0xF0000000
 #define STSI_GPR0_SEL1_MASK     0x000000FF
 #define STSI_GPR0_RESERVED      0x0FFFFF00
 
@@ -1926,65 +1892,79 @@ typedef struct _ZPB2 {
 typedef struct _SYSIB111 {              /* Basic Machine Config      */
         BYTE    flag1;                  /* 1.1.1 SYSIB Flag          */
 #define SYSIB111_PFLAG  0x80            /* Type percentage present   */
-        BYTE    resv1[31];              /* Reserved                  */
-        BYTE    manufact[4*4];          /* Manufacturer              */
-        BYTE    type[4*1];              /* Type                      */
-        BYTE    resv2[4*3];             /* Reserved                  */
-        BYTE    modcapaid[4*4];         /* Model capacity identifier */
-        BYTE    seqc[4*4];              /* Sequence Code             */
-        BYTE    plant[4*1];             /* Plant of manufacture      */
-        BYTE    model[4*4];             /* System Model              */
-        BYTE    mpci[4*4];              /* Model Perm Capacity ID    */
-        BYTE    mtci[4*4];              /* Model Temp Capacity ID    */
-        U32     mcaprating;             /* Model Capacity Rating     */
-        U32     mpcaprating;            /* Model Perm Capacity Rating*/
-        U32     mtcaprating;            /* Model temp Capacity Rating*/
+        BYTE    resv1[3];               /* Reserved                  */
+        FWORD   resv2[7];               /* Reserved                  */
+        BYTE    manufact[16];           /* Manufacturer              */
+        BYTE    type[4];                /* Type                      */
+        FWORD   resv3[3];               /* Reserved                  */
+        BYTE    modcapaid[16];          /* Model capacity identifier */
+        BYTE    seqc[16];               /* Sequence Code             */
+        BYTE    plant[4];               /* Plant of manufacture      */
+        BYTE    model[16];              /* System Model              */
+        BYTE    mpci[16];               /* Model Perm Capacity ID    */
+        BYTE    mtci[16];               /* Model Temp Capacity ID    */
+        FWORD   mcaprating;             /* Model Capacity Rating     */
+        FWORD   mpcaprating;            /* Model Perm Capacity Rating*/
+        FWORD   mtcaprating;            /* Model temp Capacity Rating*/
         BYTE    typepct[5];             /* Secondary CPU types pct   */
     }   SYSIB111;
 
 typedef struct _SYSIB121 {              /* Basic Machine CPU         */
-        BYTE    resv1[4*20];            /* Reserved                  */
-        BYTE    seqc[4*4];              /* Sequence Code             */
-        BYTE    plant[4*1];             /* Plant of manufacture      */
-        BYTE    resv2[2*1];             /* Reserved                  */
-        BYTE    cpuad[2*1];             /* CPU address               */
+        FWORD   resv1[20];              /* Reserved                  */
+        BYTE    seqc[16];               /* Sequence Code             */
+        BYTE    plant[4];               /* Plant of manufacture      */
+        HWORD   resv2;                  /* Reserved                  */
+        HWORD   cpuad;                  /* CPU address               */
     }   SYSIB121;
 
 typedef struct _SYSIB122 {              /* Basic Machine CPUs        */
-        BYTE    resv1[4*7];             /* Reserved                  */
-        BYTE    sccap[4*1];             /* Secondary CPU Capability  */
-        BYTE    cap[4*1];               /* CPU capability            */
-        BYTE    totcpu[2*1];            /* Total CPU count           */
-        BYTE    confcpu[2*1];           /* Configured CPU count      */
-        BYTE    sbcpu[2*1];             /* Standby CPU count         */
-        BYTE    resvcpu[2*1];           /* Reserved CPU count        */
-        BYTE    mpfact[2*MAX_CPU_ENGINES];  /* MP factors            */
+        BYTE    format;                 /* Format 0 or 1             */
+        BYTE    resv1;                  /* Reserved                  */
+        HWORD   accoff;                 /* Offset to accap field     */
+        FWORD   resv2[6];               /* Reserved                  */
+        FWORD   sccap;                  /* Secondary CPU Capability  */
+        FWORD   cap;                    /* CPU capability            */
+        HWORD   totcpu;                 /* Total CPU count           */
+        HWORD   confcpu;                /* Configured CPU count      */
+        HWORD   sbcpu;                  /* Standby CPU count         */
+        HWORD   resvcpu;                /* Reserved CPU count        */
+        HWORD   mpfact[MAX_CPU_ENGINES-1];  /* MP factors            */
+#if ((MAX_CPU_ENGINES-1) % 2)           /* if prev is odd #of HWORDs */
+        HWORD   resv3;                  /* then need some alignment  */
+#endif
+        FWORD   accap;                  /* Alternate CPU Capability  */
+        HWORD   ampfact[MAX_CPU_ENGINES-1]; /* Alternate MP factors  */
+#if ((MAX_CPU_ENGINES-1) % 2)           /* if prev is odd #of HWORDs */
+        HWORD   resv4;                  /* then need some alignment  */
+#endif
     }   SYSIB122;
 
 typedef struct _SYSIB221 {              /* Logical partition CPU     */
-        BYTE    resv1[4*20];            /* Reserved                  */
-        BYTE    seqc[4*4];              /* Logical CPU Sequence Code */
-        BYTE    lcpuid[2*1];            /* Logical CPU ID            */
-        BYTE    cpuad[2*1];             /* CPU address               */
+        FWORD   resv1[20];              /* Reserved                  */
+        BYTE    seqc[16];               /* Logical CPU Sequence Code */
+        BYTE    plant[4];               /* Plant of manufacture      */
+        HWORD   lcpuid;                 /* Logical CPU ID            */
+        HWORD   cpuad;                  /* CPU address               */
     }   SYSIB221;
 
 typedef struct _SYSIB222 {              /* Logical partition CPUs    */
-        BYTE    resv1[4*8];             /* Reserved                  */
-        BYTE    lparnum[2*1];           /* LPAR number               */
-        BYTE    resv2[1*1];             /* Reserved                  */
-        BYTE    lcpuc[1*1];             /* Logical CPU characteristic*/
+        FWORD   resv1[8];               /* Reserved                  */
+        HWORD   lparnum;                /* LPAR number               */
+        BYTE    resv2;                  /* Reserved                  */
+        BYTE    lcpuc;                  /* Logical CPU characteristic*/
 #define SYSIB222_LCPUC_DEDICATED    0x80
 #define SYSIB222_LCPUC_SHARED       0x40
 #define SYSIB222_LCPUC_CAPPED       0x20
-        BYTE    totcpu[2*1];            /* Total CPU count           */
-        BYTE    confcpu[2*1];           /* Configured CPU count      */
-        BYTE    sbcpu[2*1];             /* Standby CPU count         */
-        BYTE    resvcpu[2*1];           /* Reserved CPU count        */
-        BYTE    lparname[4*2];          /* LPAR name                 */
-        BYTE    lparcaf[4*1];           /* LPAR capability adjustment*/
-        BYTE    resv3[4*4];             /* Reserved                  */
-        BYTE    dedcpu[2*1];            /* Dedicated CPU count       */
-        BYTE    shrcpu[2*1];            /* Shared CPU count          */
+        HWORD   totcpu;                 /* Total CPU count           */
+        HWORD   confcpu;                /* Configured CPU count      */
+        HWORD   sbcpu;                  /* Standby CPU count         */
+        HWORD   resvcpu;                /* Reserved CPU count        */
+        BYTE    lparname[8];            /* LPAR name                 */
+        FWORD   lparcaf;                /* LPAR capability adjustment*/
+        FWORD   mdep[2];                /* Model Dependent           */
+        FWORD   resv3[2];               /* Reserved                  */
+        HWORD   dedcpu;                 /* Dedicated CPU count       */
+        HWORD   shrcpu;                 /* Shared CPU count          */
     }   SYSIB222;
 
 typedef struct _SYSIB322 {              /* Virtual Machines CPUs     */
@@ -1994,14 +1974,45 @@ typedef struct _SYSIB322 {              /* Virtual Machines CPUs     */
         BYTE    vmdb[4*16];             /* Virtual Machine desc block*/
     }   SYSIB322;
 
+typedef struct _SYSIB1512 {             /* Configuration Topology    */
+        HWORD   resv1;                  /* Reserved                  */
+        HWORD   len;                    /* Length                    */
+        BYTE    mag[6];                 /* Magnitudes 6, 5, ... 1    */
+        BYTE    resv2;                  /* Reserved                  */
+        BYTE    mnest;                  /* Nesting Level             */
+        FWORD   resv3;                  /* Reserved                  */
+        BYTE    tles[FLEXIBLE_ARRAY];   /* Topology List Entries     */
+    }   SYSIB1512;
+
+typedef struct _TLECNTNR {              /* Container TLE             */
+        BYTE    nl;                     /* Nesting Level             */
+        BYTE    resv1[3];               /* Reserved                  */
+        BYTE    resv2;                  /* Reserved                  */
+        BYTE    resv3[2];               /* Reserved                  */
+        BYTE    cntnrid;                /* Container Id              */
+    }   TLECNTNR;
+
+typedef struct _TLECPU {                /* CPU TLE                   */
+        BYTE    nl;                     /* Nesting Level             */
+        BYTE    resv1[3];               /* Reserved                  */
+        BYTE    flags;                  /* Flags                     */
+        BYTE    cputype;                /* CPU Type                  */
+        U16     cpuadorg;               /* CPU Address Origin        */
+        DW      cpumask;                /* CPU Mask                  */
+    }   TLECPU;
+
+#define CPUTLE_FLAG_RESERVED    0xF8
+#define CPUTLE_FLAG_DEDICATED   0x04
+#define CPUTLE_FLAG_VPOLARMASK  0x03
+
 typedef struct _SYSIBVMDB {             /* Virtual Machine Desc Block*/
         BYTE    resv1[4*1];             /* Reserved                  */
-        BYTE    totcpu[2*1];            /* Total CPU count           */
-        BYTE    confcpu[2*1];           /* Configured CPU count      */
-        BYTE    sbcpu[2*1];             /* Standby CPU count         */
-        BYTE    resvcpu[2*1];           /* Reserved CPU count        */
-        BYTE    vmname[4*2];            /* VM userid                 */
-        BYTE    vmcaf[4*1];             /* VM capability adjustment  */
+        HWORD   totcpu;                 /* Total CPU count           */
+        HWORD   confcpu;                /* Configured CPU count      */
+        HWORD   sbcpu;                  /* Standby CPU count         */
+        HWORD   resvcpu;                /* Reserved CPU count        */
+        BYTE    vmname[8];              /* VM userid                 */
+        FWORD   vmcaf;                  /* VM capability adjustment  */
         BYTE    cpid[4*4];              /* Control Program ID        */
     }   SYSIBVMDB;
 

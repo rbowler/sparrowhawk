@@ -2,9 +2,13 @@
 # Makefile for Hercules S/370, ESA/390 and z/Architecture emulator
 # Process this file with 'automake' to produce Makefile.in
 #
-# $Id: Makefile.am,v 1.186 2008/12/29 11:03:10 jj Exp $
+# $Id: Makefile.am 5617 2010-02-09 00:00:41Z fish $
 #
-# $Log: Makefile.am,v $
+# $Log$
+# Revision 1.187  2009/01/18 00:52:19  jmaynard
+# Fix Gentoo reported bug: unable to do multithreaded "make install" reliably
+# if --enable-setuid-hercifc is specified.
+#
 # Revision 1.186  2008/12/29 11:03:10  jj
 # Move HMC disk I/O functions to scedasd.c
 #
@@ -129,6 +133,7 @@ dynamic_SRC        = dyngui.c   \
                      hdteq.c
 
 dyndev_SRC         = commadpt.c  \
+                     comm3705.c  \
                      console.c   \
                      cardpch.c   \
                      cardrdr.c   \
@@ -215,6 +220,7 @@ endif
              hdteq.la    \
              hdt1403.la  \
              hdt2703.la  \
+             hdt3705.la  \
              hdt3088.la  \
              hdt3270.la  \
              hdt3420.la  \
@@ -268,7 +274,7 @@ if OPTION_DYNAMIC_LOAD
   hdteq_la_LDFLAGS   = $(DYNMOD_LD_FLAGS)
   hdteq_la_LIBADD    = $(DYNMOD_LD_ADD)
 
-  hdt1403_la_SOURCES = printer.c
+  hdt1403_la_SOURCES = printer.c sockdev.c
   hdt1403_la_LDFLAGS = $(DYNMOD_LD_FLAGS)
   hdt1403_la_LIBADD  = $(DYNMOD_LD_ADD)
 
@@ -279,6 +285,10 @@ if OPTION_DYNAMIC_LOAD
   hdt2703_la_SOURCES = commadpt.c
   hdt2703_la_LDFLAGS = $(DYNMOD_LD_FLAGS)
   hdt2703_la_LIBADD  = $(DYNMOD_LD_ADD)
+
+  hdt3705_la_SOURCES = comm3705.c
+  hdt3705_la_LDFLAGS = $(DYNMOD_LD_FLAGS)
+  hdt3705_la_LIBADD  = $(DYNMOD_LD_ADD)
 
   hdt3088_la_SOURCES = ctc_lcs.c ctc_ctci.c ctcadpt.c w32ctca.c tuntap.c
   hdt3088_la_LDFLAGS = $(DYNMOD_LD_FLAGS)
@@ -407,6 +417,7 @@ endif
                        diagnose.c   \
                        diagmssf.c   \
                        vm.c         \
+                       vmd250.c     \
                        channel.c    \
                        external.c   \
                        float.c      \
@@ -427,6 +438,7 @@ endif
                        cgibin.c     \
                        loadparm.c   \
                        hsccmd.c     \
+                       cmdtab.c     \
                        hao.c        \
                        hscmisc.c    \
                        sr.c         \
@@ -472,6 +484,7 @@ else
              -dlopen hdt1403.la   \
              -dlopen hdt3420.la   \
              -dlopen hdt2703.la   \
+             -dlopen hdt3705.la   \
              -dlopen hdt3088.la   \
              -dlopen hdt3270.la   \
              -dlopen hdt3505.la   \
@@ -485,6 +498,7 @@ else
              hdt1403.la   \
              hdt3420.la   \
              hdt2703.la   \
+             hdt3705.la   \
              hdt3088.la   \
              hdt3270.la   \
              hdt3505.la   \
@@ -630,6 +644,7 @@ EXTRA_DIST = autoconf/config.rpath \
              cckdfix.c             \
              README.COMMADPT       \
              README.CVS            \
+             README.DYNMOD         \
              README.ECPSVM         \
              README.HAO            \
              README.HDL            \
@@ -642,6 +657,8 @@ EXTRA_DIST = autoconf/config.rpath \
              CHANGES               \
              RELEASE.NOTES         \
              README.MSVC           \
+             README.SUN            \
+             _TODO.txt             \
              makefile.msvc         \
              makefile-dllmod.msvc  \
              msvc.makefile.includes/BZIP2_DIR.msvc    \
@@ -665,6 +682,7 @@ EXTRA_DIST = autoconf/config.rpath \
              msvc.makefile.includes/ZLIB_FLAGS.msvc   \
              msvc.makefile.includes/ZLIB_RULES.msvc   \
              makefile.bat          \
+             dynmake.bat           \
              Hercules.dsp          \
              Hercules.dsw          \
              Hercules.vcproj       \
@@ -720,11 +738,13 @@ noinst_HEADERS = fishhang.h     \
                  scsitape.h     \
                  logger.h       \
                  commadpt.h     \
+                 comm3705.h     \
                  cache.h        \
                  ecpsvm.h       \
                  memrchr.h      \
                  shared.h       \
                  hscutl.h       \
+                 cmdtab.h       \
                  hdl.h          \
                  crypto.h       \
                  sockdev.h      \
@@ -754,6 +774,7 @@ noinst_HEADERS = fishhang.h     \
                  hercwind.h     \
                  getopt.h       \
                  w32mtio.h      \
+                 vmd250.h       \
                  $(extra_dynamic_SRC)
 
 cckd: cckd2ckd$(EXEEXT)  \
@@ -781,21 +802,12 @@ cckd: cckd2ckd$(EXEEXT)  \
 tar: dist
 
 install-exec-local:
-if SETUID_HERCIFC
-	chown root $(DESTDIR)$(bindir)/hercifc
-if HERCIFC_GROUPSET
-	chgrp $(HERCIFC_GROUPNAME) $(DESTDIR)$(bindir)/hercifc
-endif
-	chmod 0750 $(DESTDIR)$(bindir)/hercifc
-	chmod +s   $(DESTDIR)$(bindir)/hercifc
-	rm                             hercifc
-endif
 
 install-exec-hook:
+if BUILD_SHARED
 	rm -f $(DESTDIR)$(libdir)/libherc*.a
 	rm -f $(DESTDIR)$(modexecdir)/dyn*.a
 	rm -f $(DESTDIR)$(modexecdir)/hdt*.a
-if BUILD_SHARED
 else
 	rm -f $(DESTDIR)$(libdir)/libherc*
 endif
@@ -810,6 +822,15 @@ endif
 	(cd $(DESTDIR)$(bindir); @LN_S@ ./dasdcopy$(EXEEXT) cfba2fba$(EXEEXT))
 	rm -f $(DESTDIR)$(bindir)/cckd2ckd$(EXEEXT)
 	(cd $(DESTDIR)$(bindir); @LN_S@ ./dasdcopy$(EXEEXT) cckd2ckd$(EXEEXT))
+if SETUID_HERCIFC
+	chown root $(DESTDIR)$(bindir)/hercifc
+if HERCIFC_GROUPSET
+	chgrp $(HERCIFC_GROUPNAME) $(DESTDIR)$(bindir)/hercifc
+endif
+	chmod 0750 $(DESTDIR)$(bindir)/hercifc
+	chmod +s   $(DESTDIR)$(bindir)/hercifc
+	rm                             hercifc
+endif
 
 uninstall-local:
 

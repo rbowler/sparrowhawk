@@ -1,9 +1,9 @@
-/* DEVTYPE.H    (c) Copyright Jan Jaeger, 1999-2007                  */
+/* DEVTYPE.H    (c) Copyright Jan Jaeger, 1999-2009                  */
 /*              Hercules Device Definitions                          */
 
-// $Id: devtype.h,v 1.21 2007/11/21 22:48:45 fish Exp $
+// $Id: devtype.h 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: devtype.h,v $
+// $Log$
 // Revision 1.21  2007/11/21 22:48:45  fish
 // New BEGIN_DEVICE_CLASS_QUERY macro
 //

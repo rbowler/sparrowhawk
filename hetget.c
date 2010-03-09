@@ -1,7 +1,7 @@
 /*
 || ----------------------------------------------------------------------------
 ||
-|| HETGET.C     (c) Copyright Leland Lucius, 2000-2007
+|| HETGET.C     (c) Copyright Leland Lucius, 2000-2009
 ||              Released under terms of the Q Public License.
 ||
 || Extract files from an HET file
@@ -9,9 +9,9 @@
 || ----------------------------------------------------------------------------
 */
 
-// $Id: hetget.c,v 1.26 2008/11/04 04:50:46 fish Exp $
+// $Id: hetget.c 5374 2009-06-02 06:19:00Z fish $
 //
-// $Log: hetget.c,v $
+// $Log$
 // Revision 1.26  2008/11/04 04:50:46  fish
 // Ensure consistent utility startup
 //
@@ -328,6 +328,11 @@ getrecord( HETB *hetb )
         recidx = 0;
         if( opts.recfm & O_VARIABLE )
         {
+            /* protect against a corrupt (short) block */
+            if ( rc < 8 )
+            {
+                return ( -1 );
+            }
             recidx = 4;
         }
     }
@@ -347,6 +352,17 @@ getrecord( HETB *hetb )
     else if( opts.recfm & O_VARIABLE )
     {
         reclen = rdw_length( recptr );
+
+        /* protect against corrupt (short) block */
+        if ( reclen + recidx > blklen )
+        {
+            return (-1);
+        }
+        /* protect against a corrupt (less than 4) RDW */
+        if ( reclen < 4 )
+        {
+            return (-1);
+        }
     }
     else
     {
@@ -553,7 +569,7 @@ getfile( HETB *hetb, FILE *outf )
             */
             if( opts.flags & O_STRIP )
             {
-                while( ptr[ rc - 1 ] == ' ' )
+                while( rc > 0 && ptr[ rc - 1 ] == ' ' )
                 {
                     rc--;
                 }
@@ -679,6 +695,7 @@ main( int argc, char *argv[] )
     if( argc < 3 )
     {
         printf( "Must specify input tape, output file, and file #\n" );
+        printf( "Use -h option for more help\n" );
         exit( 1 );
     }
 

@@ -1,7 +1,7 @@
 ////////////////////////////////////////////////////////////////////////////////////
 // SCSITAPE.H   --   Hercules SCSI tape handling module
 //
-// (c) Copyright "Fish" (David B. Trout), 2005-2007. Released under
+// (c) Copyright "Fish" (David B. Trout), 2005-2009. Released under
 // the Q Public License (http://www.hercules-390.org/herclic.html)
 // as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
@@ -12,9 +12,9 @@
 //
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: scsitape.h,v 1.20 2008/03/25 11:41:31 fish Exp $
+// $Id: scsitape.h 5126 2009-01-23 13:05:56Z bernard $
 //
-// $Log: scsitape.h,v $
+// $Log$
 // Revision 1.20  2008/03/25 11:41:31  fish
 // SCSI TAPE MODS part 1: groundwork: non-functional changes:
 // rename some functions, comments, general restructuring, etc.

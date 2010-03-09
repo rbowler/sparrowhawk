@@ -1,9 +1,6 @@
-// $Id: cckdfix.c,v 1.7 2006/12/08 09:43:17 jj Exp $
+// $Id: cckdfix.c 4102 2006-12-08 09:43:35Z jj $
 //
-// $Log: cckdfix.c,v $
-// Revision 1.7  2006/12/08 09:43:17  jj
-// Add CVS message log
-//
+// $Log$
 
 #include "hercules.h"
 int main ( int argc, char *argv[])

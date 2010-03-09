@@ -1,9 +1,9 @@
-/* W32DL.H      (c) Copyright Jan Jaeger, 2004-2007                  */
+/* W32DL.H      (c) Copyright Jan Jaeger, 2004-2009                  */
 /*              dlopen compat                                        */
 
-// $Id: w32dl.h,v 1.6 2007/06/23 00:04:19 ivan Exp $
+// $Id: w32dl.h 5127 2009-01-23 13:25:01Z bernard $
 //
-// $Log: w32dl.h,v $
+// $Log$
 // Revision 1.6  2007/06/23 00:04:19  ivan
 // Update copyright notices to include current year (2007)
 //

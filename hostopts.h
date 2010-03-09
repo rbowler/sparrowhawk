@@ -1,8 +1,7 @@
-/*-------------------------------------------------------------------*/
-/* HOSTOPTS.H   --   HOST-specific features and options              */
-/*-------------------------------------------------------------------*/
+/* HOSTOPTS.H   (c) Copyright "Fish" (David B. Trout), 2005-2009     */
+/*              Host-specific features and options for Hercules      */
 
-// $Id: hostopts.h,v 1.18 2008/08/29 19:06:42 fish Exp $
+// $Id: hostopts.h 5586 2009-12-31 10:29:11Z rbowler $
 
 //    This header file #included by 'featall.h' and 'hercules.h'
 
@@ -36,23 +35,6 @@
 
    Please. :)
 */
-
-// $Log: hostopts.h,v $
-// Revision 1.18  2008/08/29 19:06:42  fish
-// Panel display extended cursor handling (Windows only)
-//
-// Revision 1.17  2008/02/15 22:51:39  rbowler
-// Move Solaris specific definition of INADDR_NONE to hostopts.h
-//
-// Revision 1.16  2008/02/07 00:29:04  rbowler
-// Solaris build support by Jeff Savit
-//
-// Revision 1.15  2007/02/26 15:34:46  fish
-// remove stupid fish prt spooler crap
-//
-// Revision 1.14  2006/12/08 09:43:26  jj
-// Add CVS message log
-//
 
 #ifndef _HOSTOPTS_H
 #define _HOSTOPTS_H
@@ -209,33 +191,22 @@
 #define MAX_DEVICE_THREADS          0   /* (0 == unlimited)          */
 #undef  MIXEDCASE_FILENAMES_ARE_UNIQUE  /* ("Foo" same as "fOo"!!)   */
 
-#if 0
-  // I can't recall the reason (if there even WAS one!) why Windows's
-  // priority settings needed to be set to the below values, so I'm
-  // going to disable them and use more reasonable values instead,
-  // especially since a low TOD thread priority causes DOS/VS's clock
-  // to go kerflunky! (Fish)
-  #define DEFAULT_HERCPRIO    0
-  #define DEFAULT_TOD_PRIO    0
-  #define DEFAULT_CPU_PRIO    0
-  #define DEFAULT_DEV_PRIO   -8
-#else
-  // These look more reasonable to me (and are the same default values
-  // used by all other hosts too) so we'll try them for a while. (Fish)
-  #define DEFAULT_HERCPRIO    0
-  #define DEFAULT_TOD_PRIO  -20
-  #define DEFAULT_CPU_PRIO   15
-  #define DEFAULT_DEV_PRIO    8
-#endif
+#define DEFAULT_HERCPRIO    0
+#define DEFAULT_TOD_PRIO  -20
+#define DEFAULT_CPU_PRIO   15
+#define DEFAULT_DEV_PRIO    8
 
 #ifdef _MSVC_
   #define HOW_TO_IMPLEMENT_SH_COMMAND   USE_W32_POOR_MANS_FORK
+  #define SET_CONSOLE_CURSOR_SHAPE_METHOD CURSOR_SHAPE_WINDOWS_NATIVE
+  #define OPTION_EXTCURS                /* Extended cursor handling  */
 #else
   #define HOW_TO_IMPLEMENT_SH_COMMAND   USE_FORK_API_FOR_SH_COMMAND
+  #define SET_CONSOLE_CURSOR_SHAPE_METHOD CURSOR_SHAPE_VIA_SPECIAL_LINUX_ESCAPE
+  #undef  OPTION_EXTCURS                /* Normal cursor handling    */
 #endif
-#define SET_CONSOLE_CURSOR_SHAPE_METHOD CURSOR_SHAPE_WINDOWS_NATIVE
-#define OPTION_EXTCURS                  /* Extended cursor handling  */
 
+#define IsEventSet(h)   (WaitForSingleObject(h,0) == WAIT_OBJECT_0)
 
 /*-------------------------------------------------------------------*/
 /* Hard-coded Solaris-specific features and options...               */
@@ -325,9 +296,9 @@
 
 
 /*-------------------------------------------------------------------*/
-/* GNU 'C' (e.g. Linux) options...                                   */
+/* GNU Linux options...                                              */
 /*-------------------------------------------------------------------*/
-#elif defined(__GNUC__)                 /* E.g. Linux options        */
+#elif defined(__gnu_linux__)            /* GNU Linux options         */
 
 #define DLL_IMPORT   extern
 #define DLL_EXPORT
@@ -361,10 +332,12 @@
 /*-------------------------------------------------------------------*/
 #else                                   /* "Other platform" options  */
 
+#warning hostopts.h: unknown target platform: defaulting to generic platform settings.
+
 #define DLL_IMPORT   extern             /* (a safe default)          */
 #define DLL_EXPORT
 
-#undef TUNTAP_IFF_RUNNING_NEEDED        /* (tuntape support unknown) */
+#undef TUNTAP_IFF_RUNNING_NEEDED        /* (tuntap support unknown)  */
 #undef  OPTION_SCSI_TAPE                /* (NO SCSI tape support)    */
 #undef  OPTION_SCSI_ERASE_TAPE          /* (NOT supported)           */
 #undef  OPTION_SCSI_ERASE_GAP           /* (NOT supported)           */

@@ -1,13 +1,13 @@
 /////////////////////////////////////////////////////////////////////////////////////////
 // HercVer.rc  --  defines the Windows resources to be linked into the product
-//                 (c) Copyright "Fish" (David B. Trout), 2005
+//                 (c) Copyright "Fish" (David B. Trout), 2009
 //                 Released under the Q Public License as modifications to Hercules.
 //                 (http://www.hercules-390.org/herclic.html)
 /////////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: hercver.rc,v 1.7 2008/05/17 13:45:07 ivan Exp $
+// $Id: hercver.rc 5604 2010-02-05 14:07:42Z jmaynard $
 //
-// $Log: hercver.rc,v $
+// $Log$
 // Revision 1.7  2008/05/17 13:45:07  ivan
 // Update (c) info in hercver.rc
 //
@@ -35,7 +35,7 @@
 #endif
 
 #define HERCULES_PRODUCT          "The Hercules System/370, ESA/390, and z/Architecture Emulator"
-#define HERCULES_COPYRIGHT        "(c)Copyright 1999-2008"
+#define HERCULES_COPYRIGHT        "(c)Copyright 1999-2010"
 #define HERCULES_COMPANY          "by Roger Bowler, Jan Jaeger, and others"
 #define HERCULES_PRODUCT_URL      "http://www.hercules-390.org"
 #define HERCULES_PRODUCT_EMAIL    "hercules-390@yahoogroups.com"
@@ -60,9 +60,9 @@ PRODUCTVERSION  V1, V2, V3, V4
 FILEOS          VOS_NT_WINDOWS32
 FILETYPE        VFT_UNKNOWN
 #if defined(DEBUG) || defined(_DEBUG)
-FILEFLAGS       ISPRERELEASE | VS_FF_DEBUG
+FILEFLAGS       ISPRERELEASE | VS_FF_SPECIALBUILD | VS_FF_DEBUG
 #else
-FILEFLAGS       ISPRERELEASE
+FILEFLAGS       ISPRERELEASE | VS_FF_SPECIALBUILD
 #endif
 FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
 
@@ -87,19 +87,25 @@ FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
       VALUE "Hercules Email",   HERCULES_PRODUCT_EMAIL  "\0"
       VALUE "Hercules Version", VERSION                 "\0"
 
-#if defined(DEBUG) || defined(_DEBUG)
 #if defined(PRERELEASE)
-      VALUE "SpecialBuild",    "PRERELEASE DEBUG version" "\0"
+#define PRE "PRERELEASE "
 #else
-      VALUE "SpecialBuild",    "DEBUG version"          "\0"
+#define PRE
 #endif
+
+#if defined(_WIN64)
+#define ARCH "64-bit "
 #else
-#if defined(PRERELEASE)
-      VALUE "SpecialBuild",    "PRERELEASE Version"     "\0"
+#define ARCH "32-bit "
+#endif
+
+#if defined(_DEBUG) || defined(DEBUG)
+#define CFG "DEBUG "
 #else
-      VALUE "SpecialBuild",    "Release version"        "\0"
+#define CFG "RETAIL "
 #endif
-#endif
+
+      VALUE "SpecialBuild",    PRE ARCH CFG "version"  "\0"
 
     }
   }

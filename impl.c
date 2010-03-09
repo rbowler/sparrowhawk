@@ -1,7 +1,7 @@
-/* IMPL.C       (c) Copyright Roger Bowler, 1999-2007                */
+/* IMPL.C       (c) Copyright Roger Bowler, 1999-2009                */
 /*              Hercules Initialization Module                       */
 
-// $Id: impl.c,v 1.129 2009/01/07 16:00:43 bernard Exp $
+// $Id: impl.c 5408 2009-06-14 18:53:34Z fish $
 
 /*-------------------------------------------------------------------*/
 /* This module initializes the Hercules S/370 or ESA/390 emulator.   */
@@ -11,7 +11,10 @@
 /* mode.                                                             */
 /*-------------------------------------------------------------------*/
 
-// $Log: impl.c,v $
+// $Log$
+// Revision 1.130  2009/01/15 17:36:44  jj
+// Change http server startup
+//
 // Revision 1.129  2009/01/07 16:00:43  bernard
 // add msghldsec command
 //
@@ -55,7 +58,6 @@
 #include "opcode.h"
 #include "devtype.h"
 #include "herc_getopt.h"
-#include "httpmisc.h"
 #include "hostinfo.h"
 #include "history.h"
 
@@ -288,6 +290,9 @@ TID     logcbtid;                       /* RC file thread identifier */
     /* Clear the system configuration block */
     memset (&sysblk, 0, sizeof(SYSBLK));
 
+    /* Save TOD of when we were first IMPL'ed */
+    time( &sysblk.impltime );
+
 #ifdef OPTION_MSGHLD
     /* Set the default timeout value */
     sysblk.keep_timeout_secs = 120;
@@ -317,18 +322,6 @@ TID     logcbtid;                       /* RC file thread identifier */
        being redirected to the logger facility.
     */
     logger_init();
-
-#if 0 // 20060628: doesn't seem to occur anymore; will remove perm-
-      // anently once we're certain this is indeed now a dead issue.
-
-    /* ZZFIXME: I don't know what's going on (yet), but for some reason
-       log messages seem to get permanently "stuck" in the logmsg pipe.
-       (see SECOND issue in zHerc message #6562) and the following brief
-       delay seems to fix it. Note too that this problem occurs with or
-       without the GUI and is thus NOT a GUI related issue.
-    */
-    usleep(100000);     /* wait a bit before issuing messages */
-#endif
 
     /* Now display the version information again after logger_init
        has been called so that either the panel display thread or the
@@ -365,8 +358,7 @@ TID     logcbtid;                       /* RC file thread identifier */
         {
             usleep(10000); /* (give logger thread time to issue
                                preceding HHCHD007E message) */
-            fprintf (stderr,
-                _("HHCIN008S DYNGUI.DLL load failed; Hercules terminated.\n"));
+            logmsg(_("HHCIN008S DYNGUI.DLL load failed; Hercules terminated.\n"));
             delayed_exit(1);
         }
 #endif /* defined(OPTION_DYNAMIC_LOAD) */
@@ -423,8 +415,7 @@ TID     logcbtid;                       /* RC file thread identifier */
     /* Terminate if invalid arguments were detected */
     if (arg_error)
     {
-        fprintf (stderr,
-                "usage: %s [-f config-filename] [-d] [-b logo-filename]"
+        logmsg("usage: %s [-f config-filename] [-d] [-b logo-filename]"
 #if defined(OPTION_DYNAMIC_LOAD)
                 " [-p dyn-load-dir] [[-l dynmod-to-load]...]"
 #endif /* defined(OPTION_DYNAMIC_LOAD) */
@@ -436,8 +427,7 @@ TID     logcbtid;                       /* RC file thread identifier */
     /* Register the SIGINT handler */
     if ( signal (SIGINT, sigint_handler) == SIG_ERR )
     {
-        fprintf (stderr,
-                _("HHCIN001S Cannot register SIGINT handler: %s\n"),
+        logmsg(_("HHCIN001S Cannot register SIGINT handler: %s\n"),
                 strerror(errno));
         delayed_exit(1);
     }
@@ -447,8 +437,7 @@ TID     logcbtid;                       /* RC file thread identifier */
        Broken Pipe error if the printer driver writes to a closed pipe */
     if ( signal (SIGPIPE, SIG_IGN) == SIG_ERR )
     {
-        fprintf (stderr,
-                _("HHCIN002E Cannot suppress SIGPIPE signal: %s\n"),
+        logmsg(_("HHCIN002E Cannot suppress SIGPIPE signal: %s\n"),
                 strerror(errno));
     }
 #endif
@@ -486,8 +475,7 @@ TID     logcbtid;                       /* RC file thread identifier */
          || sigaction(SIGUSR1, &sa, NULL)
          || sigaction(SIGUSR2, &sa, NULL) )
         {
-            fprintf (stderr,
-                  _("HHCIN003S Cannot register SIGILL/FPE/SEGV/BUS/USR "
+            logmsg(_("HHCIN003S Cannot register SIGILL/FPE/SEGV/BUS/USR "
                     "handler: %s\n"),
                     strerror(errno));
             delayed_exit(1);
@@ -497,6 +485,9 @@ TID     logcbtid;                       /* RC file thread identifier */
 
     /* Build system configuration */
     build_config (cfgfile);
+
+    /* System initialisation time */
+    sysblk.todstart = hw_clock() << 8;
 
 #ifdef OPTION_MIPS_COUNTING
     /* Initialize "maxrates" command reporting intervals */
@@ -509,27 +500,11 @@ TID     logcbtid;                       /* RC file thread identifier */
     if ( create_thread (&sysblk.wdtid, DETACHED,
                         watchdog_thread, NULL, "watchdog_thread") )
     {
-        fprintf (stderr,
-              _("HHCIN004S Cannot create watchdog thread: %s\n"),
+        logmsg(_("HHCIN004S Cannot create watchdog thread: %s\n"),
                 strerror(errno));
         delayed_exit(1);
     }
 #endif /*!defined(NO_SIGABEND_HANDLER)*/
-
-#if defined(OPTION_HTTP_SERVER)
-    if (sysblk.httpport)
-    {
-        /* Start the http server connection thread */
-        if ( create_thread (&sysblk.httptid, DETACHED,
-                            http_server, NULL, "http_server") )
-        {
-            fprintf (stderr,
-                  _("HHCIN005S Cannot create http_server thread: %s\n"),
-                    strerror(errno));
-            delayed_exit(1);
-        }
-    }
-#endif /*defined(OPTION_HTTP_SERVER)*/
 
 #ifdef OPTION_SHARED_DEVICES
     /* Start the shared server */
@@ -537,8 +512,7 @@ TID     logcbtid;                       /* RC file thread identifier */
         if ( create_thread (&sysblk.shrdtid, DETACHED,
                             shared_server, NULL, "shared_server") )
         {
-            fprintf (stderr,
-                  _("HHCIN006S Cannot create shared_server thread: %s\n"),
+            logmsg(_("HHCIN006S Cannot create shared_server thread: %s\n"),
                     strerror(errno));
             delayed_exit(1);
         }
@@ -554,8 +528,7 @@ TID     logcbtid;                       /* RC file thread identifier */
                            *dev->hnd->init, dev, "device connecting thread")
                    )
                 {
-                    fprintf (stderr,
-                          _("HHCIN007S Cannot create %4.4X connection thread: %s\n"),
+                    logmsg(_("HHCIN007S Cannot create %4.4X connection thread: %s\n"),
                             dev->devnum, strerror(errno));
                     delayed_exit(1);
                 }

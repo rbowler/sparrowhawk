@@ -1,13 +1,16 @@
-/* CONFIG.C     (c) Copyright Jan Jaeger, 2000-2007                  */
+/* CONFIG.C     (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              Device configuration functions                       */
 
-// $Id: config.c,v 1.203 2008/11/04 05:56:31 fish Exp $
+// $Id: config.c 5654 2010-03-07 03:15:17Z fish $
 
 /*-------------------------------------------------------------------*/
 /* The original configuration builder is now called bldcfg.c         */
 /*-------------------------------------------------------------------*/
 
-// $Log: config.c,v $
+// $Log$
+// Revision 1.204  2009/01/15 17:36:43  jj
+// Change http server startup
+//
 // Revision 1.203  2008/11/04 05:56:31  fish
 // Put ensure consistent create_thread ATTR usage change back in
 //
@@ -56,7 +59,6 @@
 
 #include "hercules.h"
 #include "opcode.h"
-#include "httpmisc.h"
 
 #if !defined(_GEN_ARCH)
 
@@ -106,6 +108,7 @@ int     cpu;
 #if !defined(OPTION_FISHIO)
     /* Terminate device threads */
     obtain_lock (&sysblk.ioqlock);
+    sysblk.devtwait=0;
     broadcast_condition (&sysblk.ioqcond);
     release_lock (&sysblk.ioqlock);
 #endif
@@ -897,8 +900,31 @@ DEVBLK *find_device_by_subchan (U32 ioid)
     return dev;
 } /* end function find_device_by_subchan */
 
-/* Internal device parsing structures */
 
+/*-------------------------------------------------------------------*/
+/* Returns a CPU register context for the device, or else NULL       */
+/*-------------------------------------------------------------------*/
+REGS *devregs(DEVBLK *dev)
+{
+    /* If a register context already exists then use it */
+    if (dev->regs)
+        return dev->regs;
+
+    /* Otherwise attempt to determine what it should be */
+    {
+        int i;
+        TID tid = thread_id();              /* Our own thread id     */
+        for (i=0; i < MAX_CPU; i++)
+            if (tid == sysblk.cputid[i])    /* Are we a cpu thread?  */
+                return sysblk.regs[i];      /* yes, use its context  */
+    }
+    return NULL;    /* Not CPU thread. Return NULL register context  */
+}
+
+
+/*-------------------------------------------------------------------*/
+/* Internal device parsing structures                                */
+/*-------------------------------------------------------------------*/
 typedef struct _DEVARRAY
 {
     U16 cuu1;

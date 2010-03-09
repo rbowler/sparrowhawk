@@ -21,12 +21,9 @@
 /*                                                                    */
 /**********************************************************************/
 
-// $Id: hscutl2.c,v 1.11 2007/11/30 14:54:33 jmaynard Exp $
+// $Id: hscutl2.c 4496 2007-11-30 14:54:34Z jmaynard $
 //
-// $Log: hscutl2.c,v $
-// Revision 1.11  2007/11/30 14:54:33  jmaynard
-// Changed conmicro.cx to hercules-390.org or conmicro.com, as needed.
-//
+// $Log$
 // Revision 1.10  2006/12/08 09:43:26  jj
 // Add CVS message log
 //

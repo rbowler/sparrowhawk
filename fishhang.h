@@ -1,13 +1,13 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //         fishhang.h           verify/debug proper Hercules LOCK handling...
 ////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2002-2007. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2002-2009. Released under the Q Public License
 // (http://www.hercules-390.org/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: fishhang.h,v 1.16 2008/11/29 21:22:09 rbowler Exp $
+// $Id: fishhang.h 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: fishhang.h,v $
+// $Log$
 // Revision 1.16  2008/11/29 21:22:09  rbowler
 // Fix win64 warning C4267 conversion from size_t to unsigned int in fthreads.c
 //

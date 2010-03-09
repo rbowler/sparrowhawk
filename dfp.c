@@ -1,7 +1,7 @@
-/* DFP.C        (c) Copyright Roger Bowler, 2007-2007                */
+/* DFP.C        (c) Copyright Roger Bowler, 2007-2009                */
 /*              Decimal Floating Point instructions                  */
 
-// $Id: dfp.c,v 1.70 2008/11/23 11:18:50 rbowler Exp $
+// $Id: dfp.c 5125 2009-01-23 12:01:44Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* This module implements the Decimal Floating Point instructions    */
@@ -9,7 +9,7 @@
 /* described in the z/Architecture Principles of Operation manual.   */
 /*-------------------------------------------------------------------*/
 
-// $Log: dfp.c,v $
+// $Log$
 // Revision 1.70  2008/11/23 11:18:50  rbowler
 // Fix signed/unsigned mismatch caused by previous fix
 //

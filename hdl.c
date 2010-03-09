@@ -1,9 +1,12 @@
-/* HDL.C        (c) Copyright Jan Jaeger, 2003-2007                  */
+/* HDL.C        (c) Copyright Jan Jaeger, 2003-2009                  */
 /*              Hercules Dynamic Loader                              */
 
-// $Id: hdl.c,v 1.54 2008/11/23 23:29:44 rbowler Exp $
+// $Id: hdl.c 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: hdl.c,v $
+// $Log$
+// Revision 1.55  2009/01/14 15:23:20  jj
+// Move modpath logic to hsccmd.c
+//
 // Revision 1.54  2008/11/23 23:29:44  rbowler
 // Fix win64 type conversion warnings in hdl.c
 //
@@ -53,7 +56,7 @@ static DLLENT *hdl_cdll;                 /* current dll (hdl_lock)   */
 
 static HDLDEP *hdl_depend;               /* Version codes in hdlmain */
 
-static char *hdl_modpath = HDL_DEFAULT_PATH;
+static char *hdl_modpath = NULL;
 
 #endif
 
@@ -137,7 +140,11 @@ HDLSHD *shdent;
  */
 DLL_EXPORT void hdl_setpath(char *path)
 {
-    hdl_modpath = path;
+    if(hdl_modpath)
+        free(hdl_modpath);
+
+    hdl_modpath = strdup(path);
+
     logmsg(_("HHCHD018I Loadable module directory is %s\n"),hdl_modpath);
 }
 
@@ -670,6 +677,8 @@ HDLPRE *preload;
 
     initialize_lock(&hdl_lock);
     initialize_lock(&hdl_sdlock);
+
+    hdl_setpath(HDL_DEFAULT_PATH);
 
     dlinit();
 

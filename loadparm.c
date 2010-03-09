@@ -1,23 +1,12 @@
-/* LOADPARM.C   (c) Copyright Jan Jaeger, 2004-2007                  */
+/* LOADPARM.C   (c) Copyright Jan Jaeger, 2004-2009                  */
 /*              SCLP / MSSF loadparm                                 */
 
-// $Id: loadparm.c,v 1.13 2008/12/30 15:40:01 rbowler Exp $
+// $Id: loadparm.c 5652 2010-03-06 11:28:14Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* This module contains functions which set, copy, and retrieve the  */
-/* values of the LOADPARM and LPARNAME parameters                    */
+/* values of the LOADPARM and various other environmental parameters */
 /*-------------------------------------------------------------------*/
-
-// $Log: loadparm.c,v $
-// Revision 1.13  2008/12/30 15:40:01  rbowler
-// Allow $(LPARNAME) in herclogo file
-//
-// Revision 1.12  2007/06/23 00:04:14  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.11  2006/12/08 09:43:28  jj
-// Add CVS message log
-//
 
 #include "hstdinc.h"
 
@@ -27,8 +16,28 @@
 #include "hercules.h"
 
 
-static BYTE loadparm[8] = {0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40};
+/*-------------------------------------------------------------------*/
+/* SUBROUTINE TO COPY A STRINGZ TO A FIXED-LENGTH EBCDIC FIELD       */
+/*-------------------------------------------------------------------*/
+static void copy_stringz_to_ebcdic(BYTE* fld, size_t len, char *name)
+{
+    size_t i;
 
+    for(i = 0; name && i < strlen(name) && i < len; i++)
+        if(isprint(name[i]))
+            fld[i] = host_to_guest((int)(islower(name[i]) ? toupper(name[i]) : name[i]));
+        else
+            fld[i] = 0x40;
+    for(; i < len; i++)
+        fld[i] = 0x40;
+}
+
+/*-------------------------------------------------------------------*/
+/* LOAD PARAMETER                                                    */
+/* Set by: LOADPARM configuration statement or panel command         */
+/* Retrieved by: SERVC and MSSF_CALL instructions                    */
+/*-------------------------------------------------------------------*/
+static BYTE loadparm[8] = {0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40, 0x40};
 
 void set_loadparm(char *name)
 {
@@ -68,6 +77,11 @@ char *str_loadparm()
 }
 
 
+/*-------------------------------------------------------------------*/
+/* LOGICAL PARTITION NAME                                            */
+/* Set by: LPARNAME configuration statement                          */
+/* Retrieved by: STSI and MSSF_CALL instructions                     */
+/*-------------------------------------------------------------------*/
 static BYTE lparname[8] = {0xC8, 0xC5, 0xD9, 0xC3, 0xE4, 0xD3, 0xC5, 0xE2};
                           /* HERCULES */
 
@@ -107,4 +121,206 @@ char *str_lparname()
     }
 
     return ret_lparname;
+}
+
+
+/*-------------------------------------------------------------------*/
+/* MANUFACTURER NAME                                                 */
+/* Set by: MANUFACTURER configuration statement                      */
+/* Retrieved by: STSI instruction                                    */
+/*-------------------------------------------------------------------*/
+                          /*  "H    R    C"  */
+static BYTE manufact[16] = { 0xC8,0xD9,0xC3,0x40,0x40,0x40,0x40,0x40,
+                             0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40 };
+
+void set_manufacturer(char *name)
+{
+    size_t i;
+
+    for(i = 0; name && i < strlen(name) && i < sizeof(manufact); i++)
+        if(isprint(name[i]))
+            manufact[i] = host_to_guest((int)(islower(name[i]) ? toupper(name[i]) : name[i]));
+        else
+            manufact[i] = 0x40;
+    for(; i < sizeof(manufact); i++)
+        manufact[i] = 0x40;
+}
+
+void get_manufacturer(BYTE *dest)
+{
+    memcpy(dest, manufact, sizeof(manufact));
+}
+
+
+/*-------------------------------------------------------------------*/
+/* MANUFACTURING PLANT NAME                                          */
+/* Set by: PLANT configuration statement                             */
+/* Retrieved by: STSI instruction                                    */
+/*-------------------------------------------------------------------*/
+                      /*  "Z    Z"  */
+static BYTE plant[4] = { 0xE9,0xE9,0x40,0x40 };
+
+void set_plant(char *name)
+{
+    size_t i;
+
+    for(i = 0; name && i < strlen(name) && i < sizeof(plant); i++)
+        if(isprint(name[i]))
+            plant[i] = host_to_guest((int)(islower(name[i]) ? toupper(name[i]) : name[i]));
+        else
+            plant[i] = 0x40;
+    for(; i < sizeof(plant); i++)
+        plant[i] = 0x40;
+}
+
+void get_plant(BYTE *dest)
+{
+    memcpy(dest, plant, sizeof(plant));
+}
+
+
+/*-------------------------------------------------------------------*/
+/* MODEL IDENTIFICATION                                              */
+/* Set by: MODEL configuration statement                             */
+/* Retrieved by: STSI instruction                                    */
+/*-------------------------------------------------------------------*/
+                       /*  "E    M    U    L    A    T    O    R" */
+static BYTE model[16] = { 0xC5,0xD4,0xE4,0xD3,0xC1,0xE3,0xD6,0xD9,
+                          0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40 };
+static BYTE modelcapa[16] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
+static BYTE modelperm[16] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
+static BYTE modeltemp[16] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
+
+void set_model(int argc, char *m1, char *m2, char *m3, char *m4)
+{
+    if (argc > 1 && m1 != NULL)
+        copy_stringz_to_ebcdic(model, sizeof(model), m1);
+    if (argc > 2 && m2 != NULL)
+        copy_stringz_to_ebcdic(modelcapa, sizeof(modelcapa), m2);
+    if (argc > 3 && m3 != NULL)
+        copy_stringz_to_ebcdic(modelperm, sizeof(modelperm), m3);
+    if (argc > 4 && m4 != NULL)
+        copy_stringz_to_ebcdic(modeltemp, sizeof(modeltemp), m4);
+}
+
+void get_model(BYTE *dest)
+{
+    memcpy(dest, model, sizeof(model));
+}
+
+void get_modelcapa(BYTE *dest)
+{
+    memcpy(dest, modelcapa, sizeof(modelcapa));
+}
+
+void get_modelperm(BYTE *dest)
+{
+    memcpy(dest, modelperm, sizeof(modelperm));
+}
+
+void get_modeltemp(BYTE *dest)
+{
+    memcpy(dest, modeltemp, sizeof(modeltemp));
+}
+
+
+/*-------------------------------------------------------------------*/
+/* SYSTEM TYPE IDENTIFICATION                                        */
+/* Set by: SERVC instruction                                         */
+/* Retrieved by: DIAG204 instruction                                 */
+/*-------------------------------------------------------------------*/
+static BYTE systype[8] = { 0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40 };
+
+void set_systype(BYTE *src)
+{
+    memcpy(systype, src, sizeof(systype));
+}
+
+void get_systype(BYTE *dst)
+{
+    memcpy(dst, systype, sizeof(systype));
+}
+
+
+/*-------------------------------------------------------------------*/
+/* SYSTEM NAME                                                       */
+/* Set by: SERVC instruction                                         */
+/* Retrieved by: DIAG204 instruction                                 */
+/*-------------------------------------------------------------------*/
+static BYTE sysname[8] = { 0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40 };
+
+void set_sysname(BYTE *src)
+{
+    memcpy(sysname, src, sizeof(sysname));
+}
+
+void get_sysname(BYTE *dst)
+{
+    memcpy(dst, sysname, sizeof(sysname));
+}
+
+
+/*-------------------------------------------------------------------*/
+/* SYSPLEX NAME                                                      */
+/* Set by: SERVC instruction                                         */
+/* Retrieved by: DIAG204 instruction                                 */
+/*-------------------------------------------------------------------*/
+static BYTE sysplex[8] = { 0x40,0x40,0x40,0x40,0x40,0x40,0x40,0x40 };
+
+void set_sysplex(BYTE *src)
+{
+    memcpy(sysplex, src, sizeof(sysplex));
+}
+
+void get_sysplex(BYTE *dst)
+{
+    memcpy(dst, sysplex, sizeof(sysplex));
+}
+
+/*-------------------------------------------------------------------*/
+/* Retrieve Multiprocessing CPU-Capability Adjustment Factors        */
+/*                                                                   */
+/* This function retrieves the Multiprocessing CPU-Capability        */
+/* Adjustment Factor values for SYSIB (System Information Block)     */
+/* 1.2.2 as described in the Principles of Operations manual for     */
+/* the STORE SYSTEM INFORMATION instruction.                         */
+/*                                                                   */
+/* Input:                                                            */
+/*      dest  Address of where to store the information.             */
+/* Output:                                                           */
+/*      The requested MP Factor values at the address specified.     */
+/* Used by:                                                          */
+/*      B27D STSI  Store System Information (Basic-machine All CPUs) */
+/*      B220 SERVC Service Call             (read_scpinfo)           */
+/*-------------------------------------------------------------------*/
+void get_mpfactors(BYTE *dest)
+{
+/*-------------------------------------------------------------------*/
+/* The new z10 machine will use a denominator of 65535 for better    */
+/* granularity. But this will mess up old software. We will stick    */
+/* to the old value of 100. Bernard Feb 26, 2010.                    */
+/*-------------------------------------------------------------------*/
+#define  MPFACTOR_DENOMINATOR   100   
+#define  MPFACTOR_PERCENT       95
+
+    static U16 mpfactors[MAX_CPU_ENGINES-1] = {0};
+    static BYTE didthis = 0;
+
+    if (!didthis)
+    {
+        /* First time: initialize array... */
+        U32 mpfactor = MPFACTOR_DENOMINATOR;
+        size_t i;
+        for (i=0; i < arraysize( mpfactors ); i++)
+        {
+            /* Calculate the value of each subsequent entry
+               as percentage of the previous entry's value. */
+            mpfactor = (mpfactor * MPFACTOR_PERCENT) / 100;
+            STORE_HW( &mpfactors[i], (U16) mpfactor );
+        }
+        didthis = 1;
+    }
+
+    /* Return the requested information... */
+    memcpy( dest, &mpfactors[0], (MAX_CPU-1) * sizeof(U16) );
 }

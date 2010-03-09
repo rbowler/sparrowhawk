@@ -1,7 +1,7 @@
 /*-------------------------------------------------------------------
- * Shared device support           (c)Copyright Greg Smith, 2002-2007
+ * Shared device support           (c)Copyright Greg Smith, 2002-2009
  *
- * $Id: shared.h,v 1.16 2007/06/23 00:04:15 ivan Exp $
+ * $Id: shared.h 5126 2009-01-23 13:05:56Z bernard $
  *
  * Shared device support allows multiple Hercules instances to share
  * devices.  The device will be `local' to one instance and `remote'
@@ -311,7 +311,7 @@
  *
  *
  *
- * $Log: shared.h,v $
+ * $Log$
  * Revision 1.16  2007/06/23 00:04:15  ivan
  * Update copyright notices to include current year (2007)
  *

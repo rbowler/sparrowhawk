@@ -1,9 +1,9 @@
 /* BLDCFG.C     (c) Copyright Roger Bowler, 1999-2009                */
 /*              ESA/390 Configuration Builder                        */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: bldcfg.c,v 1.102 2009/01/08 14:43:38 jmaynard Exp $
+// $Id: bldcfg.c 5562 2009-12-24 14:29:38Z rbowler $
 
 /*-------------------------------------------------------------------*/
 /* This module builds the configuration tables for the Hercules      */
@@ -22,140 +22,13 @@
 /*      PANRATE parameter by Reed H. Petty                           */
 /*      CPUPRIO parameter by Jan Jaeger                              */
 /*      HERCPRIO, TODPRIO, DEVPRIO parameters by Mark L. Gaubatz     */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 /*      $(DEFSYM) symbol substitution support by Ivan Warren         */
 /*      Patch for ${var=def} symbol substitution (hax #26),          */
 /*          and INCLUDE <filename> support (modified hax #27),       */
 /*          contributed by Enrico Sorichetti based on                */
 /*          original patches by "Hackules"                           */
 /*-------------------------------------------------------------------*/
-
-// $Log: bldcfg.c,v $
-// Revision 1.102  2009/01/08 14:43:38  jmaynard
-// Cosmetic update to CPU type display on startup.
-//
-// Revision 1.101  2009/01/02 19:21:50  jj
-// DVD-RAM IPL
-// RAMSAVE
-// SYSG Integrated 3270 console fixes
-//
-// Revision 1.100  2009/01/02 14:11:18  ivan
-// Change DIAG8CMD command statement semantics to be more consistent with other configuration statements
-// Syntax is now :
-// DIAG8CMD DISABLE|ENABLE [ECHO|NOECHO]
-//
-// Revision 1.99  2009/01/02 14:01:02  rbowler
-// herclogo being ignored if not the last statement in config
-//
-// Revision 1.98  2008/12/29 00:00:54  ivan
-// Change semantics for DIAG8CMD configuration statement
-// Disable command redisplay at the console when NOECHO is set
-// Commands typed with a '-' as the first character are not redisplayed
-//
-// Revision 1.97  2008/12/28 14:04:59  ivan
-// Allow DIAG8CMD NOECHO
-// This configures suppression of messages related to diag 8 issued by guests
-//
-// Revision 1.96  2008/12/01 22:07:16  fish
-// remove unused #defines
-//
-// Revision 1.95  2008/12/01 16:19:49  jj
-// Check for licensed operating systems without impairing architectural
-// compliance of IFL's
-//
-// Revision 1.94  2008/11/24 14:52:21  jj
-// Add PTYP=IFL
-// Change SCPINFO processing to check on ptyp for IFL specifics
-//
-// Revision 1.93  2008/11/24 13:44:03  rbowler
-// Fix bldcfg.c:1851: warning: short unsigned int format, different type arg
-//
-// Revision 1.92  2008/11/04 05:56:30  fish
-// Put ensure consistent create_thread ATTR usage change back in
-//
-// Revision 1.91  2008/11/03 15:31:58  rbowler
-// Back out consistent create_thread ATTR modification
-//
-// Revision 1.90  2008/10/18 09:32:20  fish
-// Ensure consistent create_thread ATTR usage
-//
-// Revision 1.89  2008/10/14 22:41:08  rbowler
-// Add ENGINES configuration statement
-//
-// Revision 1.88  2008/08/29 07:06:00  fish
-// Add KEEPMSG to blank lines in message HHCCF039W
-//
-// Revision 1.87  2008/08/23 11:54:54  fish
-// Reformat/center  "HHCCF039W PGMPRDOS LICENSED"  message
-//
-// Revision 1.86  2008/08/21 18:34:45  fish
-// Fix i/o-interrupt-queue race condition
-//
-// Revision 1.85  2008/08/02 18:31:28  bernard
-// type in PGMPRDOS message
-//
-// Revision 1.84  2008/08/02 13:25:00  bernard
-// Put PGMPRDOS message in red.
-//
-// Revision 1.83  2008/07/08 05:35:48  fish
-// AUTOMOUNT redesign: support +allowed/-disallowed dirs
-// and create associated 'automount' panel command - Fish
-//
-// Revision 1.82  2008/05/28 16:46:29  fish
-// Misleading VTAPE support renamed to AUTOMOUNT instead and fixed and enhanced so that it actually WORKS now.
-//
-// Revision 1.81  2008/03/04 01:10:29  ivan
-// Add LEGACYSENSEID config statement to allow X'E4' Sense ID on devices
-// that originally didn't support it. Defaults to off for compatibility reasons
-//
-// Revision 1.80  2008/01/18 23:44:12  rbowler
-// Segfault instead of HHCCF004S if no device records in config file
-//
-// Revision 1.79  2008/01/18 22:08:33  rbowler
-// HHCCF008E Error in hercules.cnf: Unrecognized keyword 0:0009
-//
-// Revision 1.78  2007/12/29 14:38:39  fish
-// init sysblk.dummyregs.hostregs = &sysblk.dummyregs; to prevent panel or dyngui threads from crashing when using new INSTCOUNT macro.
-//
-// Revision 1.77  2007/06/23 00:04:03  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.76  2007/06/06 22:14:57  gsmith
-// Fix SYNCHRONIZE_CPUS when numcpu > number of host processors - Greg
-//
-// Revision 1.75  2007/02/27 05:30:36  fish
-// Fix minor glitch in enhanced symbol substitution
-//
-// Revision 1.74  2007/02/26 21:33:46  rbowler
-// Allow either quotes or apostrophes as argument delimiters in config statements
-//
-// Revision 1.73  2007/02/18 23:49:25  kleonard
-// Add TIME and NOTIME synonyms for LOGOPT operands
-//
-// Revision 1.72  2007/01/31 00:48:03  kleonard
-// Add logopt config statement and panel command
-//
-// Revision 1.71  2007/01/14 19:42:38  gsmith
-// Fix S370 only build - nerak60510
-//
-// Revision 1.70  2007/01/14 18:36:53  gsmith
-// Fix S370 only build - nerak60510
-//
-// Revision 1.69  2007/01/11 19:54:33  fish
-// Addt'l keep-alive mods: create associated supporting config-file stmt and panel command where individual customer-preferred values can be specified and/or dynamically modified.
-//
-// Revision 1.68  2007/01/08 09:52:00  rbowler
-// Rename symptom command as traceopt
-//
-// Revision 1.67  2007/01/07 11:25:33  rbowler
-// Instruction tracing regsfirst and noregs modes
-//
-// Revision 1.66  2007/01/06 09:05:18  gsmith
-// Enable display_inst to display traditionally too
-//
-// Revision 1.65  2006/12/08 09:43:16  jj
-// Add CVS message log
-//
 
 #include "hstdinc.h"
 
@@ -170,7 +43,6 @@
 #include "hercules.h"
 #include "devtype.h"
 #include "opcode.h"
-#include "httpmisc.h"
 #include "hostinfo.h"
 
 #if defined(OPTION_FISHIO)
@@ -293,12 +165,12 @@ void delayed_exit (int exit_code)
 
 
 /* storage configuration routine. To be moved *JJ */
-static void config_storage(int mainsize, int xpndsize)
+static void config_storage(unsigned mainsize, unsigned xpndsize)
 {
 int off;
 
     /* Obtain main storage */
-    sysblk.mainsize = mainsize * 1024 * 1024L;
+    sysblk.mainsize = mainsize * 1024 * 1024ULL;
 
     sysblk.mainstor = calloc((size_t)(sysblk.mainsize + 8192), 1);
 
@@ -309,13 +181,13 @@ int off;
 
     if (sysblk.mainstor == NULL)
     {
-        fprintf(stderr, _("HHCCF031S Cannot obtain %dMB main storage: %s\n"),
+        logmsg(_("HHCCF031S Cannot obtain %dMB main storage: %s\n"),
                 mainsize, strerror(errno));
         delayed_exit(1);
     }
 
     /* Trying to get mainstor aligned to the next 4K boundary - Greg */
-    off = (long)sysblk.mainstor & 0xFFF;
+    off = (uintptr_t)sysblk.mainstor & 0xFFF;
     sysblk.mainstor += off ? 4096 - off : 0;
 
     /* Obtain main storage key array */
@@ -327,7 +199,7 @@ int off;
     }
     if (sysblk.storkeys == NULL)
     {
-        fprintf(stderr, _("HHCCF032S Cannot obtain storage key array: %s\n"),
+        logmsg(_("HHCCF032S Cannot obtain storage key array: %s\n"),
                 strerror(errno));
         delayed_exit(1);
     }
@@ -354,10 +226,10 @@ int off;
         if (sysblk.xpndstor)
             sysblk.xpnd_clear = 1;
         else
-            sysblk.xpndstor = malloc(sysblk.xpndsize * XSTORE_PAGESIZE);
+            sysblk.xpndstor = malloc((size_t)sysblk.xpndsize * XSTORE_PAGESIZE);
         if (sysblk.xpndstor == NULL)
         {
-            fprintf(stderr, _("HHCCF033S Cannot obtain %dMB expanded storage: "
+            logmsg(_("HHCCF033S Cannot obtain %dMB expanded storage: "
                     "%s\n"),
                     xpndsize, strerror(errno));
             delayed_exit(1);
@@ -530,7 +402,7 @@ char   *buf1;                           /* Pointer to resolved buffer*/
             /* Check for I/O error */
             if (ferror(fp))
             {
-                fprintf(stderr, _("HHCCF001S Error reading file %s line %d: %s\n"),
+                logmsg(_("HHCCF001S Error reading file %s line %d: %s\n"),
                     fname, inc_stmtnum[inc_level], strerror(errno));
                 delayed_exit(1);
             }
@@ -553,7 +425,7 @@ char   *buf1;                           /* Pointer to resolved buffer*/
             /* Check that statement does not overflow buffer */
             if (stmtlen >= (int)(sizeof(buf) - 1))
             {
-                fprintf(stderr, _("HHCCF002S File %s line %d is too long\n"),
+                logmsg(_("HHCCF002S File %s line %d is too long\n"),
                     fname, inc_stmtnum[inc_level]);
                 delayed_exit(1);
             }
@@ -617,7 +489,7 @@ char   *buf1;                           /* Pointer to resolved buffer*/
                             /* Check that statement does not overflow buffer */
                             if (stmtlen+strlen(inc_envvar) >= sizeof(buf) - 1)
                             {
-                                fprintf(stderr, _("HHCCF002S File %s line %d is too long\n"),
+                                logmsg(_("HHCCF002S File %s line %d is too long\n"),
                                                 fname, inc_stmtnum[inc_level]);
                                 delayed_exit(1);
                             }
@@ -686,28 +558,34 @@ char   *buf1;                           /* Pointer to resolved buffer*/
         cnfline = strdup(buf);
 
         /* Parse the statement just read */
+
 #if defined(OPTION_CONFIG_SYMBOLS)
-    /* Perform variable substitution */
-    /* First, set some 'dynamic' symbols to their own values */
-    set_symbol("CUU","$(CUU)");
-    set_symbol("cuu","$(cuu)");
-    set_symbol("CCUU","$(CCUU)");
-    set_symbol("ccuu","$(ccuu)");
-    buf1=resolve_symbol_string(buf);
-    if(buf1!=NULL)
-    {
-        if(strlen(buf1)>=sizeof(buf))
+
+        /* Perform variable substitution */
+        /* First, set some 'dynamic' symbols to their own values */
+
+        set_symbol("CUU","$(CUU)");
+        set_symbol("cuu","$(cuu)");
+        set_symbol("CCUU","$(CCUU)");
+        set_symbol("ccuu","$(ccuu)");
+
+        buf1=resolve_symbol_string(buf);
+
+        if(buf1!=NULL)
         {
-            fprintf(stderr, _("HHCCF002S File %s line %d is too long\n"),
-                fname, inc_stmtnum[inc_level]);
-            free(buf1);
-            delayed_exit(1);
+            if(strlen(buf1)>=sizeof(buf))
+            {
+                logmsg(_("HHCCF002S File %s line %d is too long\n"),
+                    fname, inc_stmtnum[inc_level]);
+                free(buf1);
+                delayed_exit(1);
+            }
+            strcpy(buf,buf1);
         }
-        strcpy(buf,buf1);
-    }
 #endif /*defined(OPTION_CONFIG_SYMBOLS)*/
 
         parse_args (buf, MAX_ARGS, addargv, &addargc);
+
 #if defined(OPTION_DYNAMIC_LOAD)
         if(config_command)
         {
@@ -718,6 +596,12 @@ char   *buf1;                           /* Pointer to resolved buffer*/
             }
         }
 #endif /*defined(OPTION_DYNAMIC_LOAD)*/
+
+        if( !ProcessConfigCommand (addargc, (char**)addargv, cnfline) )
+        {
+            free(cnfline);
+            continue;
+        }
 
         free(cnfline);
 
@@ -782,37 +666,18 @@ char   *smodel;                         /* -> CPU model string       */
 char   *sversion;                       /* -> CPU version string     */
 char   *smainsize;                      /* -> Main size string       */
 char   *sxpndsize;                      /* -> Expanded size string   */
+char   *smaxcpu;                        /* -> Maximum number of CPUs */
 char   *snumcpu;                        /* -> Number of CPUs         */
 char   *snumvec;                        /* -> Number of VFs          */
 char   *sengines;                       /* -> Processor engine types */
-char   *sarchmode;                      /* -> Architectural mode     */
-char   *sloadparm;                      /* -> IPL load parameter     */
 char   *ssysepoch;                      /* -> System epoch           */
 char   *syroffset;                      /* -> System year offset     */
 char   *stzoffset;                      /* -> System timezone offset */
-char   *sdiag8cmd;                      /* -> Allow diagnose 8       */
-char   *sdiag8echo;                     /* -> Diag 8 Echo opt        */
-char   *sshcmdopt;                      /* -> SHCMDOPT shell cmd opt */
-char   *stoddrag;                       /* -> TOD clock drag factor  */
-char   *sostailor;                      /* -> OS to tailor system to */
-char   *spanrate;                       /* -> Panel refresh rate     */
-char   *stimerint;                      /* -> Timer update interval  */
-char   *sdevtmax;                       /* -> Max device threads     */
-char   *slegacysenseid;                 /* -> legacy senseid option  */
 char   *shercprio;                      /* -> Hercules base priority */
 char   *stodprio;                       /* -> Timer thread priority  */
 char   *scpuprio;                       /* -> CPU thread priority    */
 char   *sdevprio;                       /* -> Device thread priority */
-char   *spgmprdos;                      /* -> Program product OS OK  */
 char   *slogofile;                      /* -> 3270 logo file         */
-char   *smountedtapereinit;             /* -> mounted tape reinit opt*/
-char   *slogopt[MAX_ARGS-1];            /* -> log options            */
-int    logoptc;                         /*    count of log options   */
-char   *straceopt;                      /* -> display_inst option    */
-char   *sconkpalv;                      /* -> console keep-alive opt */
-#if defined(_FEATURE_ASN_AND_LX_REUSE)
-char   *sasnandlxreuse;                 /* -> ASNLXREUSE Optional    */
-#endif
 #if defined(_FEATURE_ECPSVM)
 char   *secpsvmlevel;                   /* -> ECPS:VM Keyword        */
 char   *secpsvmlvl;                     /* -> ECPS:VM level (or 'no')*/
@@ -821,51 +686,26 @@ int    ecpsvmac;                        /* -> ECPS:VM add'l arg cnt  */
 #if defined(OPTION_SHARED_DEVICES)
 char   *sshrdport;                      /* -> Shared device port nbr */
 #endif /*defined(OPTION_SHARED_DEVICES)*/
-#ifdef OPTION_IODELAY_KLUDGE
-char   *siodelay;                       /* -> I/O delay value        */
-char   *siodelay_warn = NULL;           /* -> I/O delay warning      */
-#endif /*OPTION_IODELAY_KLUDGE*/
-#if defined(OPTION_PTTRACE)
-char   *sptt;                           /* Pthread trace table size  */
-#endif /*defined(OPTION_PTTRACE)*/
-char   *scckd;                          /* -> CCKD parameters        */
-#if defined( OPTION_SCSI_TAPE )
-char   *sauto_scsi_mount;               /* Auto SCSI tape mounts     */
-#endif /* defined( OPTION_SCSI_TAPE ) */
-#if defined( HTTP_SERVER_CONNECT_KLUDGE )
-char   *shttp_server_kludge_msecs;
-#endif // defined( HTTP_SERVER_CONNECT_KLUDGE )
 U16     version = 0x00;                 /* CPU version code          */
 int     dfltver = 1;                    /* Default version code      */
 U32     serial;                         /* CPU serial number         */
 U16     model;                          /* CPU model number          */
-int     mainsize;                       /* Main storage size (MB)    */
-int     xpndsize;                       /* Expanded storage size (MB)*/
+unsigned mainsize;                      /* Main storage size (MB)    */
+unsigned xpndsize;                      /* Expanded storage size (MB)*/
+U16     maxcpu;                         /* Maximum number of CPUs    */
 U16     numcpu;                         /* Number of CPUs            */
 U16     numvec;                         /* Number of VFs             */
 #if defined(OPTION_SHARED_DEVICES)
 U16     shrdport;                       /* Shared device port number */
 #endif /*defined(OPTION_SHARED_DEVICES)*/
-int     archmode;                       /* Architectural mode        */
 S32     sysepoch;                       /* System epoch year         */
 S32     tzoffset;                       /* System timezone offset    */
 S32     yroffset;                       /* System year offset        */
 S64     ly1960;                         /* Leap offset for 1960 epoch*/
-int     diag8cmd;                       /* Allow diagnose 8 commands */
-BYTE    shcmdopt;                       /* Shell cmd allow option(s) */
-double  toddrag;                        /* TOD clock drag factor     */
-U64     ostailor;                       /* OS to tailor system to    */
-int     legacysenseid;                  /* ena/disa x'E4' on old devs*/
-int     timerint;                       /* Timer update interval     */
-int     panrate;                        /* Panel refresh rate        */
 int     hercprio;                       /* Hercules base priority    */
 int     todprio;                        /* Timer thread priority     */
 int     cpuprio;                        /* CPU thread priority       */
 int     devprio;                        /* Device thread priority    */
-#if defined(_FEATURE_ASN_AND_LX_REUSE)
-int     asnandlxreuse;                  /* ASN And LX Reuse option   */
-#endif
-BYTE    pgmprdos;                       /* Program product OS OK     */
 DEVBLK *dev;                            /* -> Device Block           */
 char   *sdevnum;                        /* -> Device number string   */
 char   *sdevtype;                       /* -> Device type string     */
@@ -874,25 +714,10 @@ int     devtmax;                        /* Max number device threads */
 int     ecpsvmavail;                    /* ECPS:VM Available flag    */
 int     ecpsvmlevel;                    /* ECPS:VM declared level    */
 #endif /*defined(_FEATURE_ECPSVM)*/
-#ifdef OPTION_IODELAY_KLUDGE
-int     iodelay=-1;                     /* I/O delay value           */
-int     iodelay_warn = 0;               /* Issue iodelay warning     */
-#endif /*OPTION_IODELAY_KLUDGE*/
-#ifdef OPTION_PTTRACE
-int     ptt = 0;                        /* Pthread trace table size  */
-#endif /*OPTION_PTTRACE*/
 BYTE    c;                              /* Work area for sscanf      */
 char   *styp;                           /* -> Engine type string     */
 char   *styp_values[] = {"CP","CF","AP","IL","??","IP"}; /* type values */
 BYTE    ptyp;                           /* Processor engine type     */
-#if defined(OPTION_LPARNAME)
-char   *lparname;                       /* DIAG 204 lparname         */
-#endif /*defined(OPTION_LPARNAME)*/
-#if defined(OPTION_SET_STSI_INFO)
-char   *stsi_model;                     /* Info                      */
-char   *stsi_plant;                     /*      for                  */
-char   *stsi_manufacturer;              /*          STSI             */ 
-#endif /*defined(OPTION_SET_STSI_INFO) */
 #ifdef OPTION_SELECT_KLUDGE
 int     dummyfd[OPTION_SELECT_KLUDGE];  /* Dummy file descriptors --
                                            this allows the console to
@@ -919,7 +744,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
     inc_fp[inc_level] = fopen (pathname, "r");
     if (inc_fp[inc_level] == NULL)
     {
-        fprintf(stderr, _("HHCCF003S Open error file %s: %s\n"),
+        logmsg(_("HHCCF003S Open error file %s: %s\n"),
                 fname, strerror(errno));
         delayed_exit(1);
     }
@@ -930,29 +755,33 @@ char    pathname[MAX_PATH];             /* file path in host format  */
     model = 0x0586;
     mainsize = 2;
     xpndsize = 0;
+    maxcpu = 0;
     numcpu = 0;
     numvec = MAX_CPU_ENGINES;
     sysepoch = 1900;
     yroffset = 0;
     tzoffset = 0;
-    diag8cmd = 0;
-    shcmdopt = 0;
-    toddrag = 1.0;
 #if defined(_390)
-    archmode = ARCH_390;
+    sysblk.arch_mode = ARCH_390;
 #else
-    archmode = ARCH_370;
+    sysblk.arch_mode = ARCH_370;
 #endif
-    ostailor = OS_NONE;
-    panrate  = PANEL_REFRESH_RATE_SLOW;
-    timerint = DEFAULT_TIMER_REFRESH_USECS;
+#if defined(_900)
+    sysblk.arch_z900 = ARCH_900;
+#endif
+    sysblk.pgminttr = OS_NONE;
+
+    sysblk.timerint = DEFAULT_TIMER_REFRESH_USECS;
+
+#if defined( HTTP_SERVER_CONNECT_KLUDGE )
+    sysblk.http_server_kludge_msecs = 10;
+#endif // defined( HTTP_SERVER_CONNECT_KLUDGE )
+
     hercprio = DEFAULT_HERCPRIO;
     todprio  = DEFAULT_TOD_PRIO;
     cpuprio  = DEFAULT_CPU_PRIO;
     devprio  = DEFAULT_DEV_PRIO;
-    pgmprdos = PGM_PRD_OS_RESTRICTED;
     devtmax  = MAX_DEVICE_THREADS;
-    legacysenseid = 0;
     sysblk.kaidle = KEEPALIVE_IDLE_TIME;
     sysblk.kaintv = KEEPALIVE_PROBE_INTERVAL;
     sysblk.kacnt  = KEEPALIVE_PROBE_COUNT;
@@ -965,11 +794,58 @@ char    pathname[MAX_PATH];             /* file path in host format  */
 #endif /*defined(OPTION_SHARED_DEVICES)*/
 
 #if defined(_FEATURE_ASN_AND_LX_REUSE)
-    asnandlxreuse = 0;  /* ASN And LX Reuse is defaulted to DISABLE */
+    sysblk.asnandlxreuse = 0;  /* ASN And LX Reuse is defaulted to DISABLE */
+#endif
+  
+#ifdef PANEL_REFRESH_RATE
+    sysblk.panrate = PANEL_REFRESH_RATE_SLOW;
 #endif
 
+    /* Initialize locks, conditions, and attributes */
+    initialize_lock (&sysblk.todlock);
+    initialize_lock (&sysblk.mainlock);
+    sysblk.mainowner = LOCK_OWNER_NONE;
+    initialize_lock (&sysblk.intlock);
+    initialize_lock (&sysblk.iointqlk);
+    sysblk.intowner = LOCK_OWNER_NONE;
+    initialize_lock (&sysblk.sigplock);
+//  initialize_detach_attr (&sysblk.detattr);   // (moved to impl.c)
+//  initialize_join_attr   (&sysblk.joinattr);  // (moved to impl.c)
+    initialize_condition (&sysblk.cpucond);
+    for (i = 0; i < MAX_CPU_ENGINES; i++)
+        initialize_lock (&sysblk.cpulock[i]);
+    initialize_condition (&sysblk.sync_cond);
+    initialize_condition (&sysblk.sync_bc_cond);
+#if defined(OPTION_INSTRUCTION_COUNTING)
+    initialize_lock (&sysblk.icount_lock);
+#endif
+
+#ifdef OPTION_PTTRACE
+    ptt_trace_init (0, 1);
+#endif
+
+#if defined(OPTION_FISHIO)
+    InitIOScheduler                     // initialize i/o scheduler...
+    (
+        sysblk.arch_mode,               // (for calling execute_ccw_chain)
+        &sysblk.devprio,                // (ptr to device thread priority)
+        MAX_DEVICE_THREAD_IDLE_SECS,    // (maximum device thread wait time)
+        devtmax                         // (maximum #of device threads allowed)
+    );
+#else // !defined(OPTION_FISHIO)
+    initialize_lock (&sysblk.ioqlock);
+    initialize_condition (&sysblk.ioqcond);
+    /* Set max number device threads */
+    sysblk.devtmax = devtmax;
+    sysblk.devtwait = sysblk.devtnbr =
+    sysblk.devthwm  = sysblk.devtunavail = 0;
+#endif // defined(OPTION_FISHIO)
+
+    /* Default the licence setting */
+    losc_set(PGM_PRD_OS_RESTRICTED);
+
     /* Default CPU type CP */
-    for (i = 0; i < MAX_CPU; i++)
+    for (i = 0; i < MAX_CPU_ENGINES; i++)
         sysblk.ptyp[i] = SCCB_PTYP_CP;
 
     /* Cap the default priorities at zero if setuid not available */
@@ -1002,7 +878,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         }
         if (inc_level < 0)
         {
-            fprintf(stderr, _("HHCCF004S No device records in file %s\n"),
+            logmsg(_("HHCCF004S No device records in file %s\n"),
                     fname);
             delayed_exit(1);
         }
@@ -1025,7 +901,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         {              
             if (++inc_level >= MAX_INC_LEVEL)
             {
-                fprintf(stderr, _( "HHCCF082S Error in %s line %d: "
+                logmsg(_( "HHCCF082S Error in %s line %d: "
                         "Maximum nesting level (%d) reached\n"),
                         fname, inc_stmtnum[inc_level-1], MAX_INC_LEVEL);
                 delayed_exit(1);
@@ -1040,13 +916,13 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 inc_level--;
                 if ( inc_ignore_errors == 1 ) 
                 {
-                    fprintf(stderr, _("HHCCF084W %s Open error ignored file %s: %s\n"),
+                    logmsg(_("HHCCF084W %s Open error ignored file %s: %s\n"),
                                     fname, operand, strerror(errno));
                     continue ;
                 }
                 else 
                 {
-                    fprintf(stderr, _("HHCCF085S %s Open error file %s: %s\n"),
+                    logmsg(_("HHCCF085S %s Open error file %s: %s\n"),
                                     fname, operand, strerror(errno));
                     delayed_exit(1);
                 }
@@ -1088,66 +964,27 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         sversion = NULL;
         smainsize = NULL;
         sxpndsize = NULL;
+        smaxcpu = NULL;
         snumcpu = NULL;
         snumvec = NULL;
         sengines = NULL;
-        sarchmode = NULL;
-        sloadparm = NULL;
         ssysepoch = NULL;
         syroffset = NULL;
         stzoffset = NULL;
-        sdiag8cmd = NULL;
-        sdiag8echo = NULL;
-        sshcmdopt = NULL;
-        stoddrag = NULL;
-        sostailor = NULL;
-        spanrate = NULL;
-        stimerint = NULL;
         shercprio = NULL;
         stodprio = NULL;
         scpuprio = NULL;
         sdevprio = NULL;
-        sdevtmax = NULL;
-        slegacysenseid = NULL;
-        spgmprdos = NULL;
         slogofile = NULL;
-        straceopt = NULL;
-        sconkpalv = NULL;
-        smountedtapereinit = NULL;
-        slogopt[0] = NULL;
-        logoptc = 0;
 #if defined(_FEATURE_ECPSVM)
         secpsvmlevel = NULL;
         secpsvmlvl = NULL;
         ecpsvmac = 0;
 #endif /*defined(_FEATURE_ECPSVM)*/
-#if defined(_FEATURE_ASN_AND_LX_REUSE)
-        sasnandlxreuse = NULL;
-#endif
+
 #if defined(OPTION_SHARED_DEVICES)
         sshrdport = NULL;
 #endif /*defined(OPTION_SHARED_DEVICES)*/
-#ifdef OPTION_IODELAY_KLUDGE
-        siodelay = NULL;
-#endif /*OPTION_IODELAY_KLUDGE*/
-#ifdef OPTION_PTTRACE
-        sptt = NULL;
-#endif /*OPTION_PTTRACE*/
-        scckd = NULL;
-#if defined(OPTION_LPARNAME)
-        lparname = NULL;
-#endif /*defined(OPTION_LPARNAME)*/
-#if defined(OPTION_SET_STSI_INFO)
-        stsi_model = NULL;
-        stsi_plant = NULL;
-        stsi_manufacturer = NULL;
-#endif /* defined(OPTION_SET_STSI_INFO) */
-#if defined( OPTION_SCSI_TAPE )
-        sauto_scsi_mount = NULL;
-#endif /* defined( OPTION_SCSI_TAPE ) */
-#if defined( HTTP_SERVER_CONNECT_KLUDGE )
-        shttp_server_kludge_msecs = NULL;
-#endif // defined( HTTP_SERVER_CONNECT_KLUDGE )
 
         /* Check for old-style CPU statement */
         if (scount == 0 && addargc == 5 && strlen(keyword) == 6
@@ -1159,27 +996,10 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             sxpndsize = addargv[1];
             config_cnslport = strdup(addargv[2]);
             snumcpu = addargv[3];
-            sloadparm = addargv[4];
+            set_loadparm(addargv[4]);
         }
         else
         {
-#if defined(OPTION_DYNAMIC_LOAD)
-            if (!strcasecmp (keyword, "modpath"))
-            {
-                hdl_setpath(strdup(operand));
-            }
-            else
-            if (!strcasecmp (keyword, "ldmod"))
-            {
-                hdl_load(operand, 0);
-
-                for(i = 0; i < addargc; i++)
-                    hdl_load(addargv[i], 0);
-
-                addargc = 0;
-            }
-            else
-#endif /*defined(OPTION_DYNAMIC_LOAD)*/
             if (strcasecmp (keyword, "cpuserial") == 0)
             {
                 sserial = operand;
@@ -1200,9 +1020,9 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 config_cnslport = strdup(operand);
             }
-            else if (strcasecmp (keyword, "conkpalv") == 0)
+            else if (strcasecmp (keyword, "maxcpu") == 0)
             {
-                sconkpalv = operand;
+                smaxcpu = operand;
             }
             else if (strcasecmp (keyword, "numcpu") == 0)
             {
@@ -1216,10 +1036,6 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 sengines = operand;
             }
-            else if (strcasecmp (keyword, "loadparm") == 0)
-            {
-                sloadparm = operand;
-            }
             else if (strcasecmp (keyword, "sysepoch") == 0)
             {
                 ssysepoch = operand;
@@ -1229,17 +1045,6 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                     addargc--;
                 }
             }
-            else if (strcasecmp (keyword, "logopt") == 0)
-            {
-                slogopt[0] = operand;
-                logoptc = addargc + 1;
-
-                for(i = 0; i < addargc; i++)
-                    slogopt[i+1] = addargv[i];
-
-                addargc = 0;
-
-            }
             else if (strcasecmp (keyword, "yroffset") == 0)
             {
                 syroffset = operand;
@@ -1247,41 +1052,6 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             else if (strcasecmp (keyword, "tzoffset") == 0)
             {
                 stzoffset = operand;
-            }
-            else if (strcasecmp (keyword, "diag8cmd") == 0)
-            {
-                sdiag8cmd = operand;
-                if(addargc)
-                {
-                    sdiag8echo = addargv[0];
-                    addargc--;
-                }
-            }
-            else if (strcasecmp (keyword, "SHCMDOPT") == 0)
-            {
-                sshcmdopt = operand;
-            }
-            else if (strcasecmp (keyword, "toddrag") == 0)
-            {
-                stoddrag = operand;
-            }
-#ifdef PANEL_REFRESH_RATE
-            else if (strcasecmp (keyword, "panrate") == 0)
-            {
-                spanrate = operand;
-            }
-#endif /*PANEL_REFRESH_RATE*/
-            else if (strcasecmp (keyword, "timerint") == 0)
-            {
-                stimerint = operand;
-            }
-            else if (strcasecmp (keyword, "ostailor") == 0)
-            {
-                sostailor = operand;
-            }
-            else if (strcasecmp (keyword, "archmode") == 0)
-            {
-                sarchmode = operand;
             }
             else if (strcasecmp (keyword, "cpuverid") == 0)
             {
@@ -1303,25 +1073,9 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 sdevprio = operand;
             }
-            else if (strcasecmp (keyword, "devtmax") == 0)
-            {
-                sdevtmax = operand;
-            }
-            else if (strcasecmp (keyword, "legacysenseid") == 0)
-            {
-                slegacysenseid = operand;
-            }
-            else if (strcasecmp (keyword, "pgmprdos") == 0)
-            {
-                spgmprdos = operand;
-            }
-            else if (strcasecmp (keyword, "codepage") == 0)
-            {
-                set_codepage(operand);
-            }
             else if (strcasecmp (keyword, "logofile") == 0)
             {
-                fprintf(stderr, _("HHCCF061W Warning in %s line %d: "
+                logmsg(_("HHCCF061W Warning in %s line %d: "
                     "LOGOFILE statement deprecated. Use HERCLOGO instead\n"),
                     fname, inc_stmtnum[inc_level]);
                 slogofile=operand;
@@ -1330,21 +1084,6 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             {
                 slogofile=operand;
             }
-            else if (strcasecmp (keyword, "pantitle") == 0)
-            {
-                if (sysblk.pantitle)
-                    free(sysblk.pantitle);
-                sysblk.pantitle = strdup(operand);
-            }
-            else if (strcasecmp (keyword, "mounted_tape_reinit") == 0)
-            {
-                smountedtapereinit = operand;
-            }
-            else if (strcasecmp (keyword, "traceopt") == 0
-                     || strcasecmp (keyword, "symptom") == 0)
-            {
-                straceopt = operand;
-            }
 #if defined(_FEATURE_ECPSVM)
             /* ECPS:VM support */
             else if(strcasecmp(keyword, "ecps:vm") == 0)
@@ -1352,7 +1091,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 secpsvmlevel=operand;
                 secpsvmlvl=addargv[0];
                 ecpsvmac=addargc;
-                fprintf(stderr, _("HHCCF061W Warning in %s line %d: "
+                logmsg(_("HHCCF061W Warning in %s line %d: "
                     "ECPS:VM Statement deprecated. Use ECPSVM instead\n"),
                     fname, inc_stmtnum[inc_level]);
                 addargc=0;
@@ -1365,202 +1104,6 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 addargc=0;
             }
 #endif /*defined(_FEATURE_ECPSVM)*/
-#ifdef OPTION_IODELAY_KLUDGE
-            else if (strcasecmp (keyword, "iodelay") == 0)
-            {
-                siodelay = operand;
-                if (addargc > 0)
-                {
-                    siodelay_warn = addargv[0];
-                    addargc--;
-                }
-            }
-#endif /*OPTION_IODELAY_KLUDGE*/
-#ifdef OPTION_PTTRACE
-            else if (strcasecmp (keyword, "ptt") == 0)
-            {
-                sptt = operand;
-            }
-#endif /*OPTION_PTTRACE*/
-#if defined(OPTION_CONFIG_SYMBOLS)
-            else if (strcasecmp(keyword,"defsym")==0)
-            {
-                /* Execute this operation immediatelly */
-                if(operand==NULL)
-                {
-                    fprintf(stderr, _("HHCCF059S Error in %s line %d: "
-                        "Missing symbol name on DEFSYM statement\n"),
-                        fname, inc_stmtnum[inc_level]);
-                    delayed_exit(1);
-                }
-                if(addargc!=1)
-                {
-                    fprintf(stderr, _("HHCCF060S Error in %s line %d: "
-                        "DEFSYM requires a single symbol value (include quotation marks if necessary)\n"),
-                        fname, inc_stmtnum[inc_level]);
-                    delayed_exit(1);
-                }
-        /*
-                subval=resolve_symbol_string(addargv[0]);
-                if(subval!=NULL)
-                {
-                    set_symbol(operand,subval);
-                    free(subval);
-                }
-                else
-                {
-        */
-                    set_symbol(operand,addargv[0]);
-        /*
-                }
-        */
-                addargc--;
-            }
-#endif /* defined(OPTION_CONFIG_SYMBOLS) */
-#if defined(OPTION_HTTP_SERVER)
-            else if (strcasecmp (keyword, "httpport") == 0)
-            {
-                if (!operand)
-                {
-                    fprintf(stderr, _("HHCCF007S Error in %s line %d: "
-                        "Missing argument.\n"),
-                        fname, inc_stmtnum[inc_level]);
-                    delayed_exit(1);
-                }
-                if (sscanf(operand, "%hu%c", &sysblk.httpport, &c) != 1
-                    || sysblk.httpport == 0 || (sysblk.httpport < 1024 && sysblk.httpport != 80) )
-                {
-                    fprintf(stderr, _("HHCCF029S Error in %s line %d: "
-                            "Invalid HTTP port number %s\n"),
-                            fname, inc_stmtnum[inc_level], operand);
-                    delayed_exit(1);
-                }
-                if (addargc > 0)
-                {
-                    if (!strcasecmp(addargv[0],"auth"))
-                        sysblk.httpauth = 1;
-                    else if (strcasecmp(addargv[0],"noauth"))
-                    {
-                        fprintf(stderr, _("HHCCF005S Error in %s line %d: "
-                            "Unrecognized argument %s\n"),
-                            fname, inc_stmtnum[inc_level], addargv[0]);
-                        delayed_exit(1);
-                    }
-                    addargc--;
-                }
-                if (addargc > 0)
-                {
-                    if (sysblk.httpuser) free(sysblk.httpuser);
-                    sysblk.httpuser = strdup(addargv[1]);
-                    if (--addargc)
-                    {
-                        if (sysblk.httppass) free(sysblk.httppass);
-                        sysblk.httppass = strdup(addargv[2]);
-                    }
-                    else
-                    {
-                        fprintf(stderr, _("HHCCF006S Error in %s line %d: "
-                            "Userid, but no password given %s\n"),
-                            fname, inc_stmtnum[inc_level], addargv[1]);
-                        delayed_exit(1);
-                    }
-                    addargc--;
-                }
-
-            }
-            else if (strcasecmp (keyword, "httproot") == 0)
-            {
-                if (!operand)
-                {
-                    fprintf(stderr, _("HHCCF007S Error in %s line %d: "
-                        "Missing argument.\n"),
-                        fname, inc_stmtnum[inc_level]);
-                    delayed_exit(1);
-                }
-                if (sysblk.httproot) free(sysblk.httproot);
-                sysblk.httproot = strdup(operand);
-                /* (will be validated later) */
-            }
-#endif /*defined(OPTION_HTTP_SERVER)*/
-#if defined( OPTION_TAPE_AUTOMOUNT )
-            else if (strcasecmp (keyword, "automount") == 0)
-            {
-                char tamdir[MAX_PATH+1]; /* +1 for optional '+' or '-' prefix */
-                TAMDIR* pTAMDIR = NULL;
-
-                if (!operand)
-                {
-                    fprintf(stderr, _("HHCCF007S Error in %s line %d: "
-                        "Missing argument.\n"),
-                        fname, inc_stmtnum[inc_level]);
-                    delayed_exit(1);
-                }
-
-                strlcpy (tamdir, operand, sizeof(tamdir));
-                rc = add_tamdir( tamdir, &pTAMDIR );
-
-                switch (rc)
-                {
-                    default:     /* (oops!) */
-                    {
-                        logmsg( _("HHCCF999S **LOGIC ERROR** file \"%s\", line %d\n"),
-                            __FILE__, __LINE__);
-                        delayed_exit(1);
-                    }
-                    break;
-
-                    case 5:     /* ("out of memory") */
-                    {
-                        logmsg( _("HHCCF900S Out of memory!\n"));
-                        delayed_exit(1);
-                    }
-                    break;
-
-                    case 1:     /* ("unresolvable path") */
-                    case 2:     /* ("path inaccessible") */
-                    {
-                        logmsg( _("HHCCF091S Invalid AUTOMOUNT directory: \"%s\": %s\n"),
-                               tamdir, strerror(errno));
-                        delayed_exit(1);
-                    }
-                    break;
-
-                    case 3:     /* ("conflict w/previous") */
-                    {
-                        logmsg( _("HHCCF092S AUTOMOUNT directory \"%s\""
-                            " conflicts with previous specification\n"),
-                            tamdir);
-                        delayed_exit(1);
-                    }
-                    break;
-
-                    case 4:     /* ("duplicates previous") */
-                    {
-                        logmsg( _("HHCCF093E AUTOMOUNT directory \"%s\""
-                            " duplicates previous specification\n"),
-                            tamdir);
-                        /* (non-fatal) */
-                    }
-                    break;
-
-                    case 0:     /* ("success") */
-                    {
-                        logmsg(_("HHCCF090I %s%s AUTOMOUNT directory = \"%s\"\n"),
-                            pTAMDIR->dir == sysblk.defdir ? "Default " : "",
-                            pTAMDIR->rej ? "Disallowed" : "Allowed",
-                            pTAMDIR->dir);
-                    }
-                    break;
-                }
-            }
-#endif /* OPTION_TAPE_AUTOMOUNT */
-#if defined(_FEATURE_ASN_AND_LX_REUSE)
-            else if (strcasecmp(keyword,"asn_and_lx_reuse") == 0
-                     || strcasecmp(keyword,"alrf") == 0)
-            {
-                sasnandlxreuse = operand;
-            }
-#endif /* defined(_FEATURE_ASN_AND_LX_REUSE) */
 
 #if defined(OPTION_SHARED_DEVICES)
             else if (strcasecmp (keyword, "shrdport") == 0)
@@ -1568,50 +1111,11 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 sshrdport = operand;
             }
 #endif /*defined(OPTION_SHARED_DEVICES)*/
-            else if (strcasecmp (keyword, "cckd") == 0)
-            {
-                scckd = operand;
-            }
 
-#if defined(OPTION_LPARNAME)
-            else if (strcasecmp (keyword, "lparname") == 0)
-            {
-               lparname = operand;
-            }
-#endif /*defined(OPTION_LPARNAME)*/
-
-#if defined(OPTION_SET_STSI_INFO)
-            else if (strcasecmp (keyword, "model") == 0)
-            {
-                stsi_model = operand;
-            }
-            else if (strcasecmp (keyword, "plant") == 0)
-            {
-                stsi_plant = operand;
-            }
-            else if (strcasecmp (keyword, "manufacturer") == 0)
-            {
-                stsi_manufacturer = operand;
-            }
-#endif /* defined(OPTION_SET_STSI_INFO) */
-
-#if defined( OPTION_SCSI_TAPE )
-            else if (strcasecmp (keyword, "auto_scsi_mount") == 0)
-            {
-               sauto_scsi_mount = operand;
-            }
-#endif /* defined( OPTION_SCSI_TAPE ) */
-
-#if defined( HTTP_SERVER_CONNECT_KLUDGE )
-            else if (strcasecmp (keyword, "HTTP_SERVER_CONNECT_KLUDGE") == 0)
-            {
-               shttp_server_kludge_msecs = operand;
-            }
-#endif // defined( HTTP_SERVER_CONNECT_KLUDGE )
             else
             {
                 logmsg( _("HHCCF008E Error in %s line %d: "
-                        "Unrecognized keyword %s\n"),
+                        "Syntax error: %s\n"),
                         fname, inc_stmtnum[inc_level], keyword);
                 operand = "";
                 addargc = 0;
@@ -1627,69 +1131,6 @@ char    pathname[MAX_PATH];             /* file path in host format  */
 
         } /* end else (not old-style CPU statement) */
 
-        if (sarchmode != NULL)
-        {
-#if defined(_370)
-            if (strcasecmp (sarchmode, arch_name[ARCH_370]) == 0)
-            {
-                archmode = ARCH_370;
-            }
-            else
-#endif
-#if defined(_390)
-            if (strcasecmp (sarchmode, arch_name[ARCH_390]) == 0)
-            {
-                archmode = ARCH_390;
-            }
-            else
-#endif
-#if defined(_900)
-            if (0
-                || strcasecmp (sarchmode, arch_name[ARCH_900]) == 0
-                || strcasecmp (sarchmode, "ESAME") == 0
-            )
-            {
-                archmode = ARCH_900;
-            }
-            else
-#endif
-            {
-                fprintf(stderr, _("HHCCF010S Error in %s line %d: "
-                        "Unknown or unsupported ARCHMODE specification %s\n"),
-                        fname, inc_stmtnum[inc_level], sarchmode);
-                delayed_exit(1);
-            }
-        }
-        sysblk.arch_mode = archmode;
-#if defined(_900)
-        /* Indicate if z/Architecture is supported */
-        sysblk.arch_z900 = sysblk.arch_mode != ARCH_390;
-#endif
-        /* Parse "logopt" operands */
-        if (slogopt[0])
-        {
-            for(i=0; i < logoptc; i++)
-            {
-                if (strcasecmp(slogopt[i],"timestamp") == 0 ||
-                    strcasecmp(slogopt[i],"time"     ) == 0)
-                {
-                    sysblk.logoptnotime = 0;
-                    continue;
-                }
-                if (strcasecmp(slogopt[i],"notimestamp") == 0 ||
-                    strcasecmp(slogopt[i],"notime"     ) == 0)
-                {
-                    sysblk.logoptnotime = 1;
-                    continue;
-                }
-
-                fprintf(stderr, _("HHCCF089S Error in %s line %d: "
-                        "Invalid log option keyword %s\n"),
-                        fname, inc_stmtnum[inc_level], slogopt[i]);
-                delayed_exit(1);
-            } /* for(i=0; i < logoptc; i++) */
-        }
-
         /* Parse CPU version number operand */
         if (sversion != NULL)
         {
@@ -1697,7 +1138,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 || sscanf(sversion, "%hx%c", &version, &c) != 1
                 || version>255)
             {
-                fprintf(stderr, _("HHCCF012S Error in %s line %d: "
+                logmsg(_("HHCCF012S Error in %s line %d: "
                         "%s is not a valid CPU version code\n"),
                         fname, inc_stmtnum[inc_level], sversion);
                 delayed_exit(1);
@@ -1711,7 +1152,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             if (strlen(sserial) != 6
                 || sscanf(sserial, "%x%c", &serial, &c) != 1)
             {
-                fprintf(stderr, _("HHCCF051S Error in %s line %d: "
+                logmsg(_("HHCCF051S Error in %s line %d: "
                         "%s is not a valid serial number\n"),
                         fname, inc_stmtnum[inc_level], sserial);
                 delayed_exit(1);
@@ -1724,7 +1165,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             if (strlen(smodel) != 4
                 || sscanf(smodel, "%hx%c", &model, &c) != 1)
             {
-                fprintf(stderr, _("HHCCF012S Error in %s line %d: "
+                logmsg(_("HHCCF012S Error in %s line %d: "
                         "%s is not a valid CPU model\n"),
                         fname, inc_stmtnum[inc_level], smodel);
                 delayed_exit(1);
@@ -1735,9 +1176,11 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         if (smainsize != NULL)
         {
             if (sscanf(smainsize, "%u%c", &mainsize, &c) != 1
-             || mainsize < 2)
+             || mainsize < 2
+             || (mainsize > 4095 && sizeof(sysblk.mainsize) < 8)
+             || (mainsize > 4095 && sizeof(size_t) < 8))
             {
-                fprintf(stderr, _("HHCCF013S Error in %s line %d: "
+                logmsg(_("HHCCF013S Error in %s line %d: "
                         "Invalid main storage size %s\n"),
                         fname, inc_stmtnum[inc_level], smainsize);
                 delayed_exit(1);
@@ -1748,9 +1191,10 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         if (sxpndsize != NULL)
         {
             if (sscanf(sxpndsize, "%u%c", &xpndsize, &c) != 1
-                || xpndsize > 1024)
+                || xpndsize > (0x100000000ULL / XSTORE_PAGESIZE) - 1
+                || (xpndsize > 4095 && sizeof(size_t) < 8))
             {
-                fprintf(stderr, _("HHCCF014S Error in %s line %d: "
+                logmsg(_("HHCCF014S Error in %s line %d: "
                         "Invalid expanded storage size %s\n"),
                         fname, inc_stmtnum[inc_level], sxpndsize);
                 delayed_exit(1);
@@ -1761,7 +1205,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         if (shercprio != NULL)
             if (sscanf(shercprio, "%d%c", &hercprio, &c) != 1)
             {
-                fprintf(stderr, _("HHCCF016S Error in %s line %d: "
+                logmsg(_("HHCCF016S Error in %s line %d: "
                         "Invalid Hercules process group thread priority %s\n"),
                         fname, inc_stmtnum[inc_level], shercprio);
                 delayed_exit(1);
@@ -1782,7 +1226,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         if (stodprio != NULL)
             if (sscanf(stodprio, "%d%c", &todprio, &c) != 1)
             {
-                fprintf(stderr, _("HHCCF016S Error in %s line %d: "
+                logmsg(_("HHCCF016S Error in %s line %d: "
                         "Invalid TOD Clock thread priority %s\n"),
                         fname, inc_stmtnum[inc_level], stodprio);
                 delayed_exit(1);
@@ -1803,7 +1247,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         if (scpuprio != NULL)
             if (sscanf(scpuprio, "%d%c", &cpuprio, &c) != 1)
             {
-                fprintf(stderr, _("HHCCF016S Error in %s line %d: "
+                logmsg(_("HHCCF016S Error in %s line %d: "
                         "Invalid CPU thread priority %s\n"),
                         fname, inc_stmtnum[inc_level], scpuprio);
                 delayed_exit(1);
@@ -1824,7 +1268,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         if (sdevprio != NULL)
             if (sscanf(sdevprio, "%d%c", &devprio, &c) != 1)
             {
-                fprintf(stderr, _("HHCCF016S Error in %s line %d: "
+                logmsg(_("HHCCF016S Error in %s line %d: "
                         "Invalid device thread priority %s\n"),
                         fname, inc_stmtnum[inc_level], sdevprio);
                 delayed_exit(1);
@@ -1842,7 +1286,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         if (sdevprio != NULL)
             if (sscanf(sdevprio, "%d%c", &devprio, &c) != 1)
             {
-                fprintf(stderr, _("HHCCF016S Error in %s line %d: "
+                logmsg(_("HHCCF016S Error in %s line %d: "
                         "Invalid device thread priority %s\n"),
                         fname, inc_stmtnum[inc_level], sdevprio);
                 delayed_exit(1);
@@ -1856,13 +1300,27 @@ char    pathname[MAX_PATH];             /* file path in host format  */
 
         sysblk.devprio = devprio;
 
+        /* Parse maximum number of CPUs operand */
+        if (smaxcpu != NULL)
+        {
+            if (sscanf(smaxcpu, "%hu%c", &maxcpu, &c) != 1
+                || maxcpu < 1
+                || maxcpu > MAX_CPU_ENGINES)
+            {
+                fprintf(stderr, _("HHCCF021S Error in %s line %d: "
+                        "Invalid maximum number of CPUs %s\n"),
+                        fname, inc_stmtnum[inc_level], smaxcpu);
+                delayed_exit(1);
+            }
+        }
+
         /* Parse number of CPUs operand */
         if (snumcpu != NULL)
         {
             if (sscanf(snumcpu, "%hu%c", &numcpu, &c) != 1
                 || numcpu > MAX_CPU_ENGINES)
             {
-                fprintf(stderr, _("HHCCF018S Error in %s line %d: "
+                logmsg(_("HHCCF018S Error in %s line %d: "
                         "Invalid number of CPUs %s\n"),
                         fname, inc_stmtnum[inc_level], snumcpu);
                 delayed_exit(1);
@@ -1877,7 +1335,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             if (sscanf(snumvec, "%hu%c", &numvec, &c) != 1
                 || numvec > MAX_CPU_ENGINES)
             {
-                fprintf(stderr, _("HHCCF019S Error in %s line %d: "
+                logmsg(_("HHCCF019S Error in %s line %d: "
                         "Invalid number of VFs %s\n"),
                         fname, inc_stmtnum[inc_level], snumvec);
                 delayed_exit(1);
@@ -1901,7 +1359,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                     if (sscanf(styp, "%d%c", &count, &c) != 2
                         || c != '*' || count < 1)
                     {
-                        fprintf(stderr, _("HHCCF074S Error in %s line %d: "
+                        logmsg(_("HHCCF074S Error in %s line %d: "
                                 "Invalid engine syntax %s\n"),
                                 fname, inc_stmtnum[inc_level], styp);
                         delayed_exit(1);
@@ -1920,7 +1378,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 else if (strcasecmp(styp,"ip") == 0)
                     ptyp = SCCB_PTYP_SUP;
                 else {
-                    fprintf(stderr, _("HHCCF075S Error in %s line %d: "
+                    logmsg(_("HHCCF075S Error in %s line %d: "
                             "Invalid engine type %s\n"),
                             fname, inc_stmtnum[inc_level], styp);
                     delayed_exit(1);
@@ -1936,21 +1394,6 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             }
         }
 
-        /* Parse load parameter operand */
-        if (sloadparm != NULL)
-        {
-            if (strlen(sloadparm) > 8)
-            {
-                fprintf(stderr, _("HHCCF021S Error in %s line %d: "
-                        "Load parameter %s exceeds 8 characters\n"),
-                        fname, inc_stmtnum[inc_level], sloadparm);
-                delayed_exit(1);
-            }
-
-            /* Convert the load parameter to EBCDIC */
-            set_loadparm(sloadparm);
-        }
-
         /* Parse system epoch operand */
         if (ssysepoch != NULL)
         {
@@ -1958,7 +1401,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 || sscanf(ssysepoch, "%d%c", &sysepoch, &c) != 1
                 || sysepoch <= 1800 || sysepoch >= 2100)
             {
-                fprintf(stderr, _("HHCCF022S Error in %s line %d: "
+                logmsg(_("HHCCF022S Error in %s line %d: "
                         "%s is not a valid system epoch.\n"
                         "          The only valid values are "
                         "1801-2099\n"),
@@ -1973,7 +1416,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             if (sscanf(syroffset, "%d%c", &yroffset, &c) != 1
                 || (yroffset < -142) || (yroffset > 142))
             {
-                fprintf(stderr, _("HHCCF070S Error in %s line %d: "
+                logmsg(_("HHCCF070S Error in %s line %d: "
                         "%s is not a valid year offset\n"),
                         fname, inc_stmtnum[inc_level], syroffset);
                 delayed_exit(1);
@@ -1987,350 +1430,19 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 || sscanf(stzoffset, "%d%c", &tzoffset, &c) != 1
                 || (tzoffset < -2359) || (tzoffset > 2359))
             {
-                fprintf(stderr, _("HHCCF023S Error in %s line %d: "
+                logmsg(_("HHCCF023S Error in %s line %d: "
                         "%s is not a valid timezone offset\n"),
                         fname, inc_stmtnum[inc_level], stzoffset);
                 delayed_exit(1);
             }
         }
 
-        /* Parse diag8cmd operand */
-        if (sdiag8cmd != NULL)
-        {
-            int d8ena=0,d8echo=1;
-            do
-            {
-                if(strcasecmp(sdiag8cmd,"enable")==0)
-                {
-                    d8ena=1;
-                    break;
-                }
-                if(strcasecmp(sdiag8cmd,"disable")==0)
-                {
-                    break;
-                }
-                fprintf(stderr, _("HHCCF052S Error in %s line %d: "
-                        "invalid diag8cmd option : Operand 1 should be ENABLE or DISABLE\n"),
-                        fname, inc_stmtnum[inc_level]);
-                delayed_exit(1);
-            } while(0);
-            if(sdiag8echo != NULL)
-            {
-                do
-                {
-                    if(strcasecmp(sdiag8echo,"echo")==0)
-                    {
-                        d8echo=1;
-                        break;
-                    }
-                    if(strcasecmp(sdiag8echo,"noecho")==0)
-                    {
-                        d8echo=0;
-                        break;
-                    }
-                    fprintf(stderr, _("HHCCF053S Error in %s line %d: "
-                            "incorrect diag8cmd option : Operand 2 should be ECHO or NOECHO\n"),
-                            fname, inc_stmtnum[inc_level]);
-                    delayed_exit(1);
-                } while(0);
-            }
-
-            diag8cmd=0;
-
-            if (d8ena)
-            {
-                diag8cmd = 1;
-            }
-            if(d8echo==0)
-            {
-                diag8cmd|=0x80;
-            }
-        }
-
-        /* Parse SHCMDOPT operand */
-        if (sshcmdopt != NULL)
-        {
-            if (strcasecmp (sshcmdopt, "DISABLE") == 0)
-                shcmdopt = SHCMDOPT_DISABLE;
-            else
-            if (strcasecmp (sshcmdopt, "NODIAG8") == 0)
-                shcmdopt = SHCMDOPT_NODIAG8;
-            else
-            {
-                fprintf(stderr, _("HHCCF052S Error in %s line %d: "
-                        "%s: invalid argument\n"),
-                        fname, inc_stmtnum[inc_level], sshcmdopt);
-                delayed_exit(1);
-            }
-        }
-
-        /* Parse TOD clock drag factor operand */
-        if (stoddrag != NULL)
-        {
-            if (sscanf(stoddrag, "%lf%c", &toddrag, &c) != 1
-                || toddrag < 0.0001 || toddrag > 10000.0)
-            {
-                fprintf(stderr, _("HHCCF024S Error in %s line %d: "
-                        "Invalid TOD clock drag factor %s\n"),
-                        fname, inc_stmtnum[inc_level], stoddrag);
-                delayed_exit(1);
-            }
-        }
-
-#ifdef PANEL_REFRESH_RATE
-        /* Parse panel refresh rate operand */
-        if (spanrate != NULL)
-        {
-            switch (toupper((char)spanrate[0]))
-            {
-            case 'F': /* fast */
-                panrate = PANEL_REFRESH_RATE_FAST;
-                break;
-            case 'S': /* slow */
-                panrate = PANEL_REFRESH_RATE_SLOW;
-                break;
-            default:
-                if (sscanf(spanrate, "%u%c", &panrate, &c) != 1
-                    || panrate < (1000/CLK_TCK) || panrate > 5000)
-                {
-                    fprintf(stderr, _("HHCCF025S Error in %s line %d: "
-                            "Invalid panel refresh rate %s\n"),
-                            fname, inc_stmtnum[inc_level], spanrate);
-                    delayed_exit(1);
-                }
-            }
-        }
-#endif /*PANEL_REFRESH_RATE*/
-
-        /* Parse timer update interval*/
-        if (stimerint)
-        {
-            if  (strcasecmp (stimerint, "default") == 0)
-                timerint = DEFAULT_TIMER_REFRESH_USECS;
-            else
-            {
-                if (0
-                    || sscanf(stimerint, "%d%c", &timerint, &c) != 1
-                    || timerint < 1
-                    || timerint > 1000000
-                )
-                {
-                    fprintf(stderr, _("HHCCF025S Error in %s line %d: "
-                            "Invalid timer update interval %s\n"),
-                            fname, inc_stmtnum[inc_level], stimerint);
-                    delayed_exit(1);
-                }
-            }
-        }
-
-        /* Parse OS tailoring operand */
-        if (sostailor != NULL)
-        {
-            if (strcasecmp (sostailor, "OS/390") == 0)
-            {
-                ostailor = OS_OS390;
-            }
-            else if (strcasecmp (sostailor, "+OS/390") == 0)
-            {
-                ostailor &= OS_OS390;
-            }
-            else if (strcasecmp (sostailor, "-OS/390") == 0)
-            {
-                ostailor |= ~OS_OS390;
-            }
-            else if (strcasecmp (sostailor, "Z/OS") == 0)
-            {
-                ostailor = OS_ZOS;
-            }
-            else if (strcasecmp (sostailor, "+Z/OS") == 0)
-            {
-                ostailor &= OS_ZOS;
-            }
-            else if (strcasecmp (sostailor, "-Z/OS") == 0)
-            {
-                ostailor |= ~OS_ZOS;
-            }
-            else if (strcasecmp (sostailor, "VSE") == 0)
-            {
-                ostailor = OS_VSE;
-            }
-            else if (strcasecmp (sostailor, "+VSE") == 0)
-            {
-                ostailor &= OS_VSE;
-            }
-            else if (strcasecmp (sostailor, "-VSE") == 0)
-            {
-                ostailor |= ~OS_VSE;
-            }
-            else if (strcasecmp (sostailor, "VM") == 0)
-            {
-                ostailor = OS_VM;
-            }
-            else if (strcasecmp (sostailor, "+VM") == 0)
-            {
-                ostailor &= OS_VM;
-            }
-            else if (strcasecmp (sostailor, "-VM") == 0)
-            {
-                ostailor |= ~OS_VM;
-            }
-            else if (strcasecmp (sostailor, "LINUX") == 0)
-            {
-                ostailor = OS_LINUX;
-            }
-            else if (strcasecmp (sostailor, "+LINUX") == 0)
-            {
-                ostailor &= OS_LINUX;
-            }
-            else if (strcasecmp (sostailor, "-LINUX") == 0)
-            {
-                ostailor |= ~OS_LINUX;
-            }
-            else if (strcasecmp (sostailor, "NULL") == 0)
-            {
-                ostailor = 0xFFFFFFFFFFFFFFFFULL;
-            }
-            else if (strcasecmp (sostailor, "QUIET") == 0)
-            {
-                ostailor = 0;
-            }
-            else
-            {
-                fprintf(stderr, _("HHCCF026S Error in %s line %d: "
-                        "Unknown OS tailor specification %s\n"),
-                        fname, inc_stmtnum[inc_level], sostailor);
-                delayed_exit(1);
-            }
-        }
-
-        /* Parse Maximum number of device threads */
-        if (sdevtmax != NULL)
-        {
-            if (sscanf(sdevtmax, "%d%c", &devtmax, &c) != 1
-                || devtmax < -1)
-            {
-                fprintf(stderr, _("HHCCF027S Error in %s line %d: "
-                        "Invalid maximum device threads %s\n"),
-                        fname, inc_stmtnum[inc_level], sdevtmax);
-                delayed_exit(1);
-            }
-        }
-
-        /* Parse Legacy SenseID option */
-        if (slegacysenseid != NULL)
-        {
-            if(strcasecmp(slegacysenseid,"enable") == 0)
-            {
-                legacysenseid = 1;
-            }
-            if(strcasecmp(slegacysenseid,"on") == 0)
-            {
-                legacysenseid = 1;
-            }
-            if(strcasecmp(slegacysenseid,"disable") == 0)
-            {
-                legacysenseid = 0;
-            }
-            if(strcasecmp(slegacysenseid,"off") == 0)
-            {
-                legacysenseid = 0;
-            }
-        }
-
-        /* Parse program product OS allowed */
-        if (spgmprdos != NULL)
-        {
-            if (strcasecmp (spgmprdos, "LICENSED") == 0)
-            {
-                pgmprdos = PGM_PRD_OS_LICENSED;
-            }
-            /* Handle silly British spelling. */
-            else if (strcasecmp (spgmprdos, "LICENCED") == 0)
-            {
-                pgmprdos = PGM_PRD_OS_LICENSED;
-            }
-            else if (strcasecmp (spgmprdos, "RESTRICTED") == 0)
-            {
-                pgmprdos = PGM_PRD_OS_RESTRICTED;
-            }
-            else
-            {
-                fprintf(stderr, _("HHCCF028S Error in %s line %d: "
-                        "Invalid program product OS permission %s\n"),
-                        fname, inc_stmtnum[inc_level], spgmprdos);
-                delayed_exit(1);
-            }
-        }
 
         /* Parse terminal logo option */
         if (slogofile != NULL)
         {
             strncpy(hlogofile, slogofile, sizeof(hlogofile)-1);
             hlogofile[sizeof(hlogofile)-1] = '\0';
-        }
-
-        /* Parse "traceopt" option */
-        if (straceopt)
-        {
-            if (strcasecmp(straceopt, "traditional") == 0)
-            {
-                sysblk.showregsfirst = 0;
-                sysblk.showregsnone = 0;
-            }
-            else if (strcasecmp(straceopt, "regsfirst") == 0)
-            {
-                sysblk.showregsfirst = 1;
-                sysblk.showregsnone = 0;
-            }
-            else if (strcasecmp(straceopt, "noregs") == 0)
-            {
-                sysblk.showregsfirst = 0;
-                sysblk.showregsnone = 1;
-            }
-            else
-            {
-                fprintf(stderr, _("HHCCF088S Error in %s line %d: "
-                        "Invalid trace option keyword %s\n"),
-                        fname, inc_stmtnum[inc_level], straceopt);
-                delayed_exit(1);
-            }
-        }
-
-        /* Parse "conkpalv" option */
-        if (sconkpalv)
-        {
-            int idle, intv, cnt;
-            if (parse_conkpalv(sconkpalv, &idle, &intv, &cnt) != 0)
-            {
-                fprintf(stderr, _("HHCCF088S Error in %s line %d: "
-                        "Invalid format: %s\n"),
-                        fname, inc_stmtnum[inc_level], sconkpalv);
-                delayed_exit(1);
-            }
-            sysblk.kaidle = idle;
-            sysblk.kaintv = intv;
-            sysblk.kacnt  = cnt;
-        }
-
-        /* Parse "mounted_tape_reinit" option */
-        if ( smountedtapereinit )
-        {
-            if ( strcasecmp( smountedtapereinit, "disallow" ) == 0 )
-            {
-                sysblk.nomountedtapereinit = 1;
-            }
-            else if ( strcasecmp( smountedtapereinit, "allow" ) == 0 )
-            {
-                sysblk.nomountedtapereinit = 0;
-            }
-            else
-            {
-                fprintf(stderr, _("HHCCF052S Error in %s line %d: "
-                        "%s: invalid argument\n"),
-                        fname, inc_stmtnum[inc_level], smountedtapereinit);
-                delayed_exit(1);
-            }
-            smountedtapereinit = NULL;
         }
 
 #if defined(_FEATURE_ECPSVM)
@@ -2406,151 +1518,13 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             if (sscanf(sshrdport, "%hu%c", &shrdport, &c) != 1
                 || shrdport < 1024 )
             {
-                fprintf(stderr, _("HHCCF029S Error in %s line %d: "
+                logmsg(_("HHCCF029S Error in %s line %d: "
                         "Invalid SHRDPORT port number %s\n"),
                         fname, inc_stmtnum[inc_level], sshrdport);
                 delayed_exit(1);
             }
         }
 #endif /*defined(OPTION_SHARED_DEVICES)*/
-
-#if defined(_FEATURE_ASN_AND_LX_REUSE)
-        /* Parse asn_and_lx_reuse (alrf) operand */
-        if(sasnandlxreuse != NULL)
-        {
-            if(strcasecmp(sasnandlxreuse,"enable")==0)
-            {
-                asnandlxreuse=1;
-            }
-            else
-            {
-                if(strcasecmp(sasnandlxreuse,"disable")==0)
-                {
-                    asnandlxreuse=0;
-                }
-                else {
-                    fprintf(stderr, _("HHCCF067S Error in %s line %d: "
-                                "Incorrect keyword %s for the ASN_AND_LX_REUSE statement.\n"),
-                                fname, inc_stmtnum[inc_level], sasnandlxreuse);
-                                delayed_exit(1);
-                }
-            }
-        }
-#endif /*defined(_FEATURE_ASN_AND_LX_REUSE)*/
-
-#ifdef OPTION_IODELAY_KLUDGE
-        /* Parse I/O delay value */
-        if (siodelay != NULL)
-        {
-            if (sscanf(siodelay, "%d%c", &iodelay, &c) != 1)
-            {
-                fprintf(stderr, _("HHCCF030S Error in %s line %d: "
-                        "Invalid I/O delay value: %s\n"),
-                        fname, inc_stmtnum[inc_level], siodelay);
-                delayed_exit(1);
-            }
-            /* See http://games.groups.yahoo.com/group/zHercules/message/10688 */
-            iodelay_warn = iodelay;
-            if (siodelay_warn != NULL
-             && (strcasecmp(siodelay_warn, "NOWARN") == 0
-              || strcasecmp(siodelay_warn, "IKNOWWHATIMDOINGDAMMIT") == 0
-                )
-               )
-                iodelay_warn = 0;
-        }
-#endif /*OPTION_IODELAY_KLUDGE*/
-
-#ifdef OPTION_PTTRACE
-        /* Parse pthread trace value */
-        if (sptt != NULL)
-        {
-            if (sscanf(sptt, "%d%c", &ptt, &c) != 1)
-            {
-                fprintf(stderr, _("HHCCF031S Error in %s line %d: "
-                        "Invalid ptt value: %s\n"),
-                        fname, inc_stmtnum[inc_level], sptt);
-                delayed_exit(1);
-            }
-        }
-#endif /*OPTION_PTTRACE*/
-
-        /* Parse cckd value value */
-        if (scckd)
-            cckd_command (scckd, 0);
-
-#if defined(OPTION_LPARNAME)
-        if(lparname)
-            set_lparname(lparname);
-#endif /*defined(OPTION_LPARNAME)*/
-
-#if defined(OPTION_SET_STSI_INFO)
-        if(stsi_model)
-            set_model(stsi_model);
-        if(stsi_plant)
-            set_plant(stsi_plant);
-        if(stsi_manufacturer)
-            set_manufacturer(stsi_manufacturer);
-#endif /* defined(OPTION_SET_STSI_INFO) */
-
-#if defined( OPTION_SCSI_TAPE )
-        /* Parse automatic SCSI tape mounts operand */
-        if ( sauto_scsi_mount )
-        {
-            if ( strcasecmp( sauto_scsi_mount, "no" ) == 0 )
-            {
-                sysblk.auto_scsi_mount_secs = 0;
-            }
-            else if ( strcasecmp( sauto_scsi_mount, "yes" ) == 0 )
-            {
-                sysblk.auto_scsi_mount_secs = DEFAULT_AUTO_SCSI_MOUNT_SECS;
-            }
-            else
-            {
-                int auto_scsi_mount_secs;
-                if ( sscanf( sauto_scsi_mount, "%d%c", &auto_scsi_mount_secs, &c ) != 1
-                    || auto_scsi_mount_secs <= 0 || auto_scsi_mount_secs > 99 )
-                {
-                    fprintf
-                    (
-                        stderr,
-
-                        _( "HHCCF068S Error in %s line %d: Invalid Auto_SCSI_Mount value: %s\n" )
-
-                        ,fname
-                        ,inc_stmtnum[inc_level]
-                        ,sauto_scsi_mount
-                    );
-                    delayed_exit(1);
-                }
-                sysblk.auto_scsi_mount_secs = auto_scsi_mount_secs;
-            }
-            sauto_scsi_mount = NULL;
-        }
-#endif /* defined( OPTION_SCSI_TAPE ) */
-
-#if defined( HTTP_SERVER_CONNECT_KLUDGE )
-        if ( shttp_server_kludge_msecs )
-        {
-            int http_server_kludge_msecs;
-            if ( sscanf( shttp_server_kludge_msecs, "%d%c", &http_server_kludge_msecs, &c ) != 1
-                || http_server_kludge_msecs <= 0 || http_server_kludge_msecs > 50 )
-            {
-                fprintf
-                (
-                    stderr,
-
-                    _( "HHCCF066S Error in %s line %d: Invalid HTTP_SERVER_CONNECT_KLUDGE value: %s\n" )
-
-                    ,fname
-                    ,inc_stmtnum[inc_level]
-                    ,shttp_server_kludge_msecs
-                );
-                delayed_exit(1);
-            }
-            sysblk.http_server_kludge_msecs = http_server_kludge_msecs;
-            shttp_server_kludge_msecs = NULL;
-        }
-#endif // defined( HTTP_SERVER_CONNECT_KLUDGE )
 
     } /* end for(scount) (end of configuration file statement loop) */
 
@@ -2605,11 +1579,6 @@ char    pathname[MAX_PATH];             /* file path in host format  */
     }
 #endif /* OPTION_TAPE_AUTOMOUNT */
 
-#if defined( HTTP_SERVER_CONNECT_KLUDGE )
-    if (!sysblk.http_server_kludge_msecs)
-        sysblk.http_server_kludge_msecs = 10;
-#endif // defined( HTTP_SERVER_CONNECT_KLUDGE )
-
     /* Set root mode in order to set priority */
     SETMODE(ROOT);
 
@@ -2631,13 +1600,6 @@ char    pathname[MAX_PATH];             /* file path in host format  */
     sysblk.shrdport = shrdport;
 #endif /*defined(OPTION_SHARED_DEVICES)*/
 
-#if defined(_FEATURE_ASN_AND_LX_REUSE)
-    sysblk.asnandlxreuse=asnandlxreuse;
-#endif
-
-    sysblk.diag8cmd = diag8cmd;
-    sysblk.shcmdopt = shcmdopt;
-
 #if defined(_370) || defined(_390)
     if(dfltver)
         version =
@@ -2651,77 +1613,12 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                  | ((U64)serial << 32)
                  | ((U64)model << 16);
 
-    /* Initialize locks, conditions, and attributes */
-#ifdef OPTION_PTTRACE
-    ptt_trace_init (ptt, 1);
-#endif
-    initialize_lock (&sysblk.todlock);
-    initialize_lock (&sysblk.mainlock);
-    sysblk.mainowner = LOCK_OWNER_NONE;
-    initialize_lock (&sysblk.intlock);
-    initialize_lock (&sysblk.iointqlk);
-    sysblk.intowner = LOCK_OWNER_NONE;
-    initialize_lock (&sysblk.sigplock);
-//  initialize_detach_attr (&sysblk.detattr);   // (moved to impl.c)
-//  initialize_join_attr   (&sysblk.joinattr);  // (moved to impl.c)
-    initialize_condition (&sysblk.cpucond);
-    for (i = 0; i < MAX_CPU_ENGINES; i++)
-        initialize_lock (&sysblk.cpulock[i]);
-    initialize_condition (&sysblk.sync_cond);
-    initialize_condition (&sysblk.sync_bc_cond);
-
-#if defined(OPTION_FISHIO)
-    InitIOScheduler                     // initialize i/o scheduler...
-    (
-        sysblk.arch_mode,               // (for calling execute_ccw_chain)
-        &sysblk.devprio,                // (ptr to device thread priority)
-        MAX_DEVICE_THREAD_IDLE_SECS,    // (maximum device thread wait time)
-        devtmax                         // (maximum #of device threads allowed)
-    );
-#else // !defined(OPTION_FISHIO)
-    initialize_lock (&sysblk.ioqlock);
-    initialize_condition (&sysblk.ioqcond);
-    /* Set max number device threads */
-    sysblk.devtmax = devtmax;
-    sysblk.devtwait = sysblk.devtnbr =
-    sysblk.devthwm  = sysblk.devtunavail = 0;
-#endif // defined(OPTION_FISHIO)
-
     /* Reset the clock steering registers */
     csr_reset();
 
     /* Set up the system TOD clock offset: compute the number of
      * microseconds offset to 0000 GMT, 1 January 1900 */
 
-#if 0
-    if (sysepoch == 1928)
-    {
-        sysepoch = 1900;
-        yroffset = -28;
-        logmsg( _("HHCCF071W SYSEPOCH 1928 is deprecated and "
-                "will be invalid in a future release.\n"
-                "          Specify SYSEPOCH 1900 and YROFFSET -28 instead.\n"));
-    }
-    if (sysepoch == 1988)
-    {
-        sysepoch = 1960;
-        yroffset = -28;
-        logmsg( _("HHCCF071W SYSEPOCH 1988 is deprecated and "
-                "will be invalid in a future release.\n"
-                "          Specify SYSEPOCH 1960 and YROFFSET -28 instead.\n"));
-    }
-    /* Only 1900 and 1960 are valid by this point. There are 16*1000000 clock
-       increments in one second, 86400 seconds in one day, and 14 leap days
-       between 1 January 1900 and 1 January 1960. */
-    if (sysepoch == 1960)
-        set_tod_epoch(((60*365)+14)*-TOD_DAY);
-    else
-        set_tod_epoch(0);
-
-    /* Set the year offset. This has been handled above for the case of
-       SYSEPOCH 1928 or 1988, for backwards compatibility. */
-    adjust_tod_epoch((yroffset*365+(yroffset/4))*TOD_DAY);
-#else
     if(sysepoch != 1900 && sysepoch != 1960)
     {
         if(sysepoch < 1960)
@@ -2742,41 +1639,11 @@ char    pathname[MAX_PATH];             /* file path in host format  */
     sysepoch -= 1900 + yroffset;
 
     set_tod_epoch(((sysepoch*365+(sysepoch/4))*-TOD_DAY)+lyear_adjust(sysepoch)+ly1960);
-#endif
+
     sysblk.sysepoch = sysepoch;
 
     /* Set the timezone offset */
     adjust_tod_epoch((tzoffset/100*3600+(tzoffset%100)*60)*16000000LL);
-
-    /* Set clock steering based on drag factor */
-    set_tod_steering(-(1.0-(1.0/toddrag)));
-
-    /* Set the system OS tailoring value */
-    sysblk.pgminttr = ostailor;
-
-    /* Set the licence flag */
-    losc_set(pgmprdos);
-
-#ifdef OPTION_IODELAY_KLUDGE
-    /* Set I/O delay value */
-    if (iodelay >= 0)
-    {
-        sysblk.iodelay = iodelay;
-        if (iodelay_warn)
-            logmsg (_("HHCCF037W Nonzero IODELAY value specified.\n"
-             "          This is only necessary if you are running an older Linux kernel.\n"
-             "          Otherwise, performance degradation may result.\n"));
-    }
-#endif /*OPTION_IODELAY_KLUDGE*/
-
-    /* Set the panel refresh rate */
-    sysblk.panrate = panrate;
-
-    /* set the legacy device senseid option */
-    sysblk.legacysenseid = legacysenseid;
-
-    /* Set the timer update interval */
-    sysblk.timerint = timerint;
 
     /* Gabor Hoffer (performance option) */
     copy_opcode_tables();
@@ -2793,7 +1660,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
 
         if (sdevnum == NULL || sdevtype == NULL)
         {
-            fprintf(stderr, _("HHCCF035S Error in %s line %d: "
+            logmsg(_("HHCCF035S Error in %s line %d: "
                     "Missing device number or device type\n"),
                     fname, inc_stmtnum[inc_level]);
             delayed_exit(1);
@@ -2803,7 +1670,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
 
         if(rc==-2)
         {
-            fprintf(stderr, _("HHCCF036S Error in %s line %d: "
+            logmsg(_("HHCCF036S Error in %s line %d: "
                     "%s is not a valid device number(s) specification\n"),
                     fname, inc_stmtnum[inc_level], sdevnum);
             delayed_exit(1);
@@ -2823,7 +1690,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
 
             if (++inc_level >= MAX_INC_LEVEL)
             {
-                fprintf(stderr, _( "HHCCF082S Error in %s line %d: "
+                logmsg(_( "HHCCF082S Error in %s line %d: "
                         "Maximum nesting level (%d) reached\n"),
                         fname, inc_stmtnum[inc_level-1], MAX_INC_LEVEL);
                 delayed_exit(1);
@@ -2838,13 +1705,13 @@ char    pathname[MAX_PATH];             /* file path in host format  */
                 inc_level--;
                 if ( inc_ignore_errors == 1 ) 
                 {
-                    fprintf(stderr, _("HHCCF084W %s Open error ignored file %s: %s\n"),
+                    logmsg(_("HHCCF084W %s Open error ignored file %s: %s\n"),
                                     fname, operand, strerror(errno));
                     continue ;
                 }
                 else 
                 {
-                    fprintf(stderr, _("HHCCF085E %s Open error file %s: %s\n"),
+                    logmsg(_("HHCCF085E %s Open error file %s: %s\n"),
                                     fname, operand, strerror(errno));
                     delayed_exit(1);
                 }
@@ -2887,7 +1754,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         if(sysblk.xpndsize)
         {
             sysblk.zpb[i].eso = 0;
-            sysblk.zpb[i].esl = (sysblk.xpndsize * XSTORE_PAGESIZE - 1) >> 20;
+            sysblk.zpb[i].esl = ((size_t)sysblk.xpndsize * XSTORE_PAGESIZE - 1) >> 20;
         }
         else
         {
@@ -2916,29 +1783,24 @@ char    pathname[MAX_PATH];             /* file path in host format  */
         close(dummyfd[i]);
 #endif
 
+    /* Set default maximum number of CPUs */
 #ifdef _FEATURE_CPU_RECONFIG
-    sysblk.maxcpu = archmode == ARCH_370 ? numcpu : MAX_CPU_ENGINES;
+    sysblk.maxcpu = sysblk.arch_mode == ARCH_370 ? numcpu : MAX_CPU_ENGINES;
 #else
     sysblk.maxcpu = numcpu;
 #endif /*_FEATURE_CPU_RECONFIG*/
 
-    /* Log some significant some RUN OPTIONS */
+    /* Set maximum number of CPUs to specified value */
+    if (maxcpu > 0) {
+        sysblk.maxcpu = maxcpu;
+    }
 
-    logmsg
-    (
-        "HHCCF069I Run-options enabled for this run:\n"
-        "          NUMCPU:           %d\n"
-#if defined(_FEATURE_ASN_AND_LX_REUSE)
-        "          ASN-and-LX-reuse: %sabled\n"
-#endif
-        "          DIAG8CMD:         %sabled\n"
-
-        ,sysblk.numcpu
-#if defined(_FEATURE_ASN_AND_LX_REUSE)
-        ,( sysblk.asnandlxreuse ) ? "EN" : "DIS"
-#endif
-        ,( sysblk.diag8cmd      ) ? "EN" : "DIS"
-    );
+    /* Check that numcpu does not exceed maxcpu */
+    if (sysblk.numcpu > sysblk.maxcpu) {
+        logmsg(_("HHCCF086S Error in %s: NUMCPU %d must not exceed MAXCPU %d\n"),
+                fname, sysblk.numcpu, sysblk.maxcpu);
+        delayed_exit(1);
+    }
 
     /* Start the CPUs */
     OBTAIN_INTLOCK(NULL);

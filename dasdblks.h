@@ -1,7 +1,7 @@
-/* DASDBLKS.H   (c) Copyright Roger Bowler, 1999-2007                */
+/* DASDBLKS.H   (c) Copyright Roger Bowler, 1999-2009                */
 /*              DASD control block structures                        */
 
-// $Id: dasdblks.h,v 1.21 2007/06/23 00:04:08 ivan Exp $
+// $Id: dasdblks.h 5125 2009-01-23 12:01:44Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* This header file contains definitions of OS Data Management       */
@@ -9,7 +9,7 @@
 /* It also contains function prototypes for the DASD utilities.      */
 /*-------------------------------------------------------------------*/
 
-// $Log: dasdblks.h,v $
+// $Log$
 // Revision 1.21  2007/06/23 00:04:08  ivan
 // Update copyright notices to include current year (2007)
 //

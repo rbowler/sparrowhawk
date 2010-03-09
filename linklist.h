@@ -4,12 +4,9 @@
 //
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: linklist.h,v 1.10 2006/12/08 09:43:28 jj Exp $
+// $Id: linklist.h 4102 2006-12-08 09:43:35Z jj $
 //
-// $Log: linklist.h,v $
-// Revision 1.10  2006/12/08 09:43:28  jj
-// Add CVS message log
-//
+// $Log$
 
 #ifndef _LLIST_
 #define _LLIST_

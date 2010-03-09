@@ -11,9 +11,9 @@
 /*       invoking this program.                                      */
 /*-------------------------------------------------------------------*/
 
-// $Id: conspawn.c,v 1.3 2006/12/08 09:43:18 jj Exp $
+// $Id: conspawn.c 5147 2009-02-01 21:27:16Z rbowler $
 //
-// $Log: conspawn.c,v $
+// $Log$
 // Revision 1.3  2006/12/08 09:43:18  jj
 // Add CVS message log
 //
@@ -109,7 +109,7 @@ int main(int argc, char* argv[])
         else
             p = NULL;
 
-        rc = (int) ShellExecute( hwnd, lpOperation, lpFile, lpParameters, lpDirectory, nShowCmd );
+        rc = (intptr_t) ShellExecute( hwnd, lpOperation, lpFile, lpParameters, lpDirectory, nShowCmd );
 
         if (p)
             free(p);

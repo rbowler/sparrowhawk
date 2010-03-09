@@ -2,7 +2,7 @@
 # MAKEFILE-DLLMOD.MSVC (c) Copyright Roger Bowler, 2005-2007
 # Build Hercules for Win32 using MSVC and nmake (DLL version with loadable modules)
 #
-# $Id: makefile-dllmod.msvc,v 1.31 2008/05/22 21:31:50 fish Exp $
+# $Id: makefile-dllmod.msvc 5617 2010-02-09 00:00:41Z fish $
 #
 # DD/MM/YY Description.......................................................
 # 17/02/05 Created by - Roger Bowler
@@ -60,10 +60,9 @@
 # 06/12/06 Add decNumber for DFP (Decimal Floating Point) support - Roger Bowler
 # 26/12/06 Broke sections out into separate !INCLUDE-able files for easier
 #          maintenance and use by externally built dynamic modules. - Fish
-# $Log: makefile-dllmod.msvc,v $
-# Revision 1.31  2008/05/22 21:31:50  fish
-# (remove extraneous !MESSAGE stmt)
+# 30/01/10 Dynamic module builds now use same makefile as Hercules. - Fish
 #
+# $Log$
 # Revision 1.30  2008/05/06 19:56:29  rbowler
 # Default BZIP2_DIR to winbuild/bzip2 if it exists
 #
@@ -110,6 +109,12 @@ INCDIR = msvc.makefile.includes
 !INCLUDE $(INCDIR)\HERC_FLAGS.msvc
 # ---------------------------------------------------------------------
 
+!IFDEF DYNDIR
+!INCLUDE $(DYNDIR)$(DYNMOD).msvc
+MODULES = $(MODULES) $(X)$(DYNMOD).dll
+rcflags = $(rcflags) -D TARGETFILENAME=\"$(DYNMOD).dll\" -D MAX_CPU_ENGINES_STR=\"$(MAX_CPU_ENGINES)\"
+!ENDIF
+
 # ---------------------------------------------------------------------
 !INCLUDE $(INCDIR)\PRIM_RULES.msvc
 !INCLUDE $(INCDIR)\OUTDIR_RULES.msvc
@@ -119,3 +124,16 @@ INCDIR = msvc.makefile.includes
 !INCLUDE $(INCDIR)\BZIP2_RULES.msvc
 !INCLUDE $(INCDIR)\PCRE_RULES.msvc
 # ---------------------------------------------------------------------
+
+!IFDEF DYNDIR
+
+$(O)$(DYNMOD).res: $(DYNDIR)$(DYNMOD).rc
+    $(rc) $(rcflags) $(rcvars) -fo $(O)$(DYNMOD).res $(DYNDIR)$(DYNMOD).rc
+
+$(X)$(DYNMOD).dll: $(O)$(DYNMOD).res $(DYNOBJ) $(O)hengine.lib $(O)hutil.lib $(O)hsys.lib
+    $(linkdll)
+
+{$(DYNDIR)}.c{$(OBJDIR)}.obj::
+    $(cc) $(cdebug) $(cflags) /Fp"$(OBJDIR)\\build_pch.pch" /Yu"hstdinc.h" $(cvarsdll) /Fo"$(OBJDIR)\\" /Fd"$(OBJDIR)\\" $<
+
+!ENDIF

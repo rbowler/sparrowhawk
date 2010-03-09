@@ -1,14 +1,14 @@
-/* CCKDUTIL.C   (c) Copyright Roger Bowler, 1999-2007                */
+/* CCKDUTIL.C   (c) Copyright Roger Bowler, 1999-2009                */
 /*       ESA/390 Compressed CKD Common routines                      */
 
-// $Id: cckdutil.c,v 1.57 2008/09/04 22:03:15 gsmith Exp $
+// $Id: cckdutil.c 5125 2009-01-23 12:01:44Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* This module contains functions for compressed CKD devices         */
 /* used by more than 1 main program.                                 */
 /*-------------------------------------------------------------------*/
 
-// $Log: cckdutil.c,v $
+// $Log$
 // Revision 1.57  2008/09/04 22:03:15  gsmith
 // Fix 64-bit length problem in cdsk_valid_trk - Tony Harminc
 //

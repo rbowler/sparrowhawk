@@ -45,6 +45,7 @@ and how they are used.
     <a href="#CPUMODEL">CPUMODEL</a>   3090
     <a href="#CPUVERID">CPUVERID</a>   FD
     <a href="#LPARNAME">LPARNAME</a>   HERCULES
+    <a href="#LPARNUM">LPARNUM</a>    21
     <a href="#MODEL">MODEL</a>      EMULATOR
     <a href="#PLANT">PLANT</a>      ZZ
     <a href="#MANUFACTURER">MANUFACTURER</a> HRC
@@ -52,6 +53,7 @@ and how they are used.
     <a href="#XPNDSIZE">XPNDSIZE</a>   0
     <a href="#NUMCPU">NUMCPU</a>     1
     <a href="#NUMVEC">NUMVEC</a>     1
+    <a href="#MAXCPU">MAXCPU</a>     8
     <a href="#ENGINES">ENGINES</a>    CP
     <a href="#SYSEPOCH">SYSEPOCH</a>   1900
     <a href="#YROFFSET">YROFFSET</a>   -28
@@ -60,7 +62,7 @@ and how they are used.
     <a href="#HTTPROOT">HTTPROOT</a>   /usr/local/share/hercules/
     <a href="#HTTPPORT">HTTPPORT</a>   8081 NOAUTH
 
-    <a href="cckddasd.html#cckdcommand">CCKD</a>       cache=8
+    <a href="#CCKD">CCKD</a>       RA=2,RAQ=4,RAT=2,WR=2,GCINT=10,GCPARM=0,NOSTRESS=0,TRACE=0,FREEPEND=-1
     <a href="#SHRDPORT">SHRDPORT</a>   3990
 
     <a href="#PANTITLE">PANTITLE</a>   "My own private MAINFRAME!"
@@ -113,7 +115,8 @@ and how they are used.
     000A      <a href="#1442">1442</a>    adrdmprs.rdr
     000C      <a href="#3505">3505</a>    jcl.txt     ascii  trunc
     000D      <a href="#3525">3525</a>    pch00d.txt  ascii
-    000E      <a href="#1403">1403</a>    prt00e.txt
+    000E      <a href="#1403">1403</a>    prt00e.txt  noclear
+    001E      <a href="#1403">1403</a>    192.168.200.1:1403 sockdev
 
     001F      <a href="#3270">3270</a>    * 192.168.0.1
     0200.4    <a href="#3270">3270</a>    * 192.168.0.0  255.255.255.0
@@ -213,8 +216,8 @@ and how they are used.
     <i><b>Caution:</b> &nbsp;Enabling this feature may have security
     consequences depending on which allowable host system directories you
     specify as well as how your guest operating system enforces
-    authorized use of whatever automount functionality it happens to
-    utilize.</i>
+    authorized use of the Set Diagnose (X'4B') channel command code.
+    </i>
     <p>
     All host system virtual tape volumes to be "automounted" by the guest
     must reside within one of the specified allowable host system directories
@@ -223,7 +226,7 @@ and how they are used.
     in order for the guest-invoked automount to be accepted.
     <p>
     Note: specifying a disallowed automount directory does not preclude the
-    Hercules operator from manually mounting any file s/he wishes via the
+    Hercules operator from manually mounting any desired file via the
     <code>devinit</code> panel command -- even one in a currently defined
     "disallowed" automount directory. The AUTOMOUNT statement only controls
     guest-invoked automatic tape mounts and not manual tape mounts performed
@@ -236,10 +239,10 @@ and how they are used.
     add/remove new/existing allowable/unallowable automount
     directories at any time.
     <p>
-    At least one allowable directory should be defined, but defaults to the
-    current directory if one is not specifically defined (i.e. if only
-    unallowable directories are specified, the current directory then
-    becomes the only defined allowable automount directory by default).
+    The automount feature is activated whenever you specify at least
+    one allowable or unallowable directory. If only
+    unallowable directories are specified, then the current directory
+    becomes the only defined allowable automount directory by default.
     <p>
     All specified directories are always resolved to fully-qualified
     absolute directory paths before being saved.
@@ -277,6 +280,17 @@ and how they are used.
     associated hardware (SCSI adapter) behaves to drive status queries
     for drives which do not have any media currently mounted on them.
     </i>
+    <p>
+
+<a name="CCKD"></a>
+<dt><code>CCKD &nbsp; <em>cckd-parameters</em></code>
+<dd><p>
+    The CCKD command and initialization statement can be used to affect
+    cckd processing. The CCKD initialization statement is specified as
+    a Hercules configuration file statement and supports the same options
+    as the cckd panel command. Refer to the
+    <a href="cckddasd.html#cckdcommand">Compressed Dasd Emulation</a>
+    web page for more information.
     <p>
 
 <a name="CODEPAGE"></a>
@@ -438,8 +452,9 @@ and how they are used.
 <a name="CPUMODEL"></a>
 <dt><code>CPUMODEL &nbsp; <em>xxxx</em></code>
 <dd><p>
-    specifies the 4 hexadecimal digit CPU model number
+    specifies the 4 hexadecimal digit CPU machine type number
     stored by the STIDP instruction
+    <i>Note: Prior to ESA/390 this was known as the CPU model number</i>
     <p>
 
 <a name="CPUPRIO"></a>
@@ -543,9 +558,9 @@ and how they are used.
 <a name="DIAG8CMD"></a>
 <dt><code>DIAG8CMD &nbsp; DISABLE &#124; ENABLE [ECHO &#124; NOECHO]</code>
 <dd><p>
-    When <code>ENABLE</code> is specified, commands issued through diagnose 8 will be
-    executed by hercules as hercules commands.  When set to <code>DISABLE</code>,
-    commands issued through the diagnose 8 interface will generate a Specification
+    When <code>ENABLE</code> is specified, commands issued through the Diagnose 8 interface
+    will be executed by Hercules as Hercules commands.  When set to <code>DISABLE</code>,
+    commands issued through the Diagnose 8 interface will generate a Specification
     Exception program interrupt on the issuing CPU.
     <p>An optional second argument can be given to request whether the commands
     issued using the Diagnose 8 interface will be traced at the console. This may be
@@ -553,19 +568,20 @@ and how they are used.
     When <code>ECHO</code> is specified, a message is issued as the panel is about to issue
     the command, the command is redisplayed as if it was entered through the panel input
     line, and a final message is issued to indicate the command completed. When <code>NOECHO</code>
-    is specified, no such messages are displayed and the command completes silently,
-    except for the output of the command itself if the Diagnose 8 interface didn't request
-    a response buffer.
-    <p>The default is <code>DISABLE ECHO</code>
+    is specified, no such messages are displayed and the command completes silently.
+    <p>The value of <code>ECHO</code> or <code>NOECHO</code> has no effect on
+    command output being placed into a response buffer if the Diagnose 8 interface
+    requested one.
+    <p>The default is <code>DISABLE NOECHO</code>
     <p>
 
-    <i><b>Caution:</b> &nbsp; Enabling this feature may have security consequences</i>
+    <i><b>Caution:</b> &nbsp; Enabling this feature may have security consequences.</i>
     <p>
 
-    Note that when this feature is enabled systems
-    running under hercules can even issue host commands through the Hercules
-    <code>sh</code> (shell) command. This ability may be disabled via the
-    <a href="#SHCMDOPT">SHCMDOPT</a> statement.
+    When this feature is enabled it is possible for guest operating systems
+    running under Hercules to issue commands directly to the host operating system
+    by means of the Hercules <code>sh</code> (shell) command. This ability may be
+    disabled via the <a href="#SHCMDOPT">SHCMDOPT</a> statement.
     <p>
 
 <a name="ECPSVM"></a>
@@ -612,14 +628,11 @@ and how they are used.
     type CP, the next two (engines 4-5) are of type AP, and the next two
     (engines 6-7) are of type IP.
     <p>
-    The number of installed processor engines is determined by the compile time
-    variable MAX_CPU_ENGINES.
-    If the ENGINES statement specifies more than MAX_CPU_ENGINES, the excess
-    engines are ignored. If fewer than MAX_CPU_ENGINES are specified, the
+    The number of installed processor engines is determined by the
+    <a href="#MAXCPU">MAXCPU</a> statement.
+    If the ENGINES statement specifies more than MAXCPU engines, the excess
+    engines are ignored. If fewer than MAXCPU engines are specified, the
     remaining engines are set to type CP.
-    <p>
-    See the <a href="#NUMCPU">NUMCPU</a> statement for a discussion of
-    MAX_CPU_ENGINES.
     <p>
 
 <a name="HERCPRIO"></a>
@@ -653,16 +666,6 @@ and how they are used.
     installation directory when the Hercules executable was built (which can
     vary depending on how the Hercules package was built, but is usually
     <tt>/usr/local/share/hercules/</tt>).
-    <p>
-
-    Note: Windows users of Hercules who do not have the complete Cygwin package
-    installed (i.e. only have the required Cygwin DLLs installed instead)
-    should specify this value in the form: "<tt>/cygdrive/x/pathname/</tt>"
-    where '<tt>x</tt>' is the Windows drive letter. For example, if the Windows
-    directory where the http server's files reside is
-    "<tt>K:\Hercules\html\</tt>", then you should specify
-    "<tt>/cygdrive/k/Hercules/html/</tt>"
-    on your <tt>HTTPROOT</tt> statement.
     <p>
 
 <a name="IGNORE"></a>
@@ -710,7 +713,7 @@ and how they are used.
 <a name="LDMOD"></a>
 <dt><code>LDMOD &nbsp; <em>module list</em></code>
 <dd><p>
-    specifies additional modules that are to be loaded by the hercules dynamic loader.
+    specifies additional modules that are to be loaded by the Hercules dynamic loader.
     The default search order is with the hercules directory in the default DLL search
     path. Most systems also support absolute filenames (ie names starting with '/'
     or '.') in which case the default search path is not taken.
@@ -723,8 +726,9 @@ and how they are used.
 <dd><p>
     specifies whether the SENSE ID CCW (X'E4') will be honored for
     the devices that originally didn't support that feature. This
-    includes (but may not be limited to) the 3410 and 3420 tape drives
-    as well as the 2703 communication controllers.
+    includes (but may not be limited to) 3410 and 3420 tape drives,
+    2311 and 2314 direct access storage devices,
+    and 2703 communication controllers.
     <p>
 
     Specify <code>ON</code> or <code>ENABLE</code> if your guest
@@ -768,6 +772,16 @@ and how they are used.
     <code>HERCULES</code>.
     <p>
 
+<a name="LPARNUM"></a>
+<dt><code>LPARNUM &nbsp; <em>xx</em></code>
+<dd><p>
+    specifies the one- or two-digit hexadecimal LPAR identification number
+    stored by the STIDP instruction.
+    If a one-digit number is specified then STIDP stores a format-0 CPU ID.
+    If a two-digit number is specified then STIDP stores a format-1 CPU ID.
+    If LPARNUM is not specified, then STIDP stores a basic-mode CPU ID.
+    <p>
+
 <a name="MAINSIZE"></a>
 <dt><code>MAINSIZE &nbsp; <em>nnnn</em></code>
 <dd><p>
@@ -785,11 +799,56 @@ and how they are used.
     <code>HRC</code>.
     <p>
 
-<a name="MODEL"></a>
-<dt><code>MODEL &nbsp; <em>name</em></code>
+<a name="MAXCPU"></a>
+<dt><code>MAXCPU &nbsp; <em>nn</em></code>
 <dd><p>
-    specifies the MODEL name returned by the STSI instruction.  The default is
-    <code>EMULATOR</code>.
+    specifies the number of installed processor engines.
+    The <a href="#NUMCPU">NUMCPU</a> statement specifies the number of
+    engines which will be configured online at startup time.
+    All processors are CP engines unless otherwise specified by the
+    <a href="#ENGINES">ENGINES</a> statement.
+    <p>
+    The value of MAXCPU cannot exceed the value of <code>MAX_CPU_ENGINES</code>.
+    If MAXCPU is not specified then the default value is the value of
+    <code>MAX_CPU_ENGINES</code>.
+    <p>
+    <code>MAX_CPU_ENGINES</code> is a compile-time variable which sets
+    an upper limit on the value of MAXCPU.
+    The value of <code>MAX_CPU_ENGINES</code> is displayed in the
+    Build information message on the Hercules control panel at startup time.
+    To change the value of <code>MAX_CPU_ENGINES</code> you must rebuild
+    Hercules.
+    For Unix builds, specify
+    <tt>./configure --enable-multi-cpu=<em>nn</em></tt>
+    before performing make.
+    For Windows builds, specify
+    <tt>SET MAX_CPU_ENGINES=<em>nn</em></tt>
+    before performing nmake.
+    <p>
+    <code>MAX_CPU_ENGINES</code> cannot exceed 64. For performance reasons,
+    values above 32 are not recommended for 32-bit platforms.
+    If <code>MAX_CPU_ENGINES</code> is set to 1 then multiprocessing is disabled.
+    See also <a href="#NUMCPU">NUMCPU</a> for a discussion of the performance
+    implications of <code>MAX_CPU_ENGINES</code>.
+    <p>
+
+<a name="MODEL"></a>
+<dt><code>MODEL &nbsp; <em>hardware_model</em>
+    [ <em>capacity_model</em> ]
+    [ <em>perm_capacity_model</em> ]
+    [ <em>temp_capacity_model</em> ]
+    </code>
+<dd><p>
+    specifies the MODEL names returned by the STSI instruction.
+    <p>
+    If two operands are supplied, the first is the hardware model name (CPC
+    ND model) and the second is the capacity model name (CPC SI model).
+    If only one operand is supplied, it is used as both the hardware model
+    name and the capacity model name.
+    The optional third and fourth operands specify the permanent capacity
+    model name and the temporary capacity model name respectively.
+    <p>
+    The default is <code>EMULATOR</code>.
     <p>
 
 <a name="MODPATH"></a>
@@ -829,7 +888,7 @@ and how they are used.
     and was added by user request.
     <p>
     Also note that for SCSI tape drives the <code>'devinit <i>nnnn</i> *'</code>
-    command has no affect as the tape must be unmounted manually (since it is
+    command has no effect as the tape must be unmounted manually (since it is
     a real physical device and not one emulated via a disk file like .AWS tapes).
     <p>
 
@@ -838,26 +897,11 @@ and how they are used.
 <dd><p>
     specifies the number of emulated processor engines
     which will be configured online at startup time.
-    All processors are CP engines unless otherwise specified by the
-    <a href="#ENGINES">ENGINES</a> statement.
-    If NUMCPU is less than MAX_CPU_ENGINES then the remaining engines can be
-    configured online later.
-    <p>
+    NUMCPU cannot exceed the value of <a href="#MAXCPU">MAXCPU</a>.
+    If NUMCPU is less than <a href="#MAXCPU">MAXCPU</a>
+    then the remaining engines can be configured online later.
 
-    <em>Note:</em>
-    Multiprocessor emulation is only available when the definition of
-    the compile-time variable <code>MAX_CPU_ENGINES</code>
-    in the file <tt>config.h</tt> has a value of more than 1.
-    Current versions of Hercules already have this value
-    set to 8 by default, so all you need to do is specify
-    <tt>NUMCPU 2</tt> or more
-    in your configuration file. If you wish to define a greater value
-    for <tt>MAX_CPU_ENGINES</tt>, use the
-    <tt>--enable-multi-cpu=NUMBER</tt>
-    option when you do your <tt>./configure</tt> before doing your
-    <tt>make</tt>.
     <p>
-
     Multiprocessor emulation works best
     if your host system actually has more than one physical CPU, but you can
     still emulate multiple CPUs nervertheless  even on a uniprocessor system
@@ -925,7 +969,7 @@ and how they are used.
     in a Windows command prompt window.
     Note that this option has no effect when Hercules is run under control
     of the Hercules GUI since Hercules's console window is hidden in favor
-    of using the GUI's console window instead.
+    of using the GUI's window instead.
     <p>
 
 <a name="PGMPRDOS"></a>
@@ -969,7 +1013,7 @@ and how they are used.
     programmatically via the <a href="#DIAG8CMD">DIAG8CMD</a> interface.
     <p>
     When set to <code>NODIAG8</code> only the programmatic execution of shell commands via the
-    the diagnose 8 interface is disabled, but <code>sh</code> (shell) commands entered directly
+    the Diagnose 8 interface is disabled, but <code>sh</code> (shell) commands entered directly
     via the Hercules hardware console will still work.
     <p>
     <b>NOTE:</b> &nbsp;<i>"entered directly via the Hercules hardware console"</i>
@@ -1676,7 +1720,7 @@ and how they are used.
 
             <tr><td>1052-C, 3215-C</td>
                 <td><a href="#consysc">Integrated console printer-keyboards</a></td>
-                <td>Integrated on hercules console</td>
+                <td>Integrated on Hercules console</td>
             </tr>
 
             <tr><td>1442, 2501, 3505</td>
@@ -1912,7 +1956,7 @@ and how they are used.
     </em>
     <p>
 
-    To send a logon command to a 1052-C or 3215-C enter /logon on the hercules console.
+    To send a logon command to a 1052-C or 3215-C enter /logon on the Hercules console.
     <p>
     All integrated devices must use a different command prefix.
     <p>
@@ -2072,6 +2116,15 @@ and how they are used.
         line-feeds only are written at the end of each line.
         <p>
 
+    <dt><code>noclear</code>
+    <dd><p>
+        specifies that the output file will not be cleared to zero
+        bytes when it is opened.
+        If the <code>noclear</code> argument is not specified, then
+        any previous content of the file is destroyed when the file
+        is opened for output.
+        <p>
+
     </dl>
     <p>
 
@@ -2095,12 +2148,35 @@ and how they are used.
     <p>
 
     <dl>
+    <dt><code>sockdev</code>
+    <dd><p>
+        indicates the line printer is a socket device wherein the
+        filename is actually a socket specification instead of a
+        device filename.  When used, there must only be one filename
+        specified in the form: <code>port</code> or <code>host:port</code>.
+        The device then accepts
+        remote connections on the given TCP/IP port,
+        and writes data to the socket instead of to a device
+        file. This allows automatic remote spooling of line printer
+        data. The sockdev option is mutually exclusive with all other
+        printer options (e.g. crlf, etc) and must be specified alone.
+        <p>
+
     <dt><code>crlf</code>
     <dd><p>
         specifies, for ASCII files, that carriage return line feed
         sequences are written at the end of each line.
         If the <code>crlf</code> argument is not specified, then
         line-feeds only are written at the end of each line.
+        <p>
+
+    <dt><code>noclear</code>
+    <dd><p>
+        specifies that the output file will not be cleared to zero
+        bytes when it is opened.
+        If the <code>noclear</code> argument is not specified, then
+        any previous content of the file is destroyed when the file
+        is opened for output.
         <p>
 
     </dl>
@@ -2571,11 +2647,13 @@ and how they are used.
             of course be specified (or else one that is relative to the
             default directory which happens to resolve to the desired file).
             <p>
-            All attempts to automount host files in any defined "disallowable"
-            directory (or any subdirectory thereof (or otherwise <i>not</i>
-            within any defined "allowable" directory or subdirectory)) will
-            be rejected. An error message is always issued in such cases,
-            just as one is whenever a successful mount or unmount is performed.
+            All attempts to automount host files in a "disallowed"
+            directory or any of its subdirectories will be rejected.
+            Similarly any attempt to automount a file which is not
+            within any "allowable" directory or subdirectory will
+            be rejected. An error message is always issued in such cases.
+            A message is also issued whenever a successful mount or unmount
+            is performed.
             <p>
             A sample guest automount program called <code>TMOUNT</code> for
             the DOS/VSE operating system is provided in the
@@ -3116,7 +3194,7 @@ ROUTE  00  172.021.003.032  255.255.255.224
         <p>
 
         syncio is the default for ckd. syncio statistics may be displayed via
-        the hercules <code>syncio</code> panel command.
+        the Hercules <code>syncio</code> panel command.
         <p>
 
         <!-- No longer applicable with current versions of Linux
@@ -3136,7 +3214,7 @@ ROUTE  00  172.021.003.032  255.255.255.224
         readonly returns "write inhibited" sense when a write is attempted.
         Note that not all of the sense bits may be getting set absolutely
         correctly however. (Some people have reported getting different
-        error messages under hercules than a real machine, but it really
+        error messages under Hercules than a real machine, but it really
         hasn't been an issue for a while now.)
         <p>
         <code>readonly</code> may be abbreviated as
@@ -3176,7 +3254,8 @@ ROUTE  00  172.021.003.032  255.255.255.224
         <blockquote>
             <table border=1 cellpadding=3>
             <tr align="center"><th>Device type</th><th>Default CU type</dev></th></tr>
-            <tr align="center"><td>2311 2314</td><td>2841</td></tr>
+            <tr align="center"><td>2311</td><td>2841</td></tr>
+            <tr align="center"><td>2314</td><td>2314</td></tr>
             <tr align="center"><td>3330 3340<br>3350 3375<br>3380</td><td>3880</td></tr>
             <tr align="center"><td>3390</td><td>3990</td></tr>
             <tr align="center"><td>9345</td><td>9343</td></tr>
@@ -3293,7 +3372,7 @@ ROUTE  00  172.021.003.032  255.255.255.224
     ( Preliminary 2703 BSC Support )
     <p>
 
-    Describes a BSC emulation line entry to either link 2 hercules engines
+    Describes a BSC emulation line entry to either link 2 Hercules engines
     or a custom made program emulating a 2780, 3780 or 3x74, or a custom made
     program interfacing to a real BSC line.
     <p>
@@ -3392,6 +3471,6 @@ If you have a question about Hercules, see the
 <p><center><hr width=15% noshade>
 <a href="hercinst.html"><img src="images/back.gif" border=0 alt="back"></a>
 </center>
-<p class="lastupd">Last updated $Date: 2009/01/09 15:35:57 $ $Revision: 1.153 $</p>
+<p class="lastupd">Last updated $Date: 2009-12-25 12:57:55 -0600 (Fri, 25 Dec 2009) $ $Revision: 5566 $</p>
 </BODY>
 </HTML>

@@ -1,7 +1,7 @@
-/* QETH.C       (c) Copyright Jan Jaeger,   1999-2007                */
+/* QETH.C       (c) Copyright Jan Jaeger,   1999-2009                */
 /*              OSA Express                                          */
 
-// $Id: qeth.c,v 1.11 2007/11/21 22:54:14 fish Exp $
+// $Id: qeth.c 5126 2009-01-23 13:05:56Z bernard $
 
 /* This module contains device handling functions for the            */
 /* OSA Express emulated card                                         */
@@ -10,7 +10,7 @@
 /* hercules.cnf:                                                     */
 /* 0A00-0A02 QETH <optional parameters>                              */
 
-// $Log: qeth.c,v $
+// $Log$
 // Revision 1.11  2007/11/21 22:54:14  fish
 // Use new BEGIN_DEVICE_CLASS_QUERY macro
 //

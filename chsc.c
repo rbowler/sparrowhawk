@@ -1,17 +1,17 @@
-/* CHSC.C       (c) Copyright Jan Jaeger, 2002-2007                  */
+/* CHSC.C       (c) Copyright Jan Jaeger, 2002-2009                  */
 /*              Channel Subsystem Call                               */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: chsc.c,v 1.12 2007/06/23 00:04:04 ivan Exp $
+// $Id: chsc.c 5242 2009-03-05 21:33:26Z jj $
 
 /*-------------------------------------------------------------------*/
 /* This module implements channel subsystem interface functions      */
 /* for the Hercules ESA/390 emulator.                                */
 /*-------------------------------------------------------------------*/
 
-// $Log: chsc.c,v $
+// $Log$
 // Revision 1.12  2007/06/23 00:04:04  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -200,6 +200,8 @@ CHSC_RSP *chsc_rsp;                             /* Response structure*/
 
     SIE_INTERCEPT(regs);
 
+    PTT(PTT_CL_INF,"CHSC",regs->GR_L(r1),regs->GR_L(r2),regs->psw.IA_L);
+
     n = regs->GR(r1) & ADDRESS_MAXWRAP(regs);
     
     if(n & 0xFFF)
@@ -232,6 +234,8 @@ CHSC_RSP *chsc_rsp;                             /* Response structure*/
             break;
 #endif
         default:
+
+            PTT(PTT_CL_ERR,"*CHSC",regs->GR_L(r1),regs->GR_L(r2),regs->psw.IA_L);
 
             if( HDC3(debug_chsc_unknown_request, chsc_rsp, chsc_req, regs) )
                 break;

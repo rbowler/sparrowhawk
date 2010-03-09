@@ -8,12 +8,9 @@
 /*                                                                      */
 /************************************************************************/
 
-// $Id: memrchr.h,v 1.3 2006/12/08 09:43:29 jj Exp $
+// $Id: memrchr.h 4102 2006-12-08 09:43:35Z jj $
 //
-// $Log: memrchr.h,v $
-// Revision 1.3  2006/12/08 09:43:29  jj
-// Add CVS message log
-//
+// $Log$
 
 #ifndef MEMRCHR_H
 #define MEMRCHR_H

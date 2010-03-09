@@ -1,6 +1,7 @@
-/* MACHDEP.H  Machine specific code                                  */
+/* MACHDEP.H    (c) Copyright Greg Smith, 2001-2010                  */
+/*              Hercules machine specific code                       */
 
-// $Id: machdep.h,v 1.64 2008/11/24 21:08:36 rbowler Exp $
+// $Id: machdep.h 5634 2010-02-15 15:33:56Z rbowler $
 
 /*-------------------------------------------------------------------*/
 /*                                                                   */
@@ -29,73 +30,6 @@
 /*     both being the same.                                          */
 /*                                                                   */
 /*-------------------------------------------------------------------*/
-
-// $Log: machdep.h,v $
-// Revision 1.64  2008/11/24 21:08:36  rbowler
-// Fix win64 warning C4311 type cast pointer truncation in machdep.h
-//
-// Revision 1.63  2007/10/02 22:02:27  gsmith
-// cygwin does not need special assist for -fPIC
-//
-// Revision 1.62  2007/08/07 19:47:59  ivan
-// Fix a couple of gcc-4.2 warnings
-//
-// Revision 1.61  2007/03/13 00:34:18  ivan
-// fetch_dw macro fix for MSVC compiles
-//
-// Revision 1.60  2007/03/12 22:02:06  ivan
-// Fix a couple of typos in machdep.h that affect non i686 ia32 compiles
-//
-// Revision 1.59  2007/03/10 06:27:43  gsmith
-// machdep.h updates
-//
-// Revision 1.58  2007/03/09 00:54:31  gsmith
-// concpy rework
-//
-// Revision 1.57  2007/03/09 00:53:05  gsmith
-// More tweaks to machdep.h i686 code
-//
-// Revision 1.56  2007/03/08 03:18:16  gsmith
-// Fix store_dw_i686
-//
-// Revision 1.55  2007/03/08 02:14:21  gsmith
-// Fix fetch_dw_i686
-//
-// Revision 1.54  2007/01/18 05:19:24  gsmith
-// do MULTI_BYTE_ASSIST for gcc x86 only if __linux__ defined
-//
-// Revision 1.53  2007/01/16 00:46:42  gsmith
-// Use =q for cc on ia32 cmpxchg8b and -DPIC
-//
-// Revision 1.52  2007/01/15 22:31:20  ivan
-// Indicate affected memory range to compiler in cmpxchgX assists to aid optimizer
-// Broaden ("D" to "m") constraint range of cmpxchg instruction classes memory target
-// Indicate to compiler that cc is clobbered by cmpxchg1b/4/8b/l/q (preventive)
-//
-// Revision 1.51  2007/01/15 20:19:39  ivan
-// Minor change to i686 cmpxchg8 asm assist (give more info to the compiler)
-//
-// Revision 1.50  2007/01/14 19:04:41  ivan
-// Fix a possible register clobber in cmpxchgX assists
-//
-// Revision 1.49  2006/12/31 22:49:55  gsmith
-// 2006 Dec 31 disable multi-byte-assist for cygwin
-//
-// Revision 1.48  2006/12/31 21:16:32  gsmith
-// 2006 Dec 31 really back out mainlockx.pat
-//
-// Revision 1.47  2006/12/20 09:09:40  jj
-// Fix bogus log entries
-//
-// Revision 1.46  2006/12/20 04:26:20  gsmith
-// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
-//
-// Revision 1.45  2006/12/20 04:22:00  gsmith
-// 2006 Dec 19 Backout mainlockx.pat - possible SMP problems - Greg Smith
-//
-// Revision 1.44  2006/12/08 09:43:28  jj
-// Add CVS message log
-//
 
 #ifndef _HERCULES_MACHDEP_H
 #define _HERCULES_MACHDEP_H 1
@@ -150,12 +84,6 @@
     // Any X86 at all (both 32/64-bit)
 
     #pragma  intrinsic  ( _InterlockedCompareExchange )
-
-    #define  ASSIST_CMPXCHG1    // (indicate machine-dependent assist function used)
-    #define  ASSIST_CMPXCHG4    // (indicate machine-dependent assist function used)
-    #define  ASSIST_CMPXCHG8    // (indicate machine-dependent assist function used)
-    #define  ASSIST_FETCH_DW    // (indicate machine-dependent assist function used)
-    #define  ASSIST_STORE_DW    // (indicate machine-dependent assist function used)
 
     #define  cmpxchg1(  x, y, z )  cmpxchg1_x86( x, y, z )
     #define  cmpxchg4(  x, y, z )  cmpxchg4_x86( x, y, z )
@@ -331,7 +259,8 @@
   #endif
 
   #if defined(__powerpc__) || defined(__ppc__) || \
-      defined(__POWERPC__) || defined(__PPC__)
+      defined(__POWERPC__) || defined(__PPC__) || \
+      defined(_POWER)
     #define _ext_ppc
   #endif
 
@@ -418,17 +347,16 @@ static __inline__ U64 fetch_dw_i686_noswap(void *ptr)
 __asm__ __volatile__ (
          XCHG_BREG
          LOCK_PREFIX
-         "cmpxchg8b %4\n\t"
+         "cmpxchg8b (%4)\n\t"
          XCHG_BREG
          : "=A" (value)
          : "0" (value),
            BREG ((unsigned long)value),
            "c"  ((unsigned long)(value >> 32)),
-           "m" (*(U64 *)ptr));
+           "D" (ptr));
  return value;
 }
 
-#define ASSIST_STORE_DW
 #define store_dw_noswap(x,y) store_dw_i686_noswap(x,y)
 static __inline__ void store_dw_i686_noswap(void *ptr, U64 value) {
 __asm__ __volatile__ (
@@ -513,21 +441,75 @@ static __inline__ BYTE cmpxchg8_amd64(U64 *old, U64 new, void *ptr) {
 #if defined(_ext_ppc)
 
 /* From /usr/src/linux/include/asm-ppc/system.h */
-static __inline__ unsigned long
-__cmpxchg_u32(volatile int *p, int old, int new)
-{
-    int prev;
 
-    __asm__ __volatile__ ("\n\
-1:  lwarx   %0,0,%2 \n\
-    cmpw    0,%0,%3 \n\
-    bne 2f \n\
-    stwcx.  %4,0,%2 \n\
-    bne-    1b\n"
+/* NOTE: IBM's VisualAge compiler likes 1: style labels
+         but GNU's gcc compiler running on AIX does not. */
+
+#if !defined( __GNUC__ )        // (VisualAge presumed)
+  #define LABEL1 "1:\n"
+  #define LABEL2 "2:\n"
+  #define BRNCH2 "2f"
+  #define BRNCH1 "1b"
+#else                           // (else gcc...)
+  #define LABEL1 "loop%=:\n"
+  #define LABEL2 "exit%=:\n"
+  #define BRNCH2 "exit%="
+  #define BRNCH1 "loop%="
+#endif
+
+/* NOTE: Both VisualAge *and* gcc define __64BIT__
+         see: http://gmplib.org/list-archives/gmp-discuss/2008-July/003339.html */
+
+#if defined( __64BIT__ )
+
+static __inline__ U64
+__cmpxchg_u64(volatile U64 *p, U64 old, U64 new)
+{
+    U64 prev;
+
+    __asm__ __volatile__ ("\n"
+LABEL1
+"       ldarx   %0,0,%2\n\
+        cmpd    0,%0,%3\n\
+        bne     "BRNCH2"\n\
+        stdcx.  %4,0,%2\n\
+        bne-    "BRNCH1"\n"
 #ifdef OPTION_SMP
-"    sync\n"
+"       sync\n"
 #endif /* OPTION_SMP */
-"2:"
+LABEL2
+    : "=&r" (prev), "=m" (*p)
+    : "r" (p), "r" (old), "r" (new), "m" (*p)
+    : "cc", "memory");
+
+    return prev;
+}
+
+#define cmpxchg8(x,y,z) cmpxchg8_ppc(x,y,z)
+static __inline__ BYTE cmpxchg8_ppc(U64 *old, U64 new, void *ptr) {
+/* returns zero on success otherwise returns 1 */
+U64 prev = *old;
+return (prev != (*old = __cmpxchg_u64((U64*)ptr, prev, new)));
+}
+
+#endif // defined( __64BIT__ )
+
+static __inline__ U32
+__cmpxchg_u32(volatile U32 *p, U32 old, U32 new)
+{
+    U32 prev;
+
+    __asm__ __volatile__ ("\n"
+LABEL1
+"       lwarx   %0,0,%2\n\
+        cmpw    0,%0,%3\n\
+        bne     "BRNCH2"\n\
+        stwcx.  %4,0,%2\n\
+        bne-    "BRNCH1"\n"
+#ifdef OPTION_SMP
+"       sync\n"
+#endif /* OPTION_SMP */
+LABEL2
     : "=&r" (prev), "=m" (*p)
     : "r" (p), "r" (old), "r" (new), "m" (*p)
     : "cc", "memory");
@@ -539,7 +521,7 @@ __cmpxchg_u32(volatile int *p, int old, int new)
 static __inline__ BYTE cmpxchg4_ppc(U32 *old, U32 new, void *ptr) {
 /* returns zero on success otherwise returns 1 */
 U32 prev = *old;
-return (prev != (*old = __cmpxchg_u32((int *)ptr, (int)prev, (int)new)));
+return (prev != (*old = __cmpxchg_u32((U32*)ptr, prev, new)));
 }
 
 #define cmpxchg1(x,y,z) cmpxchg1_ppc(x,y,z)
@@ -571,7 +553,7 @@ U32  *ptr4, val4, old4, new4;
  #define ASSIST_CMPXCHG1
 #endif
 
-#if defined(cmpxchg1)
+#if defined(cmpxchg4)
  #define ASSIST_CMPXCHG4
 #endif
 

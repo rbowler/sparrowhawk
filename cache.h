@@ -1,7 +1,7 @@
-/* CACHE.H    (c)Copyright Greg Smith, 2002-2007                     */
+/* CACHE.H    (c)Copyright Greg Smith, 2002-2009                     */
 /*            Buffer Cache Manager                                   */
 
-// $Id: cache.h,v 1.14 2007/06/23 00:04:03 ivan Exp $
+// $Id: cache.h 5125 2009-01-23 12:01:44Z bernard $
 
 /*-------------------------------------------------------------------
   Description:
@@ -153,7 +153,7 @@
 
   -------------------------------------------------------------------*/
 
-// $Log: cache.h,v $
+// $Log$
 // Revision 1.14  2007/06/23 00:04:03  ivan
 // Update copyright notices to include current year (2007)
 //

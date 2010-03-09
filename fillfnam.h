@@ -1,9 +1,6 @@
-// $Id: fillfnam.h,v 1.2 2006/12/08 09:43:21 jj Exp $
+// $Id: fillfnam.h 4102 2006-12-08 09:43:35Z jj $
 //
-// $Log: fillfnam.h,v $
-// Revision 1.2  2006/12/08 09:43:21  jj
-// Add CVS message log
-//
+// $Log$
 
 #ifndef __FILLFNAM_H__
 #define __FILLFNAM_H__

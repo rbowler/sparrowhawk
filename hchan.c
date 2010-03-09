@@ -1,8 +1,8 @@
-/* GCHAN.C       (c) Copyright Ivan Warren, 2005-2007                */
-/* Based on work (c)Roger Bowler, Jan Jaeger & Others 1999-2006      */
+/* GCHAN.C       (c) Copyright Ivan Warren, 2005-2009                */
+/* Based on work (c)Roger Bowler, Jan Jaeger & Others 1999-2009      */
 /*              Generic channel device handler                       */
 
-// $Id: hchan.c,v 1.11 2007/11/21 22:54:14 fish Exp $
+// $Id: hchan.c 5125 2009-01-23 12:01:44Z bernard $
 
 /* This code is covered by the QPL Licence                           */
 /**CAUTION*CAUTION*CAUTION*CAUTION*CAUTION*CAUTION*CAUTION*CAUTION****/
@@ -16,7 +16,7 @@
 /* communicate with external device handlers.                        */
 /*-------------------------------------------------------------------*/
 
-// $Log: hchan.c,v $
+// $Log$
 // Revision 1.11  2007/11/21 22:54:14  fish
 // Use new BEGIN_DEVICE_CLASS_QUERY macro
 //

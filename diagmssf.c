@@ -1,7 +1,7 @@
-/* DIAGMSSF.C   (c) Copyright Jan Jaeger, 1999-2007                  */
+/* DIAGMSSF.C   (c) Copyright Jan Jaeger, 1999-2009                  */
 /*              ESA/390 Diagnose Functions                           */
 
-// $Id: diagmssf.c,v 1.47 2008/12/23 11:07:43 ivan Exp $
+// $Id: diagmssf.c 5427 2009-07-11 11:26:54Z ivan $
 
 /*-------------------------------------------------------------------*/
 /* This module implements various diagnose functions                 */
@@ -10,10 +10,10 @@
 /* LPAR RMF interface call                                           */
 /*                                                                   */
 /*                                             04/12/1999 Jan Jaeger */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 /*-------------------------------------------------------------------*/
 
-// $Log: diagmssf.c,v $
+// $Log$
 // Revision 1.47  2008/12/23 11:07:43  ivan
 // Indicate CPU engine types in DIAG 204 CPU part structure array
 //
@@ -50,6 +50,8 @@
 #include "hercules.h"
 
 #include "opcode.h"
+
+#include "inline.h"
 
 #include "service.h"
 
@@ -198,13 +200,64 @@ typedef struct _DIAG204_PART {
 
 typedef struct _DIAG204_PART_CPU {
         HWORD   cpaddr;                 /* CP address                */
-        BYTE    resv2[2];
+        BYTE    resv1[2];
         BYTE    index;                  /* Index into diag224 area   */
         BYTE    cflag;                  /*   ???                     */
         HWORD   weight;                 /* Weight                    */
         DBLWRD  totdispatch;            /* Total dispatch time       */
         DBLWRD  effdispatch;            /* Effective dispatch time   */
     } DIAG204_PART_CPU;
+
+typedef struct _DIAG204_X_HDR {
+        BYTE    numpart;                /* Number of partitions      */
+        BYTE    flags;                  /* Flag Byte                 */
+#define DIAG204_X_PHYSICAL_PRESENT      0x80
+        HWORD   resv1;                  /* Unknown , 0 on 2003,
+                                           0x0005 under VM           */
+        HWORD   physcpu;                /* Number of phys CP's       */
+        HWORD   offown;                 /* Offset to own partition   */
+        DBLWRD  diagstck1;              /* TOD of last diag204       */
+        DBLWRD  diagstck2;              /*   in STCKE format         */
+        BYTE    resv2[40];
+    } DIAG204_X_HDR;
+
+typedef struct _DIAG204_X_PART {
+        BYTE    partnum;                /* Logical partition number
+                                           starts with 1             */
+        BYTE    virtcpu;                /* Number of virt CP's       */
+        BYTE    realcpu;                /* Number of real CP's       */
+        BYTE    pflag;
+        FWORD   mlu;      
+        BYTE    partname[8];            /* Partition name            */
+        BYTE    cpcname[8];             /* CPC name                  */
+        BYTE    osname[8];              /* Operating system type     */
+        DBLWRD  cssize;                 /* Central storage size      */
+        DBLWRD  essize;                 /* Expanded Storage size     */
+        BYTE    upid;
+        BYTE    resv1[3];
+        FWORD   gr_mlu;
+        BYTE    gr_name[8];             /* Sysplex name?             */
+        BYTE    resv2[32];
+    } DIAG204_X_PART;
+
+typedef struct _DIAG204_X_PART_CPU {
+        HWORD   cpaddr;                 /* CP address                */
+        BYTE    resv1[2];
+        BYTE    index;                  /* Index into diag224 area   */
+        BYTE    cflag;                  /*   ???                     */
+        HWORD   weight;                 /* Weight                    */
+        DBLWRD  totdispatch;            /* Total dispatch time       */
+        DBLWRD  effdispatch;            /* Effective dispatch time   */
+        HWORD   minweight;
+        HWORD   curweight;
+        HWORD   maxweight;
+        BYTE    resv2[2];
+        DBLWRD  onlinetime;
+        DBLWRD  waittime;
+        FWORD   pmaweight;
+        FWORD   polarweight;
+        BYTE    resv3[40];
+    } DIAG204_X_PART_CPU;
 
 static const char diag224_cputable[]=
 {
@@ -369,6 +422,7 @@ DEVBLK            *dev;                /* Device block pointer       */
             break;
 
         default:
+            PTT(PTT_CL_ERR,"*DIAG080",regs->GR_L(r1),regs->GR_L(r2),regs->psw.IA_L);
             /* Set response code X'06F0' for invalid MSSF command */
             spccb->resp[0] = SPCCB_REAS_UNASSIGNED;
             spccb->resp[1] = SPCCB_RESP_UNASSIGNED;
@@ -402,21 +456,28 @@ void ARCH_DEP(diag204_call) (int r1, int r2, REGS *regs)
 DIAG204_HDR       *hdrinfo;            /* Header                     */
 DIAG204_PART      *partinfo;           /* Partition info             */
 DIAG204_PART_CPU  *cpuinfo;            /* CPU info                   */
+#if defined(FEATURE_EXTENDED_DIAG204)
+DIAG204_X_HDR      *hdrxinfo;          /* Header                     */
+DIAG204_X_PART     *partxinfo;         /* Partition info             */
+DIAG204_X_PART_CPU *cpuxinfo;          /* CPU info                   */
+U64               tdis;       
+#endif /*defined(FEATURE_EXTENDED_DIAG204)*/
 RADR              abs;                 /* abs addr of data area      */
 U64               dreg;                /* work doubleword            */
-U64               tdis = 0, teff = 0;
 int               i;                   /* loop counter               */
 struct rusage     usage;               /* RMF type data              */
+static U64        diag204tod;          /* last diag204 tod           */
+#if defined(FEATURE_PHYSICAL_DIAG204)
 static BYTE       physical[8] =
               {0xD7,0xC8,0xE8,0xE2,0xC9,0xC3,0xC1,0xD3}; /* PHYSICAL */
-static U64        diag204tod;          /* last diag204 tod           */
+#endif /*defined(FEATURE_PHYSICAL_DIAG204)*/
 
     /* Test DIAG204 command word */
     switch (regs->GR_L(r2)) {
 
     case 0x04:
 
-        abs = APPLY_PREFIXING (regs->GR_L(r1), regs->PX);
+        abs = APPLY_PREFIXING (GR_A(r1,regs), regs->PX);
 
         /* Program check if RMF data is not on a page boundary */
         if ( (abs & PAGEFRAME_BYTEMASK) != 0x000)
@@ -426,21 +487,23 @@ static U64        diag204tod;          /* last diag204 tod           */
         if ( abs > regs->mainlim )
             ARCH_DEP(program_interrupt) (regs, PGM_ADDRESSING_EXCEPTION);
 
-        /* save last diag204 tod */
-        dreg = diag204tod;
-
-        /* Retrieve the TOD clock value and shift out the epoch */
-        diag204tod = tod_clock(regs) << 8;
-
         /* Point to DIAG 204 data area */
         hdrinfo = (DIAG204_HDR*)(regs->mainstor + abs);
 
         /* Mark page referenced */
         STORAGE_KEY(abs, regs) |= STORKEY_REF | STORKEY_CHANGE;
 
+        /* save last diag204 tod */
+        dreg = diag204tod;
+
+        /* Retrieve the TOD clock value and shift out the epoch */
+        diag204tod = tod_clock(regs) << 8;
+
         memset(hdrinfo, 0, sizeof(DIAG204_HDR));
         hdrinfo->numpart = 1;
+#if defined(FEATURE_PHYSICAL_DIAG204)
         hdrinfo->flags = DIAG204_PHYSICAL_PRESENT;
+#endif /*defined(FEATURE_PHYSICAL_DIAG204)*/
         STORE_HW(hdrinfo->physcpu,sysblk.cpus);
         STORE_HW(hdrinfo->offown,sizeof(DIAG204_HDR));
         STORE_DW(hdrinfo->diagstck,dreg);
@@ -448,7 +511,7 @@ static U64        diag204tod;          /* last diag204 tod           */
         /* hercules partition */
         partinfo = (DIAG204_PART*)(hdrinfo + 1);
         memset(partinfo, 0, sizeof(DIAG204_PART));
-        partinfo->partnum = 1;
+        partinfo->partnum = 1; /* Hercules partition */
         partinfo->virtcpu = sysblk.cpus;
         get_lparname(partinfo->partname);
 
@@ -462,41 +525,193 @@ static U64        diag204tod;          /* last diag204 tod           */
               STORE_HW(cpuinfo->cpaddr,sysblk.regs[i]->cpuad);
               cpuinfo->index=sysblk.ptyp[i];
               STORE_HW(cpuinfo->weight,100);
-              dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) / sysblk.cpus;
-              dreg = (dreg * 1000000) + (i ? 0 : (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec));
-              tdis += dreg;
+              dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) * 1000000;
+              dreg = (dreg + (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec)) / sysblk.cpus;
+              dreg <<= 12;
               STORE_DW(cpuinfo->totdispatch,dreg);
-              dreg = (U64)(usage.ru_utime.tv_sec) / sysblk.cpus;
-              dreg = (dreg * 1000000) + (i ? 0 : (usage.ru_utime.tv_usec) );
-              teff += dreg;
+
+              dreg = (U64)(usage.ru_utime.tv_sec)* 1000000;
+              dreg = (dreg + (usage.ru_utime.tv_usec)) / sysblk.cpus;
+              dreg <<= 12;
               STORE_DW(cpuinfo->effdispatch,dreg);
+
               cpuinfo += 1;
           }
 
+#if defined(FEATURE_PHYSICAL_DIAG204)
         /* lpar management */
         getrusage(RUSAGE_CHILDREN,&usage);
         partinfo = (DIAG204_PART*)cpuinfo;
         memset(partinfo, 0, sizeof(DIAG204_PART));
-        partinfo->partnum = 0;
-        partinfo->virtcpu = 1;
+        partinfo->partnum = 0; /* Physical machine */
+        partinfo->virtcpu = sysblk.cpus;
         memcpy(partinfo->partname,physical,sizeof(physical));
+
+        /* report all emulated physical cpu's */
+        getrusage(RUSAGE_SELF,&usage);
         cpuinfo = (DIAG204_PART_CPU*)(partinfo + 1);
-        memset(cpuinfo, 0, sizeof(DIAG204_PART_CPU));
-//      STORE_HW(cpuinfo->cpaddr,0);
-        dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec);
-        dreg = (dreg * 1000000) + (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec);
-    tdis += dreg;
-        STORE_DW(cpuinfo->totdispatch,tdis);
-        dreg = (U64)(usage.ru_utime.tv_sec);
-        dreg = (dreg * 1000000) + (usage.ru_utime.tv_usec);
-    teff += dreg;
-        STORE_DW(cpuinfo->effdispatch,teff);
+        for(i = 0; i < MAX_CPU; i++)
+          if (IS_CPU_ONLINE(i))
+          {
+              memset(cpuinfo, 0, sizeof(DIAG204_PART_CPU));
+              STORE_HW(cpuinfo->cpaddr,sysblk.regs[i]->cpuad);
+              cpuinfo->index = sysblk.ptyp[i];
+              STORE_HW(cpuinfo->weight,100);
+
+              dreg = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) * 1000000;
+              dreg = (dreg + (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec)) / sysblk.cpus;
+              dreg <<= 12;
+              STORE_DW(cpuinfo->totdispatch,dreg);
+
+              dreg = (U64)(usage.ru_utime.tv_sec) * 1000000;
+              dreg = (dreg + (usage.ru_utime.tv_usec)) / sysblk.cpus;
+              dreg <<= 12;
+              STORE_DW(cpuinfo->effdispatch,dreg);
+
+              cpuinfo += 1;
+          }
+#endif /*defined(FEATURE_PHYSICAL_DIAG204)*/
 
         regs->GR_L(r2) = 0;
 
         break;
 
+#if defined(FEATURE_EXTENDED_DIAG204)
+    /* Extended subcode 5 returns the size of the data areas provided by extended subcodes 6 and 7 */
+    case 0x00010005:
+        i = sizeof(DIAG204_X_HDR) + ((sizeof(DIAG204_X_PART) + (MAX_CPU * sizeof(DIAG204_X_PART_CPU))) * 2);
+        regs->GR_L(r2+1) = (i + PAGEFRAME_BYTEMASK) / PAGEFRAME_PAGESIZE;
+        regs->GR_L(r2) = 0;
+
+        break;
+
+    /* Provide extended information */
+    case 0x00010006:
+        /* We fall through as we do not have any secondary cpus (that we know of) */
+
+    /* Provide extended information, including information about secondary CPUs */
+    case 0x00010007:
+        /* Program check if RMF data is not on a page boundary */
+        if ( (regs->GR_L(r1) & PAGEFRAME_BYTEMASK) != 0x000)
+            ARCH_DEP(program_interrupt) (regs, PGM_SPECIFICATION_EXCEPTION);
+
+        /* Obtain absolute address of main storage block,
+           check protection, and set reference and change bits */
+        hdrxinfo = (DIAG204_X_HDR*)MADDR (GR_A(r1,regs), r1, regs, ACCTYPE_WRITE, regs->psw.pkey);
+
+        /* save last diag204 tod */
+        dreg = diag204tod;
+
+        /* Retrieve the TOD clock value and shift out the epoch */
+        diag204tod = tod_clock(regs) << 8;
+
+        memset(hdrxinfo, 0, sizeof(DIAG204_X_HDR));
+        hdrxinfo->numpart = 1;
+#if defined(FEATURE_PHYSICAL_DIAG204)
+        hdrxinfo->flags = DIAG204_X_PHYSICAL_PRESENT;
+#endif /*defined(FEATURE_PHYSICAL_DIAG204)*/
+        STORE_HW(hdrxinfo->physcpu,sysblk.cpus);
+        STORE_HW(hdrxinfo->offown,sizeof(DIAG204_X_HDR));
+        STORE_DW(hdrxinfo->diagstck1,(dreg >> 8));
+        STORE_DW(hdrxinfo->diagstck2,( 0x0000000001000000ULL | (regs->cpuad << 16) | regs->todpr));
+
+        /* hercules partition */
+        partxinfo = (DIAG204_X_PART*)(hdrxinfo + 1);
+        memset(partxinfo, 0, sizeof(DIAG204_PART));
+        partxinfo->partnum = 1; /* Hercules partition */
+        partxinfo->virtcpu = sysblk.cpus;
+        get_lparname(partxinfo->partname);
+        get_sysname(partxinfo->cpcname);
+        get_systype(partxinfo->osname);
+        STORE_DW(partxinfo->cssize,sysblk.mainsize);
+        STORE_DW(partxinfo->essize,sysblk.xpndsize);
+        get_sysplex(partxinfo->gr_name);
+
+        /* hercules cpu's */
+        getrusage(RUSAGE_SELF,&usage);
+        cpuxinfo = (DIAG204_X_PART_CPU*)(partxinfo + 1);
+        for(i = 0; i < MAX_CPU; i++)
+          if (IS_CPU_ONLINE(i))
+          {
+              memset(cpuxinfo, 0, sizeof(DIAG204_X_PART_CPU));
+              STORE_HW(cpuxinfo->cpaddr,sysblk.regs[i]->cpuad);
+              cpuxinfo->index = sysblk.ptyp[i];
+              STORE_HW(cpuxinfo->weight,100);
+              
+              tdis = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) * 1000000;
+              tdis = (tdis + (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec)) / sysblk.cpus;
+              tdis <<= 12;
+              STORE_DW(cpuxinfo->totdispatch,tdis);
+
+              dreg = (U64)(usage.ru_utime.tv_sec)* 1000000;
+              dreg = (dreg + (usage.ru_utime.tv_usec)) / sysblk.cpus;
+              dreg <<= 12;
+              STORE_DW(cpuxinfo->effdispatch,dreg);
+
+              STORE_HW(cpuxinfo->minweight,1000);
+              STORE_HW(cpuxinfo->curweight,1000);
+              STORE_HW(cpuxinfo->maxweight,1000);
+
+              STORE_DW(cpuxinfo->onlinetime, diag204tod - sysblk.todstart);
+              STORE_DW(cpuxinfo->waittime, (diag204tod - sysblk.todstart) - tdis);
+
+              STORE_HW(cpuxinfo->pmaweight,1000);
+              STORE_HW(cpuxinfo->polarweight,1000);
+
+              cpuxinfo += 1;
+          }
+
+
+#if defined(FEATURE_PHYSICAL_DIAG204)
+        /* lpar management */
+        partxinfo = (DIAG204_X_PART*)cpuxinfo;
+        memset(partxinfo, 0, sizeof(DIAG204_X_PART));
+        partxinfo->partnum = 0; /* Physical machine */
+        partxinfo->virtcpu = sysblk.cpus;
+        memcpy(partxinfo->partname,physical,sizeof(physical));
+
+        /* report all emulated physical cpu's */
+        getrusage(RUSAGE_CHILDREN,&usage);
+        cpuxinfo = (DIAG204_PART_CPU*)(partinfo + 1);
+        for(i = 0; i < MAX_CPU; i++)
+          if (IS_CPU_ONLINE(i))
+          {
+              memset(cpuxinfo, 0, sizeof(DIAG204_X_PART_CPU));
+              STORE_HW(cpuxinfo->cpaddr,sysblk.regs[i]->cpuad);
+              cpuxinfo->index = sysblk.ptyp[i];
+              STORE_HW(cpuxinfo->weight,100);
+              
+              tdis = (U64)(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec) * 1000000;
+              tdis = (tdis + (usage.ru_utime.tv_usec + usage.ru_stime.tv_usec)) / sysblk.cpus;
+              tdis <<= 12;
+              STORE_DW(cpuxinfo->totdispatch,tdis);
+
+              dreg = (U64)(usage.ru_utime.tv_sec)* 1000000;
+              dreg = (dreg + (usage.ru_utime.tv_usec)) / sysblk.cpus;
+              dreg <<= 12;
+              STORE_DW(cpuxinfo->effdispatch,dreg);
+
+              STORE_HW(cpuxinfo->minweight,1000);
+              STORE_HW(cpuxinfo->curweight,1000);
+              STORE_HW(cpuxinfo->maxweight,1000);
+
+              STORE_DW(cpuxinfo->onlinetime, diag204tod - sysblk.todstart);
+              STORE_DW(cpuxinfo->waittime, (diag204tod - sysblk.todstart) - tdis);
+
+              STORE_HW(cpuxinfo->pmaweight,1000);
+              STORE_HW(cpuxinfo->polarweight,1000);
+
+              cpuxinfo += 1;
+          }
+#endif /*defined(FEATURE_PHYSICAL_DIAG204)*/
+
+        regs->GR_L(r2) = 0;
+
+        break;
+#endif /*defined(FEATURE_EXTENDED_DIAG204)*/
+
     default:
+        PTT(PTT_CL_ERR,"*DIAG204",regs->GR_L(r1),regs->GR_L(r2),regs->psw.IA_L);
         regs->GR_L(r2) = 4;
 
     } /*switch(regs->GR_L(r2))*/

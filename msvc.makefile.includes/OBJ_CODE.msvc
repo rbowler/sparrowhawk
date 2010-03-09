@@ -3,13 +3,13 @@
 # --------------------------------------------------------------------------
 # (c) Copyright Roger Bowler, 2005-2007
 # --------------------------------------------------------------------------
-# $Id: OBJ_CODE.msvc,v 1.7 2008/12/29 11:03:11 jj Exp $
+# $Id: OBJ_CODE.msvc 5444 2009-08-09 16:36:42Z hsg001 $
 #
 #  What object code goes in what module...
 #
 #
 #                           CHANGE HISTORY
-# $Log: OBJ_CODE.msvc,v $
+# $Log$
 # Revision 1.7  2008/12/29 11:03:11  jj
 # Move HMC disk I/O functions to scedasd.c
 #
@@ -96,6 +96,7 @@ hengine_OBJ = \
     $(O)channel.obj  \
     $(O)chsc.obj     \
     $(O)clock.obj    \
+    $(O)cmdtab.obj   \
     $(O)cmpsc.obj    \
     $(O)config.obj   \
     $(O)control.obj  \
@@ -141,6 +142,7 @@ hengine_OBJ = \
     $(O)trace.obj    \
     $(O)vector.obj   \
     $(O)vm.obj       \
+    $(O)vmd250.obj   \
     $(O)vstore.obj   \
     $(O)w32chan.obj  \
     $(O)xstore.obj
@@ -148,6 +150,7 @@ hengine_OBJ = \
 hmodule_OBJ = \
     $(O)cardpch.obj  \
     $(O)cardrdr.obj  \
+    $(O)comm3705.obj \
     $(O)commadpt.obj \
     $(O)console.obj  \
     $(O)ctc_ctci.obj \

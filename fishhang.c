@@ -1,13 +1,13 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //         fishhang.c           verify/debug proper Hercules LOCK handling...
 ////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2002-2007. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2002-2009. Released under the Q Public License
 // (http://www.hercules-390.org/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: fishhang.c,v 1.19 2007/11/30 14:54:32 jmaynard Exp $
+// $Id: fishhang.c 5586 2009-12-31 10:29:11Z rbowler $
 //
-// $Log: fishhang.c,v $
+// $Log$
 // Revision 1.19  2007/11/30 14:54:32  jmaynard
 // Changed conmicro.cx to hercules-390.org or conmicro.com, as needed.
 //
@@ -150,7 +150,7 @@ typedef struct _tagFishEvent
 FISH_EVENT;
 
 /////////////////////////////////////////////////////////////////////////////
-// Macro to remove Microsoft's stupid fullpath from __FILE__ name...
+// Macro to remove Microsoft's standard fullpath from __FILE__ name...
 
 #define FIXFILENAME( filename )           \
     do { if ( filename ) {                \

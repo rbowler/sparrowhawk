@@ -1,10 +1,10 @@
-/* CPU.C        (c) Copyright Roger Bowler, 1994-2007                */
+/* CPU.C        (c) Copyright Roger Bowler, 1994-2009                */
 /*              ESA/390 CPU Emulator                                 */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: cpu.c,v 1.208 2009/01/09 23:25:59 ivan Exp $
+// $Id: cpu.c 5553 2009-12-23 17:34:16Z ivan $
 
 /*-------------------------------------------------------------------*/
 /* This module implements the CPU instruction execution function of  */
@@ -29,7 +29,10 @@
 /*      ASN-and-LX-reuse facility - Roger Bowler, June 2004      @ALR*/
 /*-------------------------------------------------------------------*/
 
-// $Log: cpu.c,v $
+// $Log$
+// Revision 1.209  2009/01/23 11:46:20  bernard
+// copyright notice
+//
 // Revision 1.208  2009/01/09 23:25:59  ivan
 // Fix monitor code location when the monitor call occurs during the interception of a z/Arch SIE guest
 //
@@ -186,9 +189,7 @@
 #endif
 
 #include "hercules.h"
-
 #include "opcode.h"
-
 #include "inline.h"
 
 /*-------------------------------------------------------------------*/
@@ -454,7 +455,10 @@ int     code;                           /* pcode without PER ind.    */
 int     ilc;                            /* instruction length        */
 #if defined(FEATURE_ESAME)
 /** FIXME : SEE ISW20090110-1 */
-void   *zmoncode;                       /* special reloc for z/Arch  */
+void   *zmoncode=NULL;                  /* special reloc for z/Arch  */
+                 /* FIXME : zmoncode not being initialized here raises
+                    a potentially non-initialized warning in GCC..
+                    can't find why. ISW 2009/02/04 */
                                         /* mon call SIE intercept    */
 #endif
 #if defined(FEATURE_INTERPRETIVE_EXECUTION)
@@ -543,6 +547,8 @@ static char *pgmintname[] = {
     if(regs->ghostregs)
         longjmp(regs->progjmp, pcode);
 
+    PTT(PTT_CL_PGM,"*PROG",pcode,(U32)(regs->TEA & 0xffffffff),regs->psw.IA_L);
+
     /* program_interrupt() may be called with a shadow copy of the
        regs structure, realregs is the pointer to the real structure
        which must be used when loading/storing the psw, or backing up
@@ -629,10 +635,12 @@ static char *pgmintname[] = {
     if(realregs->sie_active &&
         (code == PGM_PROTECTION_EXCEPTION
       || code == PGM_ADDRESSING_EXCEPTION
-#if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
+#if defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
       || code == PGM_ALET_SPECIFICATION_EXCEPTION
       || code == PGM_ALEN_TRANSLATION_EXCEPTION
-#endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
+      || code == PGM_ALE_SEQUENCE_EXCEPTION
+      || code == PGM_EXTENDED_AUTHORITY_EXCEPTION
+#endif /*defined(_FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
         ) )
     {
 #if defined(SIE_DEBUG)
@@ -787,6 +795,10 @@ static char *pgmintname[] = {
 #endif /*FEATURE_VECTOR_FACILITY*/
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)
       && !(code == PGM_ALEN_TRANSLATION_EXCEPTION
+        && SIE_FEATB(regs, MX, XC))
+      && !(code == PGM_ALE_SEQUENCE_EXCEPTION
+        && SIE_FEATB(regs, MX, XC))
+      && !(code == PGM_EXTENDED_AUTHORITY_EXCEPTION
         && SIE_FEATB(regs, MX, XC))
 #endif /*defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE)*/
       /* And conditional for the following exceptions */
@@ -1095,6 +1107,8 @@ static void ARCH_DEP(restart_interrupt) (REGS *regs)
 int     rc;                             /* Return code               */
 PSA    *psa;                            /* -> Prefixed storage area  */
 
+    PTT(PTT_CL_INF,"*RESTART",regs->cpuad,regs->cpustate,regs->psw.IA_L);
+
     /* Set the main storage reference and change bits */
     STORAGE_KEY(regs->PX, regs) |= (STORKEY_REF | STORKEY_CHANGE);
 
@@ -1145,6 +1159,8 @@ DBLWRD  csw;                            /* CSW for S/370 channels    */
 
     /* Exit if no interrupt was presented */
     if (icode == 0) return;
+
+    PTT(PTT_CL_IO,"*IOINT",ioid,ioparm,iointid);
 
 #if defined(_FEATURE_IO_ASSIST)
     if(SIE_MODE(regs) && icode != SIE_NO_INTERCEPT)
@@ -1326,7 +1342,6 @@ void *cpu_thread (int *ptr)
 REGS *regs = NULL;
 int   cpu  = *ptr;
 
-
     OBTAIN_INTLOCK(NULL);
 
     /* Signal cpu has started */
@@ -1413,7 +1428,7 @@ int i;
     obtain_lock (&sysblk.cpulock[cpu]);
 
     regs->cpuad = cpu;
-    regs->cpubit = BIT(cpu);
+    regs->cpubit = CPU_BIT(cpu);
     regs->arch_mode = sysblk.arch_mode;
     regs->mainstor = sysblk.mainstor;
     regs->sysblk = &sysblk;
@@ -1487,6 +1502,11 @@ int i;
 
     release_lock (&sysblk.cpulock[cpu]);
 
+#if defined(FEATURE_CONFIGURATION_TOPOLOGY_FACILITY)
+    /* Set topology-change-report-pending condition */
+    sysblk.topchnge = 1;
+#endif /*defined(FEATURE_CONFIGURATION_TOPOLOGY_FACILITY)*/
+
     return 0;
 }
 
@@ -1516,12 +1536,17 @@ void *cpu_uninit (int cpu, REGS *regs)
 #endif /*FEATURE_VECTOR_FACILITY*/
 
         /* Remove CPU from all CPU bit masks */
-        sysblk.config_mask &= ~BIT(cpu);
-        sysblk.started_mask &= ~BIT(cpu);
-        sysblk.waiting_mask &= ~BIT(cpu);
+        sysblk.config_mask &= ~CPU_BIT(cpu);
+        sysblk.started_mask &= ~CPU_BIT(cpu);
+        sysblk.waiting_mask &= ~CPU_BIT(cpu);
         sysblk.regs[cpu] = NULL;
         release_lock (&sysblk.cpulock[cpu]);
     }
+
+#if defined(FEATURE_CONFIGURATION_TOPOLOGY_FACILITY)
+    /* Set topology-change-report-pending condition */
+    sysblk.topchnge = 1;
+#endif /*defined(FEATURE_CONFIGURATION_TOPOLOGY_FACILITY)*/
 
     return NULL;
 }
@@ -1781,6 +1806,7 @@ REGS    regs;
     /* Switch architecture mode if appropriate */
     if(sysblk.arch_mode != regs.arch_mode)
     {
+        PTT(PTT_CL_INF,"*SETARCH",regs.arch_mode,sysblk.arch_mode,cpu);
         regs.arch_mode = sysblk.arch_mode;
         oldregs = malloc (sizeof(REGS));
         if (oldregs)

@@ -1,7 +1,7 @@
-/* CGIBIN.C     (c)Copyright Jan Jaeger, 2002-2007                   */
+/* CGIBIN.C     (c)Copyright Jan Jaeger, 2002-2010                   */
 /*              HTTP cgi-bin routines                                */
 
-// $Id: cgibin.c,v 1.75 2008/05/23 20:38:13 fish Exp $
+// $Id: cgibin.c 5645 2010-03-03 14:14:26Z rbowler $
 
 /* This file contains all cgi routines that may be executed on the   */
 /* server (ie under control of a hercules thread)                    */
@@ -43,20 +43,6 @@
 /*                                                                   */
 /*                                                                   */
 /*                                           Jan Jaeger - 28/03/2002 */
-
-// $Log: cgibin.c,v $
-// Revision 1.75  2008/05/23 20:38:13  fish
-// Change device query calls to not ask for what they don't need
-//
-// Revision 1.74  2007/06/23 00:04:03  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.73  2007/01/14 23:14:12  rbowler
-// Fix signed/unsigned mismatch in 370-only build
-//
-// Revision 1.72  2006/12/08 09:43:18  jj
-// Add CVS message log
-//
 
 #include "hstdinc.h"
 
@@ -1107,8 +1093,8 @@ void cgibin_debug_version_info(WEBBLK *webblk)
 
 }
 
+#if defined(OPTION_MIPS_COUNTING)
 /* contributed by Tim Pinkawa [timpinkawa@gmail.com] */
-
 void cgibin_xml_rates_info(WEBBLK *webblk)
 {
     hprintf(webblk->sock,"Expires: 0\n");
@@ -1122,6 +1108,7 @@ void cgibin_xml_rates_info(WEBBLK *webblk)
     hprintf(webblk->sock,"\t<siosrate>%d</siosrate>\n", sysblk.siosrate);
     hprintf(webblk->sock,"</hercules>\n");
 }
+#endif /*defined(OPTION_MIPS_COUNTING)*/
 
 /* The following table is the cgi-bin directory, which               */
 /* associates directory filenames with cgibin routines               */
@@ -1139,7 +1126,9 @@ CGITAB cgidir[] = {
     { "registers/general", &cgibin_reg_general },
     { "registers/control", &cgibin_reg_control },
     { "registers/psw", &cgibin_psw },
+#if defined(OPTION_MIPS_COUNTING)
     { "xml/rates", &cgibin_xml_rates_info },
+#endif /*defined(OPTION_MIPS_COUNTING)*/
     { NULL, NULL } };
 
 #endif /*defined(OPTION_HTTP_SERVER)*/

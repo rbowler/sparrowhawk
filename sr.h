@@ -1,7 +1,7 @@
-/* SR.H         (c)Copyright Greg Smith, 2004-2007                   */
+/* SR.H         (c)Copyright Greg Smith, 2004-2009                   */
 /*              Suspend/Resume a Hercules session                    */
 
-// $Id: sr.h,v 1.15 2007/06/23 00:04:16 ivan Exp $
+// $Id: sr.h 5126 2009-01-23 13:05:56Z bernard $
 
 /*
  * The suspend/resume functions allow a hercules instance to be
@@ -127,7 +127,7 @@
  *
  */
 
-// $Log: sr.h,v $
+// $Log$
 // Revision 1.15  2007/06/23 00:04:16  ivan
 // Update copyright notices to include current year (2007)
 //

@@ -1,12 +1,12 @@
-/* CLOCK.C      (c) Copyright Jan Jaeger, 2000-2007                  */
+/* CLOCK.C      (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              TOD Clock functions                                  */
 
-// $Id: clock.c,v 1.43 2008/08/22 04:43:50 fish Exp $
+// $Id: clock.c 5124 2009-01-23 11:44:03Z bernard $
 
 /* The emulated hardware clock is based on the host clock, adjusted  */
 /* by means of an offset and a steering rate.                        */
 
-// $Log: clock.c,v $
+// $Log$
 // Revision 1.43  2008/08/22 04:43:50  fish
 // Fix TOD clock race condition identified by Fred
 // Feucht -- by Marcin Cieslak [saper@system.pl]

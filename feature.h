@@ -1,41 +1,7 @@
-/* FEATURES.H   (c) Copyright Jan Jaeger, 2000-2007                  */
-/*      Architecture-dependent macro definitions                     */
-/*-------------------------------------------------------------------*/
-/* S/370, ESA/390 and ESAME features implemented                     */
-/*-------------------------------------------------------------------*/
+/* FEATURE.H    (c) Copyright Jan Jaeger, 2000-2009                  */
+/*              Architecture-dependent macro definitions             */
 
-//        This header file #included by 'hercules.h'
-
-// $Id: feature.h,v 1.78 2007/11/21 22:55:49 fish Exp $
-//
-// $Log: feature.h,v $
-// Revision 1.78  2007/11/21 22:55:49  fish
-// (untab)
-//
-// Revision 1.77  2007/06/23 00:04:09  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.76  2007/01/13 07:30:02  bernard
-// backout ccmask
-//
-// Revision 1.75  2007/01/12 16:43:32  bernard
-// ccmask phase 1
-//
-// Revision 1.74  2007/01/12 16:21:26  bernard
-// ccmask phase 1
-//
-// Revision 1.73  2007/01/12 15:20:44  bernard
-// ccmask phase 1
-//
-// Revision 1.72  2007/01/03 05:53:34  gsmith
-// 03 Jan 2007 Sloppy fetch - Greg Smith
-//
-// Revision 1.71  2006/12/20 04:26:19  gsmith
-// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
-//
-// Revision 1.70  2006/12/08 09:43:21  jj
-// Add CVS message log
-//
+// $Id: feature.h 5531 2009-12-11 18:23:29Z bernard $
 
 #ifdef HAVE_CONFIG_H
   #include <config.h> // Hercules build configuration options/settings
@@ -693,7 +659,7 @@ do { \
   #define SET_AEA_AR(_regs, _arn) \
   do \
   { \
-    if (ACCESS_REGISTER_MODE(&(_regs)->psw) && (_arn) > 0) { \
+    if (ACCESS_REGISTER_MODE(&(_regs)->psw) && (_arn) > 0 && (_arn) < 16) { \
       if ((_regs)->AR((_arn)) == ALET_PRIMARY) \
         (_regs)->aea_ar[(_arn)] = 1; \
       else if ((_regs)->AR((_arn)) == ALET_SECONDARY) \
@@ -731,7 +697,8 @@ do \
 #if defined(FEATURE_ACCESS_REGISTERS)
   #define _CASE_AR_SET_AEA_MODE(_regs) \
     case 2: /* AR */ \
-      for(i = USE_INST_SPACE; i < 16; i++) \
+      (_regs)->aea_ar[USE_INST_SPACE] = 1; \
+      for(i = 0; i < 16; i++) \
           (_regs)->aea_ar[i] = 1; \
       for (i = 1; i < 16; i++) { \
         if ((_regs)->AR(i) == ALET_SECONDARY) (_regs)->aea_ar[i] = 7; \
@@ -756,7 +723,8 @@ do \
 #if defined(FEATURE_LINKAGE_STACK)
   #define _CASE_HOME_SET_AEA_MODE(_regs) \
     case 4: /* HOME */ \
-      for(i = USE_INST_SPACE; i < 16; i++) \
+      (_regs)->aea_ar[USE_INST_SPACE] = 13; \
+      for(i = 0; i < 16; i++) \
           (_regs)->aea_ar[i] = 13; \
       break;
 #else
@@ -771,14 +739,16 @@ do { \
   (_regs)->aea_mode = AEA_MODE((_regs)); \
   switch ((_regs)->aea_mode & 0x0F) { \
     case 1: /* PRIM */ \
-      for(i = USE_INST_SPACE; i < 16; i++) \
+      (_regs)->aea_ar[USE_INST_SPACE] = 1; \
+      for(i = 0; i < 16; i++) \
           (_regs)->aea_ar[i] = 1; \
       break; \
     _CASE_AR_SET_AEA_MODE((_regs)) \
     _CASE_DAS_SET_AEA_MODE((_regs)) \
     _CASE_HOME_SET_AEA_MODE((_regs)) \
     default: /* case 0: REAL */ \
-      for(i = USE_INST_SPACE; i < 16; i++) \
+      (_regs)->aea_ar[USE_INST_SPACE] = CR_ASD_REAL; \
+      for(i = 0; i < 16; i++) \
           (_regs)->aea_ar[i] = CR_ASD_REAL; \
   } \
   if (inst_cr != (_regs)->aea_ar[USE_INST_SPACE]) \

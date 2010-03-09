@@ -1,7 +1,7 @@
 /* $OpenBSD: sha2.c,v 1.6 2004/05/03 02:57:36 millert Exp $ */
 /* modified for use with dyncrypt */
 
-// $Id: sha256.c,v 1.10 2008/02/28 10:16:39 rbowler Exp $
+// $Id: sha256.c 4593 2008-02-28 10:16:39Z rbowler $
 
 /*
  * FILE: sha2.c
@@ -37,10 +37,7 @@
  * $From: sha2.c,v 1.1 2001/11/08 00:01:51 adg Exp adg $
  */
 
-// $Log: sha256.c,v $
-// Revision 1.10  2008/02/28 10:16:39  rbowler
-// Fix unresolved external symbol _sha512_process
-//
+// $Log$
 // Revision 1.9  2006/12/08 09:43:35  jj
 // Add CVS message log
 //

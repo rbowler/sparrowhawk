@@ -1,9 +1,9 @@
-/* IEEE-W32.H   (c) Copyright Greg Smith, 2002-2008                  */
+/* IEEE-W32.H   (c) Copyright Greg Smith, 2002-2009                  */
 /*              Hercules IEEE floating point definitions for Windows */
 
-// $Id: ieee-w32.h,v 1.13 2008/12/16 16:22:54 rbowler Exp $
+// $Id: ieee-w32.h 5293 2009-03-24 22:52:22Z rbowler $
 //
-// $Log: ieee-w32.h,v $
+// $Log$
 // Revision 1.13  2008/12/16 16:22:54  rbowler
 // Eliminate unknown pragma warning in ieee-w32.h for VC++ Toolkit 2003
 //
@@ -254,7 +254,7 @@ __fpclassifyl (long double x)
 int
 fetestexcept (int excepts)
 {
-  int temp;
+  short temp;
 
 #if defined(NO_INLINE_ASM)
   /* Use CRT function to get current FPU status word */

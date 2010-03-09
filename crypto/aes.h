@@ -1,7 +1,7 @@
 /* $OpenBSD: rijndael.h,v 1.11 2005/05/25 05:47:53 markus Exp $ */
 /* modified for use by dyncrypt */
 
-// $Id: aes.h,v 1.6 2006/12/08 09:43:34 jj Exp $
+// $Id: aes.h 4102 2006-12-08 09:43:35Z jj $
 
 /**
  * rijndael-alg-fst.h
@@ -29,10 +29,7 @@
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-// $Log: aes.h,v $
-// Revision 1.6  2006/12/08 09:43:34  jj
-// Add CVS message log
-//
+// $Log$
 
 #ifndef __RIJNDAEL_H
 #define __RIJNDAEL_H

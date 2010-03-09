@@ -1,13 +1,13 @@
-/* GENERAL2.C   (c) Copyright Roger Bowler, 1994-2007                */
+/* GENERAL2.C   (c) Copyright Roger Bowler, 1994-2009                */
 /*              ESA/390 CPU Emulator                                 */
 /*              Instructions N-Z                                     */
 
-// $Id: general2.c,v 1.126 2008/03/28 13:36:25 rbowler Exp $
+// $Id: general2.c 5222 2009-03-01 12:28:49Z jj $
 
-/*              (c) Copyright Peter Kuschnerus, 1999-2007 (UPT & CFC)*/
+/*              (c) Copyright Peter Kuschnerus, 1999-2009 (UPT & CFC)*/
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
 /*-------------------------------------------------------------------*/
 /* This module implements all general instructions of the            */
@@ -31,7 +31,10 @@
 /*      Clear TEA on data exception - Peter Kuschnerus           v209*/
 /*-------------------------------------------------------------------*/
 
-// $Log: general2.c,v $
+// $Log$
+// Revision 1.127  2009/01/23 11:56:02  bernard
+// copyright notice
+//
 // Revision 1.126  2008/03/28 13:36:25  rbowler
 // Fix incorrect registers when cc=1 for TRTE,TRTRE
 //
@@ -425,6 +428,7 @@ VADR    effective_addr2,
             break;
 
         default:
+            PTT(PTT_CL_ERR,"*PLO",regs->GR_L(0),regs->GR_L(r1),regs->psw.IA_L);
             /* indicate function not supported */
             regs->psw.cc = 3;
             break;
@@ -549,7 +553,10 @@ VADR    effective_addr2,
         RELEASE_MAINLOCK(regs);
 
         if(regs->psw.cc && sysblk.cpus > 1)
+        {
+            PTT(PTT_CL_CSF,"*PLO",regs->GR_L(0),regs->GR_L(r1),regs->psw.IA_L);
             sched_yield();
+        }
 
     }
 }
@@ -1186,6 +1193,7 @@ int     b2;                             /* effective address base    */
 VADR    effective_addr2;                /* effective address         */
 int     i, m, n;                        /* Integer work areas        */
 U32    *p1, *p2;                        /* Mainstor pointers         */
+BYTE   *bp1;                            /* Unaligned mainstor ptr    */
 
     RS(inst, regs, r1, r3, b2, effective_addr2);
 
@@ -1196,14 +1204,28 @@ U32    *p1, *p2;                        /* Mainstor pointers         */
     m = 0x800 - ((VADR_L)effective_addr2 & 0x7ff);
 
     /* Get address of first page */
-    p1 = (U32*)MADDR(effective_addr2, b2, regs, ACCTYPE_WRITE, regs->psw.pkey);
+    bp1 = (BYTE*)MADDR(effective_addr2, b2, regs, ACCTYPE_WRITE, regs->psw.pkey);
+    p1 = (U32*)bp1;
 
     if (likely(n <= m))
     {
         /* boundary not crossed */
         n >>= 2;
-        for (i = 0; i < n; i++)
-            store_fw (p1++, regs->GR_L((r1 + i) & 0xF));
+#if defined(OPTION_STRICT_ALIGNMENT)
+        if(likely(!(((uintptr_t)effective_addr2)&0x03)))
+        {
+#endif
+            for (i = 0; i < n; i++)
+                store_fw (p1++, regs->GR_L((r1 + i) & 0xF));
+#if defined(OPTION_STRICT_ALIGNMENT)
+        }
+        else
+        {
+            for (i = 0; i < n; i++,bp1+=4)
+                store_fw (bp1, regs->GR_L((r1 + i) & 0xF));
+        }
+#endif
+
         ITIMER_UPDATE(effective_addr2,(n*4)-1,regs);
     }
     else
@@ -1874,8 +1896,8 @@ BYTE    lbyte;                          /* Left result byte of pair  */
 
 /*-------------------------------------------------------------------*/
 /* 0102 UPT   - Update Tree                                      [E] */
-/*              (c) Copyright Peter Kuschnerus, 1999-2007            */
-/*              (c) Copyright "Fish" (David B. Trout), 2005-2007     */
+/*              (c) Copyright Peter Kuschnerus, 1999-2009            */
+/*              (c) Copyright "Fish" (David B. Trout), 2005-2009     */
 /*-------------------------------------------------------------------*/
 
 DEF_INST(update_tree)

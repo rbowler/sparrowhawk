@@ -1,7 +1,7 @@
-/* HTTPSERV.C   (c)Copyright Jan Jaeger, 2002-2007                   */
+/* HTTPSERV.C   (c)Copyright Jan Jaeger, 2002-2009                   */
 /*              HTTP Server                                          */
 
-// $Id: httpserv.c,v 1.78 2008/11/04 05:56:31 fish Exp $
+// $Id: httpserv.c 5146 2009-02-01 20:09:49Z rbowler $
 
 /* This file contains all code required for the HTTP server,         */
 /* when the http_server thread is started it will listen on          */
@@ -29,7 +29,13 @@
 /*                                                                   */
 /*                                           Jan Jaeger - 28/03/2002 */
 
-// $Log: httpserv.c,v $
+// $Log$
+// Revision 1.80  2009/01/23 12:51:42  bernard
+// copyright notice
+//
+// Revision 1.79  2009/01/15 17:36:43  jj
+// Change http server startup
+//
 // Revision 1.78  2008/11/04 05:56:31  fish
 // Put ensure consistent create_thread ATTR usage change back in
 //
@@ -744,7 +750,7 @@ TID                     httptid;        /* Negotiation thread id     */
     server.sin_port = htons(server.sin_port);
 
     /* Attempt to bind the socket to the port */
-    while (1)
+    while (TRUE)
     {
         rc = bind (lsock, (struct sockaddr *)&server, sizeof(server));
 
@@ -774,7 +780,7 @@ TID                     httptid;        /* Negotiation thread id     */
             sysblk.httpport);
 
     /* Handle http requests */
-    while (TRUE) {
+    while (sysblk.httpport) {
 
         /* Initialize the select parameters */
         FD_ZERO (&selset);
@@ -806,7 +812,7 @@ TID                     httptid;        /* Negotiation thread id     */
 
             /* Create a thread to execute the http request */
             if ( create_thread (&httptid, DETACHED,
-                                http_request, (void *)(long)csock,
+                                http_request, (void *)(uintptr_t)csock,
                                 "http_request")
                )
             {
@@ -821,6 +827,13 @@ TID                     httptid;        /* Negotiation thread id     */
 
     /* Close the listening socket */
     close_socket (lsock);
+
+    /* Display thread started message on control panel */
+    logmsg (_("HHCHT009I HTTP listener thread ended: "
+            "tid="TIDPAT", pid=%d\n"),
+            thread_id(), getpid());
+
+    sysblk.httptid = 0;
 
     return NULL;
 

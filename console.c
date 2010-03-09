@@ -1,7 +1,7 @@
-/* CONSOLE.C    (c)Copyright Roger Bowler, 1999-2007                 */
+/* CONSOLE.C    (c)Copyright Roger Bowler, 1999-2009                 */
 /*              ESA/390 Console Device Handler                       */
 
-// $Id: console.c,v 1.104 2009/01/02 19:21:50 jj Exp $
+// $Id: console.c 5608 2010-02-07 09:36:35Z fish $
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for console        */
@@ -52,7 +52,7 @@
 /* WinNT version of telnet works. -- Greg Price (implemted by Fish)  */
 /*-------------------------------------------------------------------*/
 
-// $Log: console.c,v $
+// $Log$
 // Revision 1.104  2009/01/02 19:21:50  jj
 // DVD-RAM IPL
 // RAMSAVE
@@ -1283,7 +1283,7 @@ static char *herclogo[]={
     " HHH          HHH",
     " HHH          HHH     My PC thinks it's a MAINFRAME",
     "",
-    " Copyright (c) 1999-2007 Roger Bowler, Jan Jaeger, and others"};
+    " Copyright (C) 1999-2010 Roger Bowler, Jan Jaeger, and others"};
     */
 
 static char *herclogo[]={
@@ -1344,7 +1344,7 @@ static char *herclogo[]={
 "           HHH          HHH",
 "           HHH          HHH     My PC thinks it's a MAINFRAME",
 "",
-"           Copyright (c) 1999-2007 Roger Bowler, Jan Jaeger, and others"};
+"           Copyright (C) 1999-2010 Roger Bowler, Jan Jaeger, and others"};
 
 #define LOGO_BUFFERSIZE 256;
 
@@ -1436,7 +1436,7 @@ static char *build_logo(char **logodata,size_t logosize,size_t *blen)
     len=0;
     alen=0;
     bfr=buffer_addchar(bfr,&len,&alen,0xf5);
-    bfr=buffer_addchar(bfr,&len,&alen,0x40);
+    bfr=buffer_addchar(bfr,&len,&alen,0x42);
     if(bfr==NULL)
     {
         return NULL;

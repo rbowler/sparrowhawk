@@ -1,7 +1,7 @@
-/* DASDPDSU.C   (c) Copyright Roger Bowler, 1999-2007                */
+/* DASDPDSU.C   (c) Copyright Roger Bowler, 1999-2009                */
 /*              Hercules DASD Utilities: PDS unloader                */
 
-// $Id: dasdpdsu.c,v 1.28 2008/11/04 04:50:46 fish Exp $
+// $Id: dasdpdsu.c 5125 2009-01-23 12:01:44Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* This program unloads members of a partitioned dataset from        */
@@ -18,7 +18,7 @@
 /* the members are unloaded as fixed length binary files.            */
 /*-------------------------------------------------------------------*/
 
-// $Log: dasdpdsu.c,v $
+// $Log$
 // Revision 1.28  2008/11/04 04:50:46  fish
 // Ensure consistent utility startup
 //

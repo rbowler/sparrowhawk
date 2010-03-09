@@ -1,10 +1,10 @@
-/* STACK.C      (c) Copyright Roger Bowler, 1999-2007                */
+/* STACK.C      (c) Copyright Roger Bowler, 1999-2009                */
 /*              ESA/390 Linkage Stack Operations                     */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: stack.c,v 1.89 2008/04/11 14:29:28 bernard Exp $
+// $Id: stack.c 5126 2009-01-23 13:05:56Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* This module implements the linkage stack functions of ESA/390     */
@@ -24,7 +24,7 @@
 /* ASN-and-LX-reuse facility                  June 2004 Roger Bowler */
 /*-------------------------------------------------------------------*/
 
-// $Log: stack.c,v $
+// $Log$
 // Revision 1.89  2008/04/11 14:29:28  bernard
 // Integrate regs->exrl into base Hercules code.
 //

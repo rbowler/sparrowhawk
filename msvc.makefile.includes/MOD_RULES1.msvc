@@ -3,16 +3,13 @@
 # --------------------------------------------------------------------------
 # (c) Copyright Roger Bowler, 2005-2007
 # --------------------------------------------------------------------------
-# $Id: MOD_RULES1.msvc,v 1.2 2007/06/02 13:46:42 rbowler Exp $
+# $Id: MOD_RULES1.msvc 4379 2007-06-02 13:46:42Z rbowler $
 #
 #  Prerequisite hercules build rules...  (precompiled header, etc...)
 #
 #
 #                           CHANGE HISTORY
-# $Log: MOD_RULES1.msvc,v $
-# Revision 1.2  2007/06/02 13:46:42  rbowler
-# PFPO framework
-#
+# $Log$
 # DD/MM/YY Description
 # 26/12/06 Fish: created by extraction from existing makefile-dllmod.msvc
 #

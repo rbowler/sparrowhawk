@@ -1,4 +1,4 @@
-/* HERCWIND.H   (c) Copyright Roger Bowler, 2005-2007                */
+/* HERCWIND.H   (c) Copyright Roger Bowler, 2005-2009                */
 /*              MSVC Environment Specific Definitions                */
 
 /*-------------------------------------------------------------------*/
@@ -6,9 +6,9 @@
 /* prototypes required by Hercules in the MSVC environment           */
 /*-------------------------------------------------------------------*/
 
-// $Id: hercwind.h,v 1.19 2008/06/22 05:54:30 fish Exp $
+// $Id: hercwind.h 5373 2009-06-02 06:03:58Z fish $
 //
-// $Log: hercwind.h,v $
+// $Log$
 // Revision 1.19  2008/06/22 05:54:30  fish
 // Fix print-formatting issue (mostly in tape modules)
 // that can sometimes, in certain circumstances,
@@ -36,9 +36,6 @@
 
 #if !defined(_HERCWIND_H)
 #define _HERCWIND_H
-
-// (just a handy macro to have around)
-#define  IsEventSet(h)  (WaitForSingleObject(h,0) == WAIT_OBJECT_0)
 
 // PROGRAMMING NOTE: Cygwin has a bug in setvbuf requiring us
 // to do an 'fflush()' after each stdout/err write, and it doesn't
@@ -102,8 +99,8 @@
 #endif
 
 struct dirent {
-        long            d_ino;          
-        char            d_name[FILENAME_MAX + 1]; 
+        long            d_ino;
+        char            d_name[FILENAME_MAX + 1];
 };
 
 typedef unsigned __int32 in_addr_t;
@@ -141,9 +138,9 @@ typedef int             mode_t;
 #define S_ISFIFO(m)     (((m) & _S_IFMT) == _S_IFIFO)
 
 /* Bit settings for access() function */
-#define F_OK            0       
-#define W_OK            2       
-#define R_OK            4       
+#define F_OK            0
+#define W_OK            2
+#define R_OK            4
 
 #define strcasecmp      stricmp
 #define strncasecmp     strnicmp
@@ -169,7 +166,7 @@ typedef int             mode_t;
 #define OPTION_CONFIG_SYMBOLS
 #define OPTION_ENHANCED_CONFIG_SYMBOLS
 #define OPTION_ENHANCED_CONFIG_INCLUDE
-#define OPTION_FTHREADS 
+#define OPTION_FTHREADS
 #define HAVE_STRSIGNAL
 #define EXTERNALGUI
 #define NO_SETUID
@@ -212,8 +209,10 @@ typedef int             mode_t;
 #endif
 
 #if defined( _WIN64 )
+  #define  SIZEOF_INT_P       8
   #define  SIZEOF_SIZE_T      8
 #else
+  #define  SIZEOF_INT_P       4
   #define  SIZEOF_SIZE_T      4
 #endif
 
@@ -225,20 +224,20 @@ inline void DebugTrace(char* fmt, ...)
     int buffsize = 0;
     char* buffer = NULL;
     int rc = -1;
-	va_list args;
-	va_start( args, fmt );
+    va_list args;
+    va_start( args, fmt );
     do
     {
         if (buffer) free( buffer );
         buffsize += chunksize;
         buffer = malloc( buffsize );
         if (!buffer) __debugbreak();
-	    rc = vsnprintf( buffer, buffsize, fmt, args);
+        rc = vsnprintf( buffer, buffsize, fmt, args);
     }
     while (rc < 0 || rc >= buffsize);
     OutputDebugStringA( buffer );
     free( buffer );
-	va_end( args );
+    va_end( args );
 }
 
 #endif /*!defined(_HERCWIND_H)*/

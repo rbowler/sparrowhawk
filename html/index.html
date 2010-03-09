@@ -88,26 +88,29 @@ programmers is constantly at work implementing new features and fixing bugs.
 <li>Source tarball:
 <p>
 <ul>
-<li><a href="http://www.hercules-390.org/hercules-3.06.tar.gz">hercules-3.06.tar.gz</a>
+<li><a href="http://www.hercules-390.org/hercules-3.07.tar.gz">hercules-3.07.tar.gz</a>
 </ul>
 <p>
 <li>Linux:
 <p>
 <ul>
-<li><a href="http://www.hercules-390.org/hercules-3.06-1.i686.rpm">hercules-3.06-1.i686.rpm</a>: Intel RPM
-<li><a href="http://www.hercules-390.org/hercules-3.06-1.src.rpm">hercules-3.06-1.src.rpm</a>: Source
+<li><a href="http://www.hercules-390.org/hercules-3.07-1.i686.rpm">hercules-3.07-1.i686.rpm</a>: 32-bit Intel RPM
+<li><a href="http://www.hercules-390.org/hercules-3.07-1.x86_64.rpm">hercules-3.07-1.x86_64.rpm</a>: 64-bit Intel RPM
+<li><a href="http://www.hercules-390.org/hercules-3.07-1.src.rpm">hercules-3.07-1.src.rpm</a>: Source
 RPM (if you want to build RPMs yourself)
 </ul>
 <p>
 <li>Windows native program:
 <p>
 <ul>
-<li><a href="http://www.hercules-390.org/hercules-3.06-native.msi">hercules-3.06-native.msi</a>:
-Windows Installer package
-<li><a href="http://www.hercules-390.org/hercules-3.06-native.exe">hercules-3.06-native.exe</a>:
-Binaries only self-extracting archive
-<li><a href="http://www.hercules-390.org/hercules-3.06-native.zip">hercules-3.06-native.zip</a>:
-Binaries only archive
+<li><a href="http://www.hercules-390.org/hercules-3.07-w32.msi">hercules-3.07-w32.msi</a>:
+Windows 32-bit Installer package
+<li><a href="http://www.hercules-390.org/hercules-3.07-w32.zip">hercules-3.07-w32.zip</a>:
+64-bit binaries only archive
+<li><a href="http://www.hercules-390.org/hercules-3.07-w64.msi">hercules-3.07-w64.msi</a>:
+Windows 64-bit Installer package
+<li><a href="http://www.hercules-390.org/hercules-3.07-w64.zip">hercules-3.07-w64.zip</a>:
+64-bit binaries only archive
 <p>
 <small>
 <b>Note:</b> Installing the .msi Windows Installer package ensures the
@@ -116,17 +119,20 @@ convenience shortcuts in the programs menu. If the required components
 are already present and the shortcuts are not needed on the target system,
 the self-extracting or .zip archive may be used instead.
 <br>
-The required component for this build is the x86 version of the C runtime at level 8.50727.762.
+The required component for this build is the x86 version of the C runtime at
+level 8.50727.762.
 </small>
 </ul>
 <p>
 <li>Mac OS X:
 <p>
 <ul>
-<li><a href="http://www.hercules-390.org/hercules-3.06-tiger.dmg">hercules-3.06-tiger.dmg</a>: Mac OS X
-10.4 (Tiger) universal binary version, 32-bit version only
-<li><a href="http://www.hercules-390.org/hercules-3.06-leopard.dmg">hercules-3.06-leopard.dmg</a>: Mac OS X
-10.5 (Leopard) universal binary version, 32-and 64-bit
+<li><a href="http://www.hercules-390.org/hercules-3.07-tiger.dmg">hercules-3.07-tiger.dmg</a>: Mac OS X
+10.4 (Tiger) universal binary version, 32-bit Intel and PowerPC
+<li><a href="http://www.hercules-390.org/hercules-3.07-leopard.dmg">hercules-3.07-leopard.dmg</a>: Mac OS X
+10.5 (Leopard) universal binary version, 32- and 64-bit Intel and PowerPC
+<li><a href="http://www.hercules-390.org/hercules-3.07-snowleopard.dmg">hercules-3.07-snowleopard.dmg</a>: Mac OS X
+10.6 (Snow Leopard) universal binary version, 32- and 64-bit Intel
 </ul>
 </ul>
 
@@ -294,32 +300,31 @@ http://linuxvm.org/Present/SHARE99/S2880JMa.pdf</a>
 
 <center><hr width=15% noshade></center>
 <h3>
-The CVS source code repository
+The Subversion source code repository
 </h3>
 
 <p>
 The complete source code for the current <i>development</i> version of
-Hercules is also available via anonymous access from our CVS source code
-repository. The CVS root is:
+Hercules is also available via anonymous access from our Subversion source
+code repository. The Subversion URL is:
 
-<center><b>CVSROOT=:pserver:anonymous@cvs.hercules-390.org:/usr/cvs/hercules</b></center>
+<center><b>svn://svn.hercules-390.org/hercules</b></center>
 
 <p>
 
-Doing a checkout on module "hercules" will get you the source for all of Hercules.
-&nbsp;No password is required; just press enter when asked:
+Doing a checkout on module "hercules" will get you the source for all of
+Hercules. You'll want to check out the trunk, instead of the whole
+repository:
 
 <blockquote>
 <tt>
-    cvs login<br>
-    (Logging in to anonymous@hercules-390.org...)<br>
-    CVS password:<br>
-    cvs -z9 co hercules<br>
-    cvs server: Updating hercules<br>
+    svn checkout svn://svn.hercules-390.org/hercules/trunk hercules
 </tt>
 </blockquote>
 
 <p>
+(The last <tt>hercules</tt> specifies the directory the checked out copy is
+placed into.)
 Please note that this will get you the current
 <i>development</i> version of Hercules, which is <i>not</i>
 release quality and thus might not even work (since it's still under
@@ -329,7 +334,7 @@ previously mentioned links instead.
 
 <p>
 Please read the file <tt>README.CVS</tt> included with the source for additional and updated
-instructions for building the development cvs version.
+instructions for building the development version.
 
 <p><br>
 
@@ -349,8 +354,6 @@ Other Hercules-related sites
 <p><li><a href="http://www.softdevlabs.com/Hercules/hercgui-index.html">
     http://www.softdevlabs.com/Hercules/hercgui-index.html</a>
     <br>Fish's Hercules GUI for Windows.
-<p><li><a href="http://www.homerow.net/hax/">http://www.homerow.net/hax/</a>
-    <br>A whole host of unofficial Hercules add-ons and patches by Leland Lucius
 <p><li><a href="http://cbttape.org/~jmorrison/">http://cbttape.org/~jmorrison/</a>
     <br>Jim Morrison's downloads (includes 3380 support for MVS 3.8!)
 <p><li><a href="http://www.jaymoseley.com/hercules">http://www.jaymoseley.com/hercules</a>
@@ -361,12 +364,6 @@ Other Hercules-related sites
     <br>Bob Hansen's MVS 3.8 documentation
 <p><li><a href="http://www.schaefernet.de/hercules">http://www.schaefernet.de/hercules</a>
     <br>Wolfgang Sch&auml;fer's Hercules site - MVT/MVS tutorials and add-ons
-<p><li><a href="http://www.kiyoinc.com/herc390.html">http://www.kiyoinc.com/herc390.html</a>
-    <br>Cory Hamasaki's New Users Documentation Effort
-<p><li><a href="http://www.kiyoinc.com/herc3088.html">http://www.kiyoinc.com/herc3088.html</a>
-    <br>Axel Schwarzer's 3088 howto documentation
-<p><li><a href="http://pweb.uunet.de/schwarzer.d/projects/hercules/">http://pweb.uunet.de/schwarzer.d/projects/hercules/</a>
-    <br>Axel Schwarzer's Hercules Documentation
 </ul>
 
 <p><br>
@@ -400,7 +397,7 @@ Other product names mentioned here are trademarks of other companies.
 
 </small>
 
-<p class="lastupd">Last updated $Date: 2009/01/09 15:23:50 $ $Revision: 1.63 $</p>
+<p class="lastupd">Last updated $Date: 2010-03-09 14:56:34 -0600 (Tue, 09 Mar 2010) $ $Revision: 5663 $</p>
 
 </td></tr></table>
 

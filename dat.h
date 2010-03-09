@@ -1,10 +1,10 @@
-/* DAT.H        (c) Copyright Roger Bowler, 1999-2007                */
+/* DAT.H        (c) Copyright Roger Bowler, 1999-2009                */
 /*              ESA/390 Dynamic Address Translation                  */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: dat.h,v 1.112 2008/12/08 20:38:20 ivan Exp $
+// $Id: dat.h 5549 2009-12-16 16:50:50Z ivan $
 
 /*-------------------------------------------------------------------*/
 /* This module implements the DAT, ALET, and ASN translation         */
@@ -23,7 +23,7 @@
 /*      ESAME ASN authorization and ALET translation - Roger Bowler  */
 /*-------------------------------------------------------------------*/
 
-// $Log: dat.h,v $
+// $Log$
 // Revision 1.112  2008/12/08 20:38:20  ivan
 // Fix SIE DAT Issue with ESA/390 Guest on z/Arch host with >2GB of storage
 //
@@ -541,12 +541,12 @@ _DAT_C_STATIC void ARCH_DEP(purge_alb) (REGS *regs)
 int i;
 
     for(i = 1; i < 16; i++)
-        if(regs->aea_ar[i] >= CR_ALB_OFFSET)
+        if(regs->aea_ar[i] >= CR_ALB_OFFSET && regs->aea_ar[i] != CR_ASD_REAL)
             regs->aea_ar[i] = 0;
 
     if(regs->host && regs->guestregs)
         for(i = 1; i < 16; i++)
-            if(regs->guestregs->aea_ar[i] >= CR_ALB_OFFSET)
+            if(regs->guestregs->aea_ar[i] >= CR_ALB_OFFSET && regs->guestregs->aea_ar[i] != CR_ASD_REAL)
                 regs->guestregs->aea_ar[i] = 0;
 
 } /* end function purge_alb */
@@ -701,7 +701,7 @@ U16     eax;                            /* Authorization index       */
 
             default:
                 /* ALB Lookup */
-                if(regs->aea_ar[arn] >= CR_ALB_OFFSET)
+                if(regs->aea_ar[arn] >= CR_ALB_OFFSET && regs->aea_ar[arn] != CR_ASD_REAL)
                 {
                     regs->dat.asd = regs->CR(regs->aea_ar[arn]);
                     regs->dat.protect = regs->aea_aleprot[arn];
@@ -737,18 +737,6 @@ U16     eax;                            /* Authorization index       */
                     regs->aea_ar[arn] = CR_ALB_OFFSET + arn;
                     regs->aea_common[CR_ALB_OFFSET + arn] = (regs->dat.asd & ASD_PRIVATE) == 0;
                     regs->aea_aleprot[arn] = regs->dat.protect & 2;
-
-                    /* Build a host real space entry for each XC dataspace */
-                    if (arn > 0 && SIE_ACTIVE(regs)
-                     && MULTIPLE_CONTROLLED_DATA_SPACE(regs->guestregs))
-                    {
-                        regs->guestregs->dat.asd = regs->dat.asd ^ TLB_HOST_ASD;
-
-                        regs->guestregs->CR(CR_ALB_OFFSET + arn) = regs->guestregs->dat.asd;
-                        regs->guestregs->aea_ar[arn] = CR_ALB_OFFSET + arn;
-                        regs->guestregs->aea_common[CR_ALB_OFFSET + arn] = (regs->dat.asd & ASD_PRIVATE) == 0;
-                        regs->guestregs->aea_aleprot[arn] = regs->dat.protect & 2;
-                    }
 
                 }
 
@@ -1691,7 +1679,7 @@ tran_excp_addr:
     if (ACCESS_REGISTER_MODE(&regs->psw)
      || (SIE_ACTIVE(regs) && MULTIPLE_CONTROLLED_DATA_SPACE(regs->guestregs))
        )
-       regs->excarid = arn < 0 ? 0 : arn;
+       regs->excarid = arn > 15 ? 0 : arn;
 
     /* Return condition code */
     return cc;
@@ -2091,7 +2079,7 @@ static inline int ARCH_DEP(check_sa_per2) (int arn, int acctype, REGS *regs)
     UNREFERENCED(acctype);
     if((regs->dat.asd & SAEVENT_BIT) || !(regs->CR(9) & CR9_SAC))
     {
-        regs->peraid = arn > 0 ? arn : 0;
+        regs->peraid = arn > 0 && arn < 16 ? arn : 0;
         regs->perc |= regs->dat.stid;
         return 1;
     }
@@ -2188,7 +2176,7 @@ int     ix = TLBIX(addr);               /* TLB index                 */
     {
 
         if (SIE_TRANSLATE_ADDR (regs->sie_mso + regs->dat.aaddr,
-                    (arn > 0 && MULTIPLE_CONTROLLED_DATA_SPACE(regs)) ? arn : USE_PRIMARY_SPACE,
+                    (arn > 0 && arn < 16 && MULTIPLE_CONTROLLED_DATA_SPACE(regs)) ? arn : USE_PRIMARY_SPACE,
                     regs->hostregs, ACCTYPE_SIE))
             (regs->hostregs->program_interrupt) (regs->hostregs, regs->hostregs->dat.xcode);
 
@@ -2199,8 +2187,19 @@ int     ix = TLBIX(addr);               /* TLB index                 */
             regs->tlb.TLB_PTE(ix)   = addr & TLBID_PAGEMASK;
 
         /* Indicate a host real space entry for a XC dataspace */
-        if (arn > 0 && MULTIPLE_CONTROLLED_DATA_SPACE(regs))
+        if (arn > 0 && arn < 16 && MULTIPLE_CONTROLLED_DATA_SPACE(regs))
+        {
             regs->tlb.TLB_ASD(ix) = regs->dat.asd;
+            /* Ensure that the private bit is percolated to the guest such that LAP is applied correctly */
+            regs->dat.private = regs->hostregs->dat.private;
+            
+            /* Build tlb entry of XC dataspace */
+            regs->dat.asd = regs->hostregs->dat.asd ^ TLB_HOST_ASD;
+            regs->CR(CR_ALB_OFFSET + arn) = regs->dat.asd;
+            regs->aea_ar[arn] = CR_ALB_OFFSET + arn;
+            regs->aea_common[CR_ALB_OFFSET + arn] = (regs->dat.asd & ASD_PRIVATE) == 0;
+            regs->aea_aleprot[arn] = regs->hostregs->dat.protect & 2;
+        }
 
         /* Convert host real address to host absolute address */
         regs->hostregs->dat.aaddr = aaddr =
@@ -2209,6 +2208,15 @@ int     ix = TLBIX(addr);               /* TLB index                 */
 
         if(regs->hostregs->dat.aaddr > regs->hostregs->mainlim)
             goto vabs_addr_excp;
+        /* Take into account SIE guests with a 2K page scheme 
+           because the SIE host may be operating with a 4K page
+           system */
+#if defined(FEATURE_2K_STORAGE_KEYS)
+        if((addr & PAGEFRAME_PAGEMASK) & 0x800)
+        {
+            apfra|=0x800;
+        }
+#endif
     }
 
     /* Do not apply host key access when SIE fetches/stores data */
@@ -2218,6 +2226,7 @@ int     ix = TLBIX(addr);               /* TLB index                 */
 
     /* Check protection and set reference and change bits */
     regs->dat.storkey = &(STORAGE_KEY(aaddr, regs));
+
 
     if (acctype & ACC_READ)
     {
@@ -2297,7 +2306,7 @@ vabs_prot_excp:
   #endif /*defined(FEATURE_ESAME)*/
     }
     regs->TEA |= regs->dat.stid;
-    regs->excarid = (arn > 0 ? arn : 0);
+    regs->excarid = (arn > 0 && arn < 16 ? arn : 0);
 #endif /*FEATURE_SUPPRESSION_ON_PROTECTION*/
 
 #if defined(_FEATURE_PROTECTION_INTERCEPTION_CONTROL)

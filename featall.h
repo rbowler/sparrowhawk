@@ -1,85 +1,7 @@
 /* FEATALL.H    (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              Architecture-dependent macro definitions             */
 
-// $Id: featall.h,v 1.140 2009/01/02 19:21:51 jj Exp $
-//
-// $Log: featall.h,v $
-// Revision 1.140  2009/01/02 19:21:51  jj
-// DVD-RAM IPL
-// RAMSAVE
-// SYSG Integrated 3270 console fixes
-//
-// Revision 1.139  2008/12/24 22:35:53  rbowler
-// Framework for integrated 3270 and ASCII console features
-//
-// Revision 1.138  2008/09/02 06:07:33  fish
-// Add OPTION_MSGHLD back again
-//
-// Revision 1.137  2008/08/29 11:11:06  fish
-// Fix message-keep logic  (i.e. sticky/held messages)
-//
-// Revision 1.136  2008/08/23 12:34:05  bernard
-// OPTION_MSGHLD sticky messages
-//
-// Revision 1.135  2008/08/04 22:06:00  rbowler
-// DIAG308 function codes for Program-directed re-IPL
-//
-// Revision 1.134  2008/08/02 09:04:28  bernard
-// SCP message colors
-//
-// Revision 1.133  2008/07/20 12:10:40  bernard
-// OPTION_CMDTGT
-//
-// Revision 1.132  2008/07/08 05:35:49  fish
-// AUTOMOUNT redesign: support +allowed/-disallowed dirs
-// and create associated 'automount' panel command - Fish
-//
-// Revision 1.131  2008/03/01 12:19:04  rbowler
-// Rename new features to include the word facility
-//
-// Revision 1.130  2008/02/28 10:11:50  rbowler
-// STFL bit settings for new features in zPOP-06
-//
-// Revision 1.129  2008/02/27 17:09:22  bernard
-// introduce FEATURE_GENERAL_INSTRUCTIONS_EXTENSION_FEATURE
-//
-// Revision 1.128  2008/02/27 14:15:17  bernard
-// Implemented feature_message_security_assist_extension_2
-//
-// Revision 1.127  2007/11/30 15:14:14  rbowler
-// Permit String-Instruction facility to be activated in S/370 mode
-//
-// Revision 1.126  2007/08/06 16:48:20  ivan
-// Implement "PARM" option for IPL command (same as VM IPL PARM XXX)
-// Also add command helps for ipl, iplc, sysclear, sysreset
-//
-// Revision 1.125  2007/06/23 00:04:09  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.124  2007/05/26 21:45:25  rbowler
-// Activate Compare-and-Swap-and-Store feature
-//
-// Revision 1.123  2007/04/24 16:34:41  rbowler
-// Define feature macros and STFL bit settings for new features in zPOP-05
-//
-// Revision 1.122  2007/01/04 01:08:41  gsmith
-// 03 Jan 2007 single_cpu_dw fetch/store patch for ia32
-//
-// Revision 1.121  2006/12/31 21:16:32  gsmith
-// 2006 Dec 31 really back out mainlockx.pat
-//
-// Revision 1.120  2006/12/20 09:09:40  jj
-// Fix bogus log entries
-//
-// Revision 1.119  2006/12/20 04:26:19  gsmith
-// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
-//
-// Revision 1.118  2006/12/20 04:22:00  gsmith
-// 2006 Dec 19 Backout mainlockx.pat - possible SMP problems - Greg Smith
-//
-// Revision 1.117  2006/12/08 09:43:21  jj
-// Add CVS message log
-//
+// $Id: featall.h 5454 2009-08-14 14:25:06Z rbowler $
 
 /*-------------------------------------------------------------------*/
 /* Default features                                                  */
@@ -189,8 +111,9 @@
 #undef FEATURE_COMPRESSION
 #undef FEATURE_CONDITIONAL_SSKE                                 /*407*/
 #undef FEATURE_CONFIGURATION_TOPOLOGY_FACILITY                  /*208*/
+#undef FEATURE_CPU_MEASUREMENT_COUNTER_FACILITY
+#undef FEATURE_CPU_MEASUREMENT_SAMPLING_FACILITY
 #undef FEATURE_CPU_RECONFIG
-#undef FEATURE_CPUID_FORMAT_1
 #undef FEATURE_DAT_ENHANCEMENT
 #undef FEATURE_DAT_ENHANCEMENT_FACILITY_2                       /*@Z9*/
 #undef FEATURE_DECIMAL_FLOATING_POINT                           /*DFP*/
@@ -205,6 +128,7 @@
 #undef FEATURE_EXECUTE_EXTENSIONS_FACILITY                      /*208*/
 #undef FEATURE_EXPANDED_STORAGE
 #undef FEATURE_EXPEDITED_SIE_SUBSET
+#undef FEATURE_EXTENDED_DIAG204
 #undef FEATURE_EXTENDED_IMMEDIATE                               /*@Z9*/
 #undef FEATURE_EXTENDED_STORAGE_KEYS
 #undef FEATURE_EXTENDED_TOD_CLOCK
@@ -213,6 +137,7 @@
 #undef FEATURE_EXTENDED_TRANSLATION_FACILITY_3
 #undef FEATURE_EXTERNAL_INTERRUPT_ASSIST
 #undef FEATURE_EXTRACT_CPU_TIME                                 /*407*/
+#undef FEATURE_FAST_SYNC_DATA_MOVER
 #undef FEATURE_FETCH_PROTECTION_OVERRIDE
 #undef FEATURE_FPS_ENHANCEMENT                                  /*DFP*/
 #undef FEATURE_FPS_EXTENSIONS
@@ -241,6 +166,7 @@
 #undef FEATURE_MIDAW                                            /*@Z9*/
 #undef FEATURE_MOVE_PAGE_FACILITY_2
 #undef FEATURE_MOVE_WITH_OPTIONAL_SPECIFICATIONS                /*208*/
+#undef FEATURE_MPF_INFO
 #undef FEATURE_MSSF_CALL
 #undef FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE
 #undef FEATURE_MVS_ASSIST
@@ -262,10 +188,11 @@
 #undef FEATURE_S370_CHANNEL
 #undef FEATURE_S390_DAT
 #undef FEATURE_S370E_EXTENDED_ADDRESSING
+#undef FEATURE_SEGMENT_PROTECTION
 #undef FEATURE_SENSE_RUNNING_STATUS                             /*@Z9*/
 #undef FEATURE_SERVICE_PROCESSOR
 #undef FEATURE_SET_ADDRESS_SPACE_CONTROL_FAST
-#undef FEATURE_SEGMENT_PROTECTION
+#undef FEATURE_SET_PROGRAM_PARAMETER_FACILITY
 #undef FEATURE_SQUARE_ROOT
 #undef FEATURE_STORAGE_KEY_ASSIST
 #undef FEATURE_STORAGE_PROTECTION_OVERRIDE
@@ -280,6 +207,7 @@
 #undef FEATURE_TOD_CLOCK_STEERING                               /*@Z9*/
 #undef FEATURE_TRACING
 #undef FEATURE_VECTOR_FACILITY
+#undef FEATURE_VM_BLOCKIO
 #undef FEATURE_WAITSTATE_ASSIST
 
 /* end of FEATALL.H */

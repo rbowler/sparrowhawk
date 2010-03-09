@@ -1,7 +1,7 @@
-/* GENERAL3.C   (c) Copyright Roger Bowler, 2008                     */
+/* GENERAL3.C   (c) Copyright Roger Bowler, 2009                     */
 /*              Additional General Instructions                      */
 
-// $Id: general3.c,v 1.22 2008/05/12 16:08:29 rbowler Exp $
+// $Id: general3.c 5125 2009-01-23 12:01:44Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* This module implements additional general instructions introduced */
@@ -9,7 +9,7 @@
 /* SA22-7832-06 z/Architecture Principles of Operation               */
 /*-------------------------------------------------------------------*/
 
-// $Log: general3.c,v $
+// $Log$
 // Revision 1.22  2008/05/12 16:08:29  rbowler
 // ECAG correction
 //

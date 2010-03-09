@@ -1,12 +1,12 @@
 /*
  * dasdcat
  *
- * Vast swathes copied from dasdpdsu.c (c) Copyright Roger Bowler, 1999-2007
- * Changes and additions Copyright 2000-2007 by Malcolm Beattie
+ * Vast swathes copied from dasdpdsu.c (c) Copyright Roger Bowler, 1999-2009
+ * Changes and additions Copyright 2000-2009 by Malcolm Beattie
  *
- * $Id: dasdcat.c,v 1.33 2008/11/04 04:50:45 fish Exp $
+ * $Id: dasdcat.c 5125 2009-01-23 12:01:44Z bernard $
  *
- * $Log: dasdcat.c,v $
+ * $Log$
  * Revision 1.33  2008/11/04 04:50:45  fish
  * Ensure consistent utility startup
  *

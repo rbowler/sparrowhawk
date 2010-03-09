@@ -1,9 +1,9 @@
-/* HDTEQ.C      (c) Copyright Jan Jaeger, 2003-2007                  */
+/* HDTEQ.C      (c) Copyright Jan Jaeger, 2003-2009                  */
 /*              Hercules Dynamic Loader                              */
 
-// $Id: hdteq.c,v 1.16 2008/12/28 15:30:09 jj Exp $
+// $Id: hdteq.c 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: hdteq.c,v $
+// $Log$
 // Revision 1.16  2008/12/28 15:30:09  jj
 // SYSG and SYSA mods
 //

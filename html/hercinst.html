@@ -63,13 +63,13 @@ has instructions on his "<b>Building Hercules for Windows</b>" web page at
 <h3>Building from source - Linux and Mac OS X</h3>
 <ol>
 <li>Download the distribution file
-<a href="http://www.hercules-390.org/hercules-3.06.tar.gz">hercules-3.06.tar.gz</a>
+<a href="http://www.hercules-390.org/hercules-3.07.tar.gz">hercules-3.07.tar.gz</a>
 <br><em>Note:</em> By downloading this file you agree to the terms
     of the <a href="herclic.html">Q Public Licence</a>.
 <p>
 <li>Use these commands to unzip the distribution file:
-<pre>tar xvzf ../hercules-3.06.tar.gz
-cd hercules-3.06</pre>
+<pre>tar xvzf ../hercules-3.07.tar.gz
+cd hercules-3.07</pre>
 
 <li>Verify you have all of the correct versions of all of the
 required packages installed:
@@ -107,7 +107,8 @@ compiler and other software levels.
 <ol>
 <li>Download the RPM file you want:
 <ul>
-<li><a href="http://www.hercules-390.org/hercules-3.06-1.i686.rpm">hercules-3.06-1.i686.rpm</a>: Intel
+<li><a href="http://www.hercules-390.org/hercules-3.07-1.i686.rpm">hercules-3.07-1.i686.rpm</a>: 32-bit Intel
+<li><a href="http://www.hercules-390.org/hercules-3.07-1.x86_64.rpm">hercules-3.07-1.x86_64.rpm</a>: 64-bit Intel
 </ul>
 <li>Install the RPM:
 <br><code>rpm -Uvh</code> <i>RPMfile</i>
@@ -136,7 +137,7 @@ Debian packages are available for "woody" and later releases.
 
 <h3>Installing on Gentoo Linux:</h3>
 <p>Hercules is installed like any other Gentoo package: do <code>emerge
-sync</code> if you haven't done it lately, then <code>emerge
+--sync</code> if you haven't done it lately, then <code>emerge
 hercules</code>.</p>
 <p>Do not try to override the optimization flags automatically selected by
 <code>configure</code>. Hercules stresses the gcc optimizer, and will break
@@ -146,12 +147,15 @@ in subtle ways if the wrong optimization settings are used.</p>
 
 <ol>
 <li>Download the compressed disk image: <a
-href="http://www.hercules-390.org/hercules-3.06-tiger.dmg">hercules-3.06-tiger.dmg</a>
-or <a
-href="http://www.hercules-390.org/hercules-3.06-leopard.dmg">hercules-3.06-leopard.dmg</a>.
+href="http://www.hercules-390.org/hercules-3.07-tiger.dmg">hercules-3.07-tiger.dmg</a>,
+<a href="http://www.hercules-390.org/hercules-3.07-leopard.dmg">hercules-3.07-leopard.dmg</a>,
+or <a href="http://www.hercules-390.org/hercules-3.07-snowleopard.dmg">hercules-3.07-snowleopard.dmg</a>.
 This package is a universal binary and requires the OS X version in the
-name, either 10.4 (Tiger) or 10.5 (Leopard), or later. The Leopard version
-includes native 64-bit host support, while the Tiger version does not.
+name, either 10.4 (Tiger), 10.5 (Leopard), 10.6 (Snow Leopard) or later. The
+Leopard and Snow Leopard versions include native 64-bit host support, while
+the Tiger version does not. The Tiger and Leopard versions will run on Intel
+or PowerPC Macs, while the Snow Leopard version will only run on Intel, as
+with Snow Leopard itself.
 <li>Mount the image by double-clicking on it in the Finder.
 Your web browser may have done that for you already.
 <li>Installation and use instructions are in the
@@ -163,17 +167,15 @@ to install the supplied Tunnel driver.
 <h3>Installing on Windows (without Cygwin):</h3>
 <ol>
 <li>Download the <a
-href="http://www.hercules-390.org/hercules-3.06-native.exe">self-extracting
-Windows archive</a> or the <a
-href="http://www.hercules-390.org/hercules-3.06-native.msi">Windows
+href="http://www.hercules-390.org/hercules-3.07-w32.msi">Windows 32-bit
+Installer package</a> or the <a
+href="http://www.hercules-390.org/hercules-3.07-w64.msi">Windows 64-bit
 Installer package</a>.
-<li>If you downloaded the self-extracting archive, simply execute it to
-install Hercules on your system. If you downloaded the Windows Installer
-package, use the Windows Installer to install Hercules. The Windows
-Installer is included in Windows XP. It may already be on your older Windows
-system, depending on what other software you've installed. If it is,
-double-clicking on the Hercules package file will install Hercules. If not,
-you can download the Windows Installer for Windows NT and 2000 by following
+<li>Use the Windows Installer to install Hercules. The Windows Installer is
+included in Windows XP. It may already be on your older Windows system,
+depending on what other software you've installed. If it is, double-clicking
+on the Hercules package file will install Hercules. If not, you can download
+the Windows Installer for Windows NT and 2000 by following
 <a href="http://www.microsoft.com/downloads/release.asp?releaseid=32832">this
 link</a>, or the Windows Installer for Windows 98 and ME by following
 <a href="http://www.microsoft.com/downloads/release.asp?releaseid=32831">this
@@ -187,7 +189,7 @@ http://www.softdevlabs.com/Hercules/hercgui-index.html</a>.
 <h3>Installing on Windows with Cygwin:</h3>
 <ol>
 <li>
-Hercules 3.06 is now supplied as prebuilt binaries only in a native Windows
+Hercules 3.07 is now supplied as prebuilt binaries only in a native Windows
 version. This version will work perfectly well under Cygwin, as well as
 native Windows, and does not require any specific version of the Cygwin
 libraries. Follow the instructions above to install the native Windows
@@ -958,6 +960,6 @@ For technical support, please see our <a href="hercsupp.html">Technical Support<
 <p><center><hr width=15% noshade><p>
 <a href="index.html"><img src="images/back.gif" border=0 alt="back"></a>
 </center>
-<p class="lastupd">Last updated $Date: 2009/01/10 00:35:02 $ $Revision: 1.59 $</p>
+<p class="lastupd">Last updated $Date: 2010-03-09 09:14:00 -0600 (Tue, 09 Mar 2010) $ $Revision: 5661 $</p>
 </BODY>
 </HTML>

@@ -1,14 +1,14 @@
-/* CARDRDR.C    (c) Copyright Roger Bowler, 1999-2007                */
+/* CARDRDR.C    (c) Copyright Roger Bowler, 1999-2009                */
 /*              ESA/390 Card Reader Device Handler                   */
 
-// $Id: cardrdr.c,v 1.47 2007/11/21 22:54:13 fish Exp $
+// $Id: cardrdr.c 5125 2009-01-23 12:01:44Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
 /* card reader devices.                                              */
 /*-------------------------------------------------------------------*/
 
-// $Log: cardrdr.c,v $
+// $Log$
 // Revision 1.47  2007/11/21 22:54:13  fish
 // Use new BEGIN_DEVICE_CLASS_QUERY macro
 //

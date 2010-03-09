@@ -3,20 +3,18 @@
 # --------------------------------------------------------------------------
 # (c) Copyright Roger Bowler, 2005-2007
 # --------------------------------------------------------------------------
-# $Id: BZIP2_RULES.msvc,v 1.2 2008/10/11 23:46:01 fish Exp $
+# $Id: BZIP2_RULES.msvc 5616 2010-02-08 23:44:59Z fish $
 #
 #  BZIP2 build rules...
 #
 #
 #                           CHANGE HISTORY
-# $Log: BZIP2_RULES.msvc,v $
-# Revision 1.2  2008/10/11 23:46:01  fish
-# Add CVS "Id" and "Log"
-#
+# $Log$
 #
 # DD/MM/YY Description
 #
 # 26/12/06 Fish: created by extraction from existing makefile-dllmod.msvc
+# 07/02/10 Fish: allHercules.
 #
 # ***************************************************************************
 
@@ -25,15 +23,12 @@
 $(X)libbz2.dll:
     XCOPY "$(BZIP2_DLL)" $(X) /V /C /F /H /R /K /O /X /Y
 
-alllibbz2: $(OBJDIR) $(EXEDIR) $(PDBDIR) $(MAPDIR) $(ASMDIR) $(O)build_pch.pch \
-    $(MODULES) \
-    $(EXECUTABLES) \
+alllibbz2: allHercules \
     $(X)libbz2.dll
 
 !ELSE
-alllibbz2: $(OBJDIR) $(EXEDIR) $(PDBDIR) $(MAPDIR) $(ASMDIR) $(O)build_pch.pch \
-    $(MODULES) \
-    $(EXECUTABLES)
+
+alllibbz2: allHercules
 
 !ENDIF
 

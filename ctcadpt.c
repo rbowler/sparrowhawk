@@ -1,11 +1,11 @@
 // Hercules Channel-to-Channel Emulation Support
 // ====================================================================
 //
-// Copyright (C) James A. Pierson, 2002-2007
-//               Roger Bowler, 2000-2006
+// Copyright (C) James A. Pierson, 2002-2009
+//               Roger Bowler, 2000-2009
 //
-// vmnet     (C) Copyright Willem Konynenberg, 2000-2007
-// CTCT      (C) Copyright Vic Cross, 2001-2007
+// vmnet     (C) Copyright Willem Konynenberg, 2000-2009
+// CTCT      (C) Copyright Vic Cross, 2001-2009
 //
 // Notes:
 //   This module contains the remaining CTC emulation modes that
@@ -15,35 +15,7 @@
 //
 //   Please read README.NETWORKING for more info.
 //
-// $Id: ctcadpt.c,v 1.75 2008/11/04 05:56:31 fish Exp $
-//
-// $Log: ctcadpt.c,v $
-// Revision 1.75  2008/11/04 05:56:31  fish
-// Put ensure consistent create_thread ATTR usage change back in
-//
-// Revision 1.74  2008/11/03 15:31:57  rbowler
-// Back out consistent create_thread ATTR modification
-//
-// Revision 1.73  2008/10/18 09:32:21  fish
-// Ensure consistent create_thread ATTR usage
-//
-// Revision 1.72  2008/07/17 07:19:12  fish
-// Fix FCS (Frame Check Sequence) bug in LCS_Write function
-// and other minor bugs.
-//
-// Revision 1.70  2008/07/17 03:30:40  fish
-// CTC/LCS cosmetic-only changes -- part 1
-// (no actual functionality was changed!)
-//
-// Revision 1.69  2007/11/21 22:54:14  fish
-// Use new BEGIN_DEVICE_CLASS_QUERY macro
-//
-// Revision 1.68  2007/06/23 00:04:07  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.67  2006/12/08 09:43:19  jj
-// Add CVS message log
-//
+// $Id: ctcadpt.c 5311 2009-04-05 08:14:17Z rbowler $
 
 #include "hstdinc.h"
 
@@ -1384,7 +1356,8 @@ int  ParseMAC( char* pszMACAddr, BYTE* pbMACAddr )
 {
     char    work[((sizeof(MAC)*3)-0)];
     BYTE    sep;
-    int     x, i;
+    int       x;
+    unsigned  i;
 
     if (strlen(pszMACAddr) != ((sizeof(MAC)*3)-1)
         || (sizeof(MAC) > 1 &&

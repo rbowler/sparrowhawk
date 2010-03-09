@@ -3,7 +3,7 @@
  * modified for use with dyncrypt
  */
 
-// $Id: des.c,v 1.9 2006/12/08 09:43:34 jj Exp $
+// $Id: des.c 4102 2006-12-08 09:43:35Z jj $
 
 /*
  * PuTTY is copyright 1997-2005 Simon Tatham.
@@ -33,10 +33,7 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-// $Log: des.c,v $
-// Revision 1.9  2006/12/08 09:43:34  jj
-// Add CVS message log
-//
+// $Log$
 
 #include "hstdinc.h"
 

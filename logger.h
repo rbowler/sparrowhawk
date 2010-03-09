@@ -1,9 +1,9 @@
-/* LOGGER.H     (c) Copyright Jan Jaeger, 2003-2007                  */
+/* LOGGER.H     (c) Copyright Jan Jaeger, 2003-2009                  */
 /*              System logger functions                              */
 
-// $Id: logger.h,v 1.22 2007/06/23 00:04:14 ivan Exp $
+// $Id: logger.h 5126 2009-01-23 13:05:56Z bernard $
 //
-// $Log: logger.h,v $
+// $Log$
 // Revision 1.22  2007/06/23 00:04:14  ivan
 // Update copyright notices to include current year (2007)
 //

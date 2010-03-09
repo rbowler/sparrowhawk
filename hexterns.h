@@ -7,56 +7,7 @@
 //      The <config.h> header and other required headers are
 //      presumed to have already been #included ahead of it...
 
-// $Id: hexterns.h,v 1.27 2009/01/07 16:36:55 bernard Exp $
-//
-// $Log: hexterns.h,v $
-// Revision 1.27  2009/01/07 16:36:55  bernard
-// hldmsg command
-//
-// Revision 1.26  2009/01/02 19:21:51  jj
-// DVD-RAM IPL
-// RAMSAVE
-// SYSG Integrated 3270 console fixes
-//
-// Revision 1.25  2008/12/30 15:40:01  rbowler
-// Allow $(LPARNAME) in herclogo file
-//
-// Revision 1.24  2008/12/28 21:05:08  rbowler
-// Integrated 3270 (SYSG) console attn/read commands
-//
-// Revision 1.23  2008/12/24 15:42:14  jj
-// Add debug entry point for sclp event masks
-//
-// Revision 1.22  2008/12/22 13:10:21  jj
-// Add sclp debug entry points
-//
-// Revision 1.21  2008/12/01 23:57:21  rbowler
-// Fix warning C4273: 'losc_set/check' : inconsistent dll linkage
-//
-// Revision 1.20  2008/12/01 16:19:49  jj
-// Check for licensed operating systems without impairing architectural
-// compliance of IFL's
-//
-// Revision 1.19  2008/07/08 05:35:49  fish
-// AUTOMOUNT redesign: support +allowed/-disallowed dirs
-// and create associated 'automount' panel command - Fish
-//
-// Revision 1.18  2008/02/19 11:49:19  ivan
-// - Move setting of CPU priority after spwaning timer thread
-// - Added support for Posix 1003.1e capabilities
-//
-// Revision 1.17  2008/02/12 08:42:15  fish
-// dyngui tweaks: new def devlist fmt, new debug_cd_cmd hook
-//
-// Revision 1.16  2008/01/04 02:28:51  gsmith
-// sf commands update
-//
-// Revision 1.15  2007/01/11 19:54:33  fish
-// Addt'l keep-alive mods: create associated supporting config-file stmt and panel command where individual customer-preferred values can be specified and/or dynamically modified.
-//
-// Revision 1.14  2006/12/08 09:43:26  jj
-// Add CVS message log
-//
+// $Id: hexterns.h 5654 2010-03-07 03:15:17Z fish $
 
 #ifndef _HEXTERNS_H
 #define _HEXTERNS_H
@@ -99,6 +50,16 @@
 #endif  /* _HENGINE_DLL_ */
 #else
 #define HCMD_DLL_IMPORT DLL_EXPORT
+#endif
+
+#ifndef _CMDTAB_C_
+#ifndef _HENGINE_DLL_
+#define CMDT_DLL_IMPORT DLL_IMPORT
+#else   /* _HENGINE_DLL_ */
+#define CMDT_DLL_IMPORT extern
+#endif  /* _HENGINE_DLL_ */
+#else
+#define CMDT_DLL_IMPORT DLL_EXPORT
 #endif
 
 #ifndef _HAO_C_
@@ -223,6 +184,7 @@ void build_config (char *fname);
 void release_config ();
 CONF_DLL_IMPORT DEVBLK *find_device_by_devnum (U16 lcss, U16 devnum);
 DEVBLK *find_device_by_subchan (U32 ioid);
+REGS *devregs(DEVBLK *dev);
 DEVBLK *get_devblk (U16 lcss, U16 devnum);
 void ret_devblk (DEVBLK *dev);
 int  attach_device (U16 lcss, U16 devnum, const char *devtype, int addargc,
@@ -273,6 +235,9 @@ HAO_DLL_IMPORT void hao_message(char *message); /* process message */
 HCMD_DLL_IMPORT int aia_cmd     (int argc, char *argv[], char *cmdline);
 HCMD_DLL_IMPORT int stopall_cmd (int argc, char *argv[], char *cmdline);
 
+/* Functions in module cmdtab.c */
+CMDT_DLL_IMPORT int ProcessConfigCommand (int argc, char **argv, char *cmdline);
+
 /* Functions in losc.c */
 void losc_set (int license_status);
 void losc_check(char *ostype);
@@ -280,7 +245,7 @@ void losc_check(char *ostype);
 #if defined(OPTION_DYNAMIC_LOAD)
 
 HHDL_DLL_IMPORT char *(*hdl_device_type_equates) (const char *);
-HCMD_DLL_IMPORT void *(panel_command_r)          (void *cmdline);
+CMDT_DLL_IMPORT void *(panel_command_r)          (void *cmdline);
 HPAN_DLL_IMPORT void  (panel_display_r)          (void);
 
 HSYS_DLL_IMPORT int   (*config_command) (int argc, char *argv[], char *cmdline);
@@ -291,7 +256,7 @@ HSYS_DLL_IMPORT void *(*panel_command)  (void *);
 
 HSYS_DLL_IMPORT void *(*debug_device_state)         (DEVBLK *);
 HSYS_DLL_IMPORT void *(*debug_cpu_state)            (REGS *);
-HSYS_DLL_IMPORT void  (*debug_cd_cmd)               (char *);
+HSYS_DLL_IMPORT void *(*debug_cd_cmd)               (char *);
 HSYS_DLL_IMPORT void *(*debug_watchdog_signal)      (REGS *);
 HSYS_DLL_IMPORT void *(*debug_program_interrupt)    (REGS *, int);
 HSYS_DLL_IMPORT void *(*debug_diagnose)             (U32, int,  int, REGS *);
@@ -325,13 +290,22 @@ char *str_loadparm();
 void set_lparname(char *name);
 void get_lparname(BYTE *dest);
 LOADPARM_DLL_IMPORT char *str_lparname();
-
-#if defined(OPTION_SET_STSI_INFO)
-/* Functions in control.c */
 void set_manufacturer(char *name);
 void set_plant(char *name);
-void set_model(char *name);
-#endif /* defined(OPTION_SET_STSI_INFO) */
+void set_model(int argc, char *m1, char* m2, char* m3, char* m4);
+void get_manufacturer(BYTE *name);
+void get_plant(BYTE *name);
+void get_model(BYTE *name);
+void get_modelcapa(BYTE *name);
+void get_modelperm(BYTE *name);
+void get_modeltemp(BYTE *name);
+void get_sysname(BYTE *name);
+void get_systype(BYTE *name);
+void get_sysplex(BYTE *name);
+void set_sysname(BYTE *name);
+void set_systype(BYTE *name);
+void set_sysplex(BYTE *name);
+void get_mpfactors(BYTE *dest);
 
 /* Functions in module impl.c */
 IMPL_DLL_IMPORT void system_cleanup(void);
@@ -372,6 +346,12 @@ int ckddasd_hresume  ( DEVBLK *dev, void *file );
 /* Functions in module fbadasd.c */
 FBA_DLL_IMPORT void fbadasd_syncblk_io (DEVBLK *dev, BYTE type, int blknum,
         int blksize, BYTE *iobuf, BYTE *unitstat, U16 *residual);
+FBA_DLL_IMPORT void fbadasd_read_block 
+      ( DEVBLK *dev, int blknum, int blksize, int blkfactor, 
+        BYTE *iobuf, BYTE *unitstat, U16 *residual );
+FBA_DLL_IMPORT void fbadasd_write_block 
+      ( DEVBLK *dev, int blknum, int blksize, int blkfactor, 
+        BYTE *iobuf, BYTE *unitstat, U16 *residual );
 int fbadasd_init_handler ( DEVBLK *dev, int argc, char *argv[]);
 void fbadasd_execute_ccw ( DEVBLK *dev, BYTE code, BYTE flags,
         BYTE chained, U16 count, BYTE prevcode, int ccwseq,

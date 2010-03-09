@@ -1,7 +1,7 @@
-/* LOGGER.C     (c) Copyright Jan Jaeger, 2003-2007                  */
+/* LOGGER.C     (c) Copyright Jan Jaeger, 2003-2009                  */
 /*              System logger functions                              */
 
-// $Id: logger.c,v 1.54 2008/11/29 21:28:01 rbowler Exp $
+// $Id: logger.c 5126 2009-01-23 13:05:56Z bernard $
 
 /* If standard output or standard error is redirected then the log   */
 /* is written to the redirection.                                    */
@@ -13,7 +13,7 @@
 /* Any thread can determine background mode by inspecting stderr     */
 /* for isatty()                                                      */
 
-// $Log: logger.c,v $
+// $Log$
 // Revision 1.54  2008/11/29 21:28:01  rbowler
 // Fix warnings C4267 because win64 declares send length as int not size_t
 //

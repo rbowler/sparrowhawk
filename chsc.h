@@ -1,9 +1,9 @@
-/* CHSC.H       (c) Copyright Jan Jaeger, 1999-2007                  */
+/* CHSC.H       (c) Copyright Jan Jaeger, 1999-2000                  */
 /*              Channel Subsystem interface fields                   */
 
-// $Id: chsc.h,v 1.5 2007/06/23 00:04:04 ivan Exp $
+// $Id: chsc.h 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: chsc.h,v $
+// $Log$
 // Revision 1.5  2007/06/23 00:04:04  ivan
 // Update copyright notices to include current year (2007)
 //

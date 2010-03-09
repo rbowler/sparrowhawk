@@ -1,9 +1,9 @@
-/* CON1052.C    (c)Copyright Jan Jaeger, 2004-2007                   */
+/* CON1052.C    (c)Copyright Jan Jaeger, 2004-2009                   */
 /*              Emulated 1052 on hercules console                    */
 
-// $Id: con1052c.c,v 1.14 2007/11/21 22:54:14 fish Exp $
+// $Id: con1052c.c 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: con1052c.c,v $
+// $Log$
 // Revision 1.14  2007/11/21 22:54:14  fish
 // Use new BEGIN_DEVICE_CLASS_QUERY macro
 //

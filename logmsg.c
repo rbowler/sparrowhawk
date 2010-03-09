@@ -1,12 +1,9 @@
 /* LOGMSG.C : ISW 2003 */
 /* logmsg frontend routing */
 
-// $Id: logmsg.c,v 1.19 2006/12/11 17:14:29 rbowler Exp $
+// $Id: logmsg.c 4110 2006-12-11 17:14:29Z rbowler $
 //
-// $Log: logmsg.c,v $
-// Revision 1.19  2006/12/11 17:14:29  rbowler
-// Fix logmsg.c:315: parse error before `func' (gcc 2.95) after 1.5.4.12
-//
+// $Log$
 // Revision 1.18  2006/12/08 09:43:28  jj
 // Add CVS message log
 //

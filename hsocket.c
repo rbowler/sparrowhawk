@@ -1,9 +1,9 @@
-/* HSOCKET.C    (c) Copyright Hercules development, 2003-2007        */
+/* HSOCKET.C    (c) Copyright Hercules development, 2003-2009        */
 /*              Socket read/write routines                           */
 
-// $Id: hsocket.c,v 1.8 2007/06/23 00:04:11 ivan Exp $
+// $Id: hsocket.c 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: hsocket.c,v $
+// $Log$
 // Revision 1.8  2007/06/23 00:04:11  ivan
 // Update copyright notices to include current year (2007)
 //

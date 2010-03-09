@@ -1,9 +1,6 @@
-// $Id: ecpsvm.h,v 1.10 2006/12/08 09:43:20 jj Exp $
+// $Id: ecpsvm.h 4102 2006-12-08 09:43:35Z jj $
 //
-// $Log: ecpsvm.h,v $
-// Revision 1.10  2006/12/08 09:43:20  jj
-// Add CVS message log
-//
+// $Log$
 
 #ifndef __ECPSVM_H__
 #define __ECPSVM_H__

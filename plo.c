@@ -1,12 +1,12 @@
-/* PLO.C        (c) Copyright Jan Jaeger, 2000-2007                  */
+/* PLO.C        (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              Perform Locked Operation functions codes             */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: plo.c,v 1.24 2008/03/05 23:15:13 ptl00 Exp $
+// $Id: plo.c 5126 2009-01-23 13:05:56Z bernard $
 //
-// $Log: plo.c,v $
+// $Log$
 // Revision 1.24  2008/03/05 23:15:13  ptl00
 // Fix fc=3 fc=19 and qword chks
 //

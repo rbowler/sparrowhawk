@@ -1,7 +1,7 @@
-/* DASDINIT.C   (c) Copyright Roger Bowler, 1999-2007                */
+/* DASDINIT.C   (c) Copyright Roger Bowler, 1999-2009                */
 /*              Hercules DASD Utilities: DASD image builder          */
 
-// $Id: dasdinit.c,v 1.50 2008/11/04 04:50:46 fish Exp $
+// $Id: dasdinit.c 5125 2009-01-23 12:01:44Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* This program creates a disk image file and initializes it as      */
@@ -39,7 +39,7 @@
 /*                                                                   */
 /*-------------------------------------------------------------------*/
 
-// $Log: dasdinit.c,v $
+// $Log$
 // Revision 1.50  2008/11/04 04:50:46  fish
 // Ensure consistent utility startup
 //

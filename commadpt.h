@@ -1,9 +1,7 @@
-// $Id: commadpt.h,v 1.9 2006/12/08 09:43:18 jj Exp $
-//
-// $Log: commadpt.h,v $
-// Revision 1.9  2006/12/08 09:43:18  jj
-// Add CVS message log
-//
+/* COMMADPT.H   (c)Copyright Ivan Warren, 2003-2009                  */
+/*              Structure definitions for 2703 line driver           */
+
+// $Id: commadpt.h 5584 2009-12-30 22:16:28Z rbowler $
 
 #ifndef __COMMADPT_H__
 #define __COMMADPT_H__
@@ -24,6 +22,9 @@ struct COMMADPT
 {
     DEVBLK *dev;                /* the devblk to which this CA is attched   */
     BYTE lnctl;                 /* Line control used                        */
+    BYTE term;                  /* Terminal type                            */
+    BYTE* code_table_toebcdic;  /* correspondence or EBCD code tables       */
+    BYTE* code_table_fromebcdic; /* correspondence or EBCD code tables      */
     int  rto;                   /* Read Time-Out                            */
     int  pto;                   /* Poll Time-Out                            */
     int  eto;                   /* Enable Time-Out                          */
@@ -76,14 +77,29 @@ struct COMMADPT
                                 /* has already been issued                  */
     u_int readcomp:1;           /* Data in the read buffer completes a read */
     u_int datalostcond:1;       /* Data Lost Condition Raised               */
+    u_int telnet_opt:1;         /* expecting telnet option char             */
+    u_int telnet_iac:1;         /* expecting telnet command char            */
+    u_int telnet_int:1;         /* telnet interrupt received                */
+    u_int eol_flag:1;           /* carriage return received flag            */
+    u_int uctrans:1;            /* Uppercase translate flag                 */
+    BYTE telnet_cmd;            /* telnet command received                  */
+    BYTE byte_skip_table[256];  /* async: characters to suppress in output  */
 };
 
-enum {
+enum commadpt_lnctl {
     COMMADPT_LNCTL_BSC=1,       /* BSC Line Control                         */
     COMMADPT_LNCTL_ASYNC        /* ASYNC Line Control                       */
-} commadpt_lnctl;
+};
 
-enum {
+enum commadpt_term {
+        COMMADPT_TERM_TTY,      /* TTY (TELE2) */
+        COMMADPT_TERM_2741,     /* 2741 (IBM1) */
+};
+
+#define IS_BSC_LNCTL(ca)    ((ca->lnctl == COMMADPT_LNCTL_BSC))
+#define IS_ASYNC_LNCTL(ca)  ((ca->lnctl == COMMADPT_LNCTL_ASYNC))
+
+enum commadpt_pendccw {
     COMMADPT_PEND_IDLE=0,       /* NO CCW currently executing               */
     COMMADPT_PEND_READ,         /* A READ CCW is running                    */
     COMMADPT_PEND_WRITE,        /* A WRITE CCW is running                   */
@@ -95,7 +111,7 @@ enum {
     COMMADPT_PEND_TINIT,        /*                                          */
     COMMADPT_PEND_CLOSED,       /*                                          */
     COMMADPT_PEND_SHUTDOWN      /*                                          */
-} commadpt_pendccw;
+};
 
 #define COMMADPT_PEND_TEXT static char *commadpt_pendccw_text[]={\
     "IDLE",\

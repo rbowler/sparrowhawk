@@ -2,12 +2,12 @@
 //           Hercules LAN Channel Station Support
 // ====================================================================
 //
-// Copyright (C) 2002-2008 by James A. Pierson    (original author)
-// Copyright (C) 2002-2008 by David B. Trout      (current maintainer)
+// Copyright (C) 2002-2009 by James A. Pierson    (original author)
+// Copyright (C) 2002-2009 by David B. Trout      (current maintainer)
 //
-// $Id: ctc_lcs.c,v 1.81 2008/12/23 14:01:22 rbowler Exp $
+// $Id: ctc_lcs.c 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: ctc_lcs.c,v $
+// $Log$
 // Revision 1.81  2008/12/23 14:01:22  rbowler
 // Allow symbol substitution in OAT files
 //

@@ -1,10 +1,10 @@
 /* TIMER.C   */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: timer.c,v 1.67 2007/12/10 23:12:02 gsmith Exp $
+// $Id: timer.c 5558 2009-12-24 01:49:18Z fish $
 //
-// $Log: timer.c,v $
+// $Log$
 // Revision 1.67  2007/12/10 23:12:02  gsmith
 // Tweaks to OPTION_MIPS_COUNTING processing
 //
@@ -44,7 +44,7 @@ void update_cpu_timer(void)
 {
 int             cpu;                    /* CPU counter               */
 REGS           *regs;                   /* -> CPU register context   */
-U32             intmask = 0;            /* Interrupt CPU mask        */
+CPU_BITMAP      intmask = 0;            /* Interrupt CPU mask        */
 
     /* Access the diffent register contexts with the intlock held */
     OBTAIN_INTLOCK(NULL);
@@ -70,7 +70,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
             if (!IS_IC_CLKC(regs))
             {
                 ON_IC_CLKC(regs);
-                intmask |= BIT(regs->cpuad);
+                intmask |= regs->cpubit;
             }
         }
         else if (IS_IC_CLKC(regs))
@@ -84,7 +84,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
             if(TOD_CLOCK(regs->guestregs) > regs->guestregs->clkc)
             {
                 ON_IC_CLKC(regs->guestregs);
-                intmask |= BIT(regs->cpuad);
+                intmask |= regs->cpubit;
             }
             else
                 OFF_IC_CLKC(regs->guestregs);
@@ -101,7 +101,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
             if (!IS_IC_PTIMER(regs))
             {
                 ON_IC_PTIMER(regs);
-                intmask |= BIT(regs->cpuad);
+                intmask |= regs->cpubit;
             }
         }
         else if(IS_IC_PTIMER(regs))
@@ -115,7 +115,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
             if (CPU_TIMER(regs->guestregs) < 0)
             {
                 ON_IC_PTIMER(regs->guestregs);
-                intmask |= BIT(regs->cpuad);
+                intmask |= regs->cpubit;
             }
             else
                 OFF_IC_PTIMER(regs->guestregs);
@@ -130,7 +130,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
         if(regs->arch_mode == ARCH_370)
         {
             if( chk_int_timer(regs) )
-                intmask |= BIT(regs->cpuad);
+                intmask |= regs->cpubit;
         }
 
 
@@ -142,7 +142,7 @@ U32             intmask = 0;            /* Interrupt CPU mask        */
               && SIE_STATNB(regs->guestregs, M, ITMOF))
             {
                 if( chk_int_timer(regs->guestregs) )
-                    intmask |= BIT(regs->cpuad);
+                    intmask |= regs->cpubit;
             }
         }
 #endif /*defined(_FEATURE_SIE)*/

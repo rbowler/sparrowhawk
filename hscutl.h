@@ -4,13 +4,9 @@
 /* laneous global utility functions.                                 */
 /*********************************************************************/
 
-// $Id: hscutl.h,v 1.22 2008/02/19 11:49:19 ivan Exp $
+// $Id: hscutl.h 4573 2008-02-19 11:49:19Z ivan $
 //
-// $Log: hscutl.h,v $
-// Revision 1.22  2008/02/19 11:49:19  ivan
-// - Move setting of CPU priority after spwaning timer thread
-// - Added support for Posix 1003.1e capabilities
-//
+// $Log$
 // Revision 1.21  2007/01/10 15:12:11  rbowler
 // Console keepalive for Unix
 //

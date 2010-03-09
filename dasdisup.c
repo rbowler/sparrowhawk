@@ -1,7 +1,7 @@
-/* DASDISUP.C   (c) Copyright Roger Bowler, 1999-2007                */
+/* DASDISUP.C   (c) Copyright Roger Bowler, 1999-2009                */
 /*              Hercules DASD Utilities: IEHIOSUP                    */
 
-// $Id: dasdisup.c,v 1.31 2008/11/04 04:50:46 fish Exp $
+// $Id: dasdisup.c 5125 2009-01-23 12:01:44Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* This program performs the IEHIOSUP function of OS/360.            */
@@ -13,7 +13,7 @@
 /* where: ckdfile is the name of the CKD image file                  */
 /*-------------------------------------------------------------------*/
 
-// $Log: dasdisup.c,v $
+// $Log$
 // Revision 1.31  2008/11/04 04:50:46  fish
 // Ensure consistent utility startup
 //

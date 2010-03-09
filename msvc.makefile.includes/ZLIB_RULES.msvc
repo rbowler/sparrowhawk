@@ -3,20 +3,18 @@
 # --------------------------------------------------------------------------
 # (c) Copyright Roger Bowler, 2005-2007
 # --------------------------------------------------------------------------
-# $Id: ZLIB_RULES.msvc,v 1.2 2008/10/11 23:46:01 fish Exp $
+# $Id: ZLIB_RULES.msvc 5616 2010-02-08 23:44:59Z fish $
 #
 #  ZLIB build rules...
 #
 #
 #                           CHANGE HISTORY
-# $Log: ZLIB_RULES.msvc,v $
-# Revision 1.2  2008/10/11 23:46:01  fish
-# Add CVS "Id" and "Log"
-#
+# $Log$
 #
 # DD/MM/YY Description
 #
 # 26/12/06 Fish: created by extraction from existing makefile-dllmod.msvc
+# 07/02/10 Fish: allHercules.
 #
 # ***************************************************************************
 
@@ -25,15 +23,12 @@
 $(X)zlib1.dll:
     XCOPY "$(ZLIB_DLL)" $(X) /V /C /F /H /R /K /O /X /Y
 
-allzlib: $(OBJDIR) $(EXEDIR) $(PDBDIR) $(MAPDIR) $(ASMDIR) $(O)build_pch.pch \
-    $(MODULES) \
-    $(EXECUTABLES) \
+allzlib: allHercules \
     $(X)zlib1.dll
 
 !ELSE
-allzlib: $(OBJDIR) $(EXEDIR) $(PDBDIR) $(MAPDIR) $(ASMDIR) $(O)build_pch.pch \
-    $(MODULES) \
-    $(EXECUTABLES)
+
+allzlib: allHercules
 
 !ENDIF
 

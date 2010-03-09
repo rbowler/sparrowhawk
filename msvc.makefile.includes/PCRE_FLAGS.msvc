@@ -3,16 +3,13 @@
 # --------------------------------------------------------------------------
 # (c) Copyright Roger Bowler, 2005-2007
 # --------------------------------------------------------------------------
-# $Id: PCRE_FLAGS.msvc,v 1.2 2008/10/11 23:46:01 fish Exp $
+# $Id: PCRE_FLAGS.msvc 4884 2008-10-11 23:46:01Z fish $
 #
 #  Sets PCRE-related compiler/linker flags & #defines...
 #
 #
 #                           CHANGE HISTORY
-# $Log: PCRE_FLAGS.msvc,v $
-# Revision 1.2  2008/10/11 23:46:01  fish
-# Add CVS "Id" and "Log"
-#
+# $Log$
 #
 # DD/MM/YY Description
 #

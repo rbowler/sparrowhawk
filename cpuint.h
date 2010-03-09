@@ -1,15 +1,7 @@
-// $Id: cpuint.h,v 1.40 2008/02/15 21:15:51 ptl00 Exp $
-//
-// $Log: cpuint.h,v $
-// Revision 1.40  2008/02/15 21:15:51  ptl00
-// Fix SET_IC_PER so it ANDs PER bits before ORing new ones
-//
-// Revision 1.39  2006/12/21 22:39:38  gsmith
-// 21 Dec 2006 Range for s+, t+ - Greg Smith
-//
-// Revision 1.38  2006/12/08 09:43:19  jj
-// Add CVS message log
-//
+/* CPUINT.H     (c) Copyright Jan Jaeger, 2001-2009                  */
+/*              Hercules Interrupt State and Mask Definitions        */
+
+// $Id: cpuint.h 5553 2009-12-23 17:34:16Z ivan $
 
 /**********************************************************************
  Interrupts_State & Interrupts_Mask bits definition (Initial_Mask=800E)
@@ -73,8 +65,16 @@
 // Intel assembler bit manipulation instructions (since Intel is still
 // the predominant host architecture platform for Hercules)
 
+/* The BIT() macro should only be used for bit numbers
+   strictly less than 32 */
 #ifndef    BIT
   #define  BIT(nr)  ( 1 << (nr) )         // (bit# counting from the right)
+#endif
+
+/* The CPU_BIT macro is solely for manipulating
+   the CPU number as a CPU bit in a CPU_BITMAP */
+#ifndef CPU_BIT
+  #define CPU_BIT(nr) ( ((  CPU_BITMAP ) ( 1 ) ) << ( nr ) )
 #endif
 
 /* Interrupt bit numbers */
@@ -277,7 +277,7 @@
 #define SET_IC_TRACE \
  do { \
    int i; \
-   U32 mask = sysblk.started_mask; \
+   CPU_BITMAP mask = sysblk.started_mask; \
    for (i = 0; mask; i++) { \
      if (mask & 1) \
        sysblk.regs[i]->ints_state |= BIT(IC_INTERRUPT); \
@@ -313,7 +313,7 @@
 
 #define ON_IC_IOPENDING \
  do { \
-   int i; U32 mask; \
+   int i; CPU_BITMAP mask; \
    if ( !(sysblk.ints_state & BIT(IC_IO)) ) { \
      sysblk.ints_state |= BIT(IC_IO); \
      mask = sysblk.started_mask; \
@@ -331,7 +331,7 @@
 
 #define ON_IC_CHANRPT \
  do { \
-   int i; U32 mask; \
+   int i; CPU_BITMAP mask; \
    if ( !(sysblk.ints_state & BIT(IC_CHANRPT)) ) { \
      sysblk.ints_state |=  BIT(IC_CHANRPT); \
      mask = sysblk.started_mask; \
@@ -349,7 +349,7 @@
 
 #define ON_IC_INTKEY \
  do { \
-   int i; U32 mask; \
+   int i; CPU_BITMAP mask; \
    if ( !(sysblk.ints_state & BIT(IC_INTKEY)) ) { \
      sysblk.ints_state |= BIT(IC_INTKEY); \
      mask = sysblk.started_mask; \
@@ -367,7 +367,7 @@
 
 #define ON_IC_SERVSIG \
  do { \
-   int i; U32 mask; \
+   int i; CPU_BITMAP mask; \
    if ( !(sysblk.ints_state & BIT(IC_SERVSIG)) ) { \
      sysblk.ints_state |= BIT(IC_SERVSIG); \
      mask = sysblk.started_mask; \
@@ -497,7 +497,7 @@
 
 #define OFF_IC_IOPENDING \
  do { \
-   int i; U32 mask; \
+   int i; CPU_BITMAP mask; \
    if ( sysblk.ints_state & BIT(IC_IO) ) { \
      sysblk.ints_state &= ~BIT(IC_IO); \
      mask = sysblk.started_mask; \
@@ -511,7 +511,7 @@
 
 #define OFF_IC_CHANRPT \
  do { \
-   int i; U32 mask; \
+   int i; CPU_BITMAP mask; \
    if ( sysblk.ints_state & BIT(IC_CHANRPT) ) { \
      sysblk.ints_state &= ~BIT(IC_CHANRPT); \
      mask = sysblk.started_mask; \
@@ -525,7 +525,7 @@
 
 #define OFF_IC_INTKEY \
  do { \
-   int i; U32 mask; \
+   int i; CPU_BITMAP mask; \
    if ( sysblk.ints_state & BIT(IC_INTKEY) ) { \
      sysblk.ints_state &= ~BIT(IC_INTKEY); \
      mask = sysblk.started_mask; \
@@ -539,7 +539,7 @@
 
 #define OFF_IC_SERVSIG \
  do { \
-   int i; U32 mask; \
+   int i; CPU_BITMAP mask; \
    if ( sysblk.ints_state & BIT(IC_SERVSIG) ) { \
      sysblk.ints_state &= ~BIT(IC_SERVSIG); \
      mask = sysblk.started_mask; \

@@ -1,14 +1,14 @@
-/* CCKDCDSK.C   (c) Copyright Roger Bowler, 1999-2007                */
+/* CCKDCDSK.C   (c) Copyright Roger Bowler, 1999-2009                */
 /*       Perform chkdsk for a Compressed CKD Direct Access Storage   */
 /*       Device file.                                                */
 
-// $Id: cckdcdsk.c,v 1.45 2008/11/04 04:50:45 fish Exp $
+// $Id: cckdcdsk.c 5125 2009-01-23 12:01:44Z bernard $
 
 /*-------------------------------------------------------------------*/
 /* Perform check function on a compressed ckd file                   */
 /*-------------------------------------------------------------------*/
 
-// $Log: cckdcdsk.c,v $
+// $Log$
 // Revision 1.45  2008/11/04 04:50:45  fish
 // Ensure consistent utility startup
 //

@@ -1,31 +1,17 @@
-/* XSTORE.C   Expanded storage related instructions - Jan Jaeger     */
+/* XSTORE.C     (c) Copyright Jan Jaeger, 1999-2009                  */
+/*              Expanded storage related instructions                */
 
-/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2007      */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
 /* MVPG moved from cpu.c to xstore.c   05/07/00 Jan Jaeger */
 
-// $Id: xstore.c,v 1.47 2007/06/23 00:04:19 ivan Exp $
-//
-// $Log: xstore.c,v $
-// Revision 1.47  2007/06/23 00:04:19  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.46  2007/06/06 22:14:58  gsmith
-// Fix SYNCHRONIZE_CPUS when numcpu > number of host processors - Greg
-//
-// Revision 1.45  2007/01/13 07:27:40  bernard
-// backout ccmask
-//
-// Revision 1.44  2007/01/12 15:25:39  bernard
-// ccmask phase 1
-//
-// Revision 1.43  2007/01/04 23:12:04  gsmith
-// remove thunk calls for program_interrupt
-//
-// Revision 1.42  2006/12/08 09:43:34  jj
-// Add CVS message log
-//
+// $Id: xstore.c 5405 2009-06-10 12:34:17Z rbowler $
+
+/*-------------------------------------------------------------------*/
+/* This module implements the expanded storage instructions          */
+/* for the Hercules ESA/390 emulator.                                */
+/*-------------------------------------------------------------------*/
 
 #include "hstdinc.h"
 
@@ -38,9 +24,7 @@
 #endif
 
 #include "hercules.h"
-
 #include "opcode.h"
-
 #include "inline.h"
 
 #if defined(FEATURE_EXPANDED_STORAGE)
@@ -52,7 +36,8 @@ DEF_INST(page_in)
 int     r1, r2;                         /* Values of R fields        */
 VADR    vaddr;                          /* Virtual storage address   */
 BYTE   *maddr;                          /* Main storage address      */
-U32     xaddr;                          /* Expanded storage address  */
+U32     xaddr;                          /* Expanded storage block#   */
+size_t  xoffs;                          /* Byte offset into xpndstor */
 
     RRE(inst, regs, r1, r2);
 
@@ -75,6 +60,7 @@ U32     xaddr;                          /* Expanded storage address  */
         xaddr += regs->sie_xso;
         if(xaddr >= regs->sie_xsl)
         {
+            PTT(PTT_CL_ERR,"*PGIN",regs->GR_L(r1),regs->GR_L(r2),regs->psw.IA_L);
             regs->psw.cc = 3;
             return;
         }
@@ -84,24 +70,25 @@ U32     xaddr;                          /* Expanded storage address  */
        terminate with cc3 */
     if (xaddr >= sysblk.xpndsize)
     {
+        PTT(PTT_CL_ERR,"*PGIN",regs->GR_L(r1),regs->GR_L(r2),regs->psw.IA_L);
         regs->psw.cc = 3;
         return;
     }
 
     /* Byte offset in expanded storage */
-    xaddr <<= XSTORE_PAGESHIFT;
+    xoffs = (size_t)xaddr << XSTORE_PAGESHIFT;
 
     /* Obtain abs address, verify access and set ref/change bits */
     vaddr = (regs->GR(r1) & ADDRESS_MAXWRAP(regs)) & XSTORE_PAGEMASK;
     maddr = MADDR (vaddr, USE_REAL_ADDR, regs, ACCTYPE_WRITE, 0);
 
     /* Copy data from expanded to main */
-    memcpy (maddr, sysblk.xpndstor + xaddr, XSTORE_PAGESIZE);
+    memcpy (maddr, sysblk.xpndstor + xoffs, XSTORE_PAGESIZE);
 
     /* cc0 means pgin ok */
     regs->psw.cc = 0;
 
-}
+} /* end DEF_INST(page_in) */
 #endif /*defined(FEATURE_EXPANDED_STORAGE)*/
 
 
@@ -114,7 +101,8 @@ DEF_INST(page_out)
 int     r1, r2;                         /* Values of R fields        */
 VADR    vaddr;                          /* Virtual storage address   */
 BYTE   *maddr;                          /* Main storage address      */
-U32     xaddr;                          /* Expanded storage address  */
+U32     xaddr;                          /* Expanded storage block#   */
+size_t  xoffs;                          /* Byte offset into xpndstor */
 
     RRE(inst, regs, r1, r2);
 
@@ -137,6 +125,7 @@ U32     xaddr;                          /* Expanded storage address  */
         xaddr += regs->sie_xso;
         if(xaddr >= regs->sie_xsl)
         {
+            PTT(PTT_CL_ERR,"*PGOUT",regs->GR_L(r1),regs->GR_L(r2),regs->psw.IA_L);
             regs->psw.cc = 3;
             return;
         }
@@ -146,30 +135,31 @@ U32     xaddr;                          /* Expanded storage address  */
        terminate with cc3 */
     if (xaddr >= sysblk.xpndsize)
     {
+        PTT(PTT_CL_ERR,"*PGOUT",regs->GR_L(r1),regs->GR_L(r2),regs->psw.IA_L);
         regs->psw.cc = 3;
         return;
     }
 
     /* Byte offset in expanded storage */
-    xaddr <<= XSTORE_PAGESHIFT;
+    xoffs = (size_t)xaddr << XSTORE_PAGESHIFT;
 
     /* Obtain abs address, verify access and set ref/change bits */
     vaddr = (regs->GR(r1) & ADDRESS_MAXWRAP(regs)) & XSTORE_PAGEMASK;
     maddr = MADDR (vaddr, USE_REAL_ADDR, regs, ACCTYPE_READ, 0);
 
     /* Copy data from main to expanded */
-    memcpy (sysblk.xpndstor + xaddr, maddr, XSTORE_PAGESIZE);
+    memcpy (sysblk.xpndstor + xoffs, maddr, XSTORE_PAGESIZE);
 
     /* cc0 means pgout ok */
     regs->psw.cc = 0;
 
-}
+} /* end DEF_INST(page_out) */
 #endif /*defined(FEATURE_EXPANDED_STORAGE)*/
 
 
 #if defined(FEATURE_MOVE_PAGE_FACILITY_2) && defined(FEATURE_EXPANDED_STORAGE)
 /*-------------------------------------------------------------------*/
-/* B259 IESBE - Invalidate Expanded Storage Blk Entry          [RRE] */
+/* B259 IESBE - Invalidate Expanded Storage Block Entry        [RRE] */
 /*-------------------------------------------------------------------*/
 DEF_INST(invalidate_expanded_storage_block_entry)
 {
@@ -197,8 +187,9 @@ int     r1, r2;                         /* Values of R fields        */
     /* Perform serialization after operation */
     PERFORM_SERIALIZATION (regs);
 
-}
+} /* end DEF_INST(invalidate_expanded_storage_block_entry) */
 #endif /*defined(FEATURE_EXPANDED_STORAGE)*/
+
 
 #if defined(_MSVC_)
   /* Workaround for "fatal error C1001: INTERNAL COMPILER ERROR" in MSVC */
@@ -207,26 +198,13 @@ int     r1, r2;                         /* Values of R fields        */
 
 #if defined(FEATURE_MOVE_PAGE_FACILITY_2)
 /*-------------------------------------------------------------------*/
-/* Move Page (Facility 2)                                            */
-/*                                                                   */
-/* Input:                                                            */
-/*      r1      First operand register number                        */
-/*      r2      Second operand register number                       */
-/*      regs    Pointer to the CPU register context                  */
-/* Return value:                                                     */
-/*      Returns the condition code for the MVPG instruction.         */
-/*                                                                   */
-/*      This function does not return if a program check occurs.     */
-/*-------------------------------------------------------------------*/
-
-/*-------------------------------------------------------------------*/
 /* B254 MVPG  - Move Page                                      [RRE] */
 /*-------------------------------------------------------------------*/
 DEF_INST(move_page)
 {
 int     r1, r2;                         /* Register values           */
 int     rc = 0;                         /* Return code               */
-int     cc = 0;             /* Condition code            */
+int     cc = 0;                         /* Condition code            */
 VADR    vaddr1, vaddr2;                 /* Virtual addresses         */
 RADR    raddr1=0, raddr2=0, xpkeya;     /* Real addresses            */
 BYTE   *main1 = NULL, *main2 = NULL;    /* Mainstor addresses        */
@@ -572,7 +550,7 @@ BYTE    xpkey1 = 0, xpkey2 = 0;         /* Expanded storage keys     */
 
         /* Move 4K bytes from expanded storage to main storage */
         memcpy (main1,
-                sysblk.xpndstor + (xpblk2 << XSTORE_PAGESHIFT),
+                sysblk.xpndstor + ((size_t)xpblk2 << XSTORE_PAGESHIFT),
                 XSTORE_PAGESIZE);
     }
     else if (xpvalid1)
@@ -581,7 +559,7 @@ BYTE    xpkey1 = 0, xpkey2 = 0;         /* Expanded storage keys     */
         STORE_W(regs->mainstor + raddr1, pte1 | PAGETAB_ESREF | PAGETAB_ESCHA);
 
         /* Move 4K bytes from main storage to expanded storage */
-        memcpy (sysblk.xpndstor + (xpblk1 << XSTORE_PAGESHIFT),
+        memcpy (sysblk.xpndstor + ((size_t)xpblk1 << XSTORE_PAGESHIFT),
                 main2,
                 XSTORE_PAGESIZE);
     }
@@ -601,6 +579,8 @@ BYTE    xpkey1 = 0, xpkey2 = 0;         /* Expanded storage keys     */
 
 mvpg_progck:
 
+    PTT(PTT_CL_ERR,"*MVPG",regs->GR_L(r1),regs->GR_L(r2),regs->psw.IA_L);
+
     /* If page translation exception (PTE invalid) and condition code
         option in register 0 bit 23 is set, return condition code */
     if ((regs->GR_L(0) & 0x00000100)
@@ -619,14 +599,15 @@ mvpg_progck:
         regs->opndrid = (r1 << 4) | r2;
     }
     regs->program_interrupt (regs, regs->dat.xcode);
-} /* end function move_page */
 
+} /* end DEF_INST(move_page) */
 #endif /*defined(FEATURE_MOVE_PAGE_FACILITY_2)*/
 
 #if defined(_MSVC_)
   /* Workaround for "fatal error C1001: INTERNAL COMPILER ERROR" in MSVC */
   #pragma optimize("",on)
 #endif /*defined(_MSVC_)*/
+
 
 #if !defined(_GEN_ARCH)
 

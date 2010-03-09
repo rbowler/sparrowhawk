@@ -1,7 +1,7 @@
-/* ESAME.C      (c) Copyright Jan Jaeger, 2000-2007                  */
+/* ESAME.C      (c) Copyright Jan Jaeger, 2000-2010                  */
 /*              ESAME (z/Architecture) instructions                  */
 
-// $Id: esame.c,v 1.202 2008/05/06 22:15:42 rbowler Exp $
+// $Id: esame.c 5633 2010-02-15 13:37:55Z jmaynard $
 
 /*-------------------------------------------------------------------*/
 /* This module implements the instructions which exist in ESAME      */
@@ -19,7 +19,13 @@
 /*      Extended immediate facility - Roger Bowler            Aug2005*/
 /*-------------------------------------------------------------------*/
 
-// $Log: esame.c,v $
+// $Log$
+// Revision 1.204  2009/01/23 11:53:18  bernard
+// copyright notice
+//
+// Revision 1.203  2009/01/15 17:27:02  rbowler
+// STFLE bit settings for CPU Measurement Facility
+//
 // Revision 1.202  2008/05/06 22:15:42  rbowler
 // Fix warning: operation on `p1' may be undefined
 //
@@ -119,6 +125,9 @@
 
 #if !defined(_ESAME_C_)
 #define _ESAME_C_
+
+BYTE * get_stfl_data(int, int *);
+
 #endif
 
 #include "hercules.h"
@@ -131,6 +140,8 @@
 #include "crypto.h"
 
 #include "clock.h"
+
+
 
 #if defined(FEATURE_BINARY_FLOATING_POINT)
 /*-------------------------------------------------------------------*/
@@ -1053,6 +1064,8 @@ U64     old;                            /* Old value                 */
     }
     else
     {
+        PTT(PTT_CL_CSF,"*CSPG",regs->GR_L(r1),regs->GR_L(r2),regs->psw.IA_L);
+
         /* Otherwise yield */
         regs->GR_G(r1) = CSWAP64(old);
         if (sysblk.cpus > 1)
@@ -4096,6 +4109,7 @@ int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 int     i, m, n;                        /* Integer work areas        */
 U64    *p1, *p2;                        /* Mainstor pointers         */
+BYTE   *bp1;                            /* Unaligned Mainstor ptr    */
 
     RSY(inst, regs, r1, r3, b2, effective_addr2);
 
@@ -4106,20 +4120,33 @@ U64    *p1, *p2;                        /* Mainstor pointers         */
     m = 0x800 - ((VADR_L)effective_addr2 & 0x7ff);
 
     /* Address of operand beginning */
-    p1 = (U64*)MADDR(effective_addr2, b2, regs, ACCTYPE_READ, regs->psw.pkey);
+    bp1 = (BYTE*)MADDR(effective_addr2, b2, regs, ACCTYPE_READ, regs->psw.pkey);
+    p1=(U64*)bp1;
 
     if (likely(n <= m))
     {
         /* Boundary not crossed */
         n >>= 3;
-#if defined(OPTION_SINGLE_CPU_DW) && defined(ASSIST_STORE_DW)
-        if (regs->cpubit == regs->sysblk->started_mask)
-            for (i = 0; i < n; i++, p1++)
-                regs->GR_G((r1 + i) & 0xF) = CSWAP64(*p1);
-        else
+#if defined(OPTION_STRICT_ALIGNMENT)
+        if(likely(!(((uintptr_t)effective_addr2)&0x07)))
+        {
 #endif
-        for (i = 0; i < n; i++, p1++)
-            regs->GR_G((r1 + i) & 0xF) = fetch_dw (p1);
+#if defined(OPTION_SINGLE_CPU_DW) && defined(ASSIST_STORE_DW)
+            if (regs->cpubit == regs->sysblk->started_mask)
+                for (i = 0; i < n; i++, p1++)
+                    regs->GR_G((r1 + i) & 0xF) = CSWAP64(*p1);
+            else
+#endif
+            for (i = 0; i < n; i++, p1++)
+                regs->GR_G((r1 + i) & 0xF) = fetch_dw (p1);
+#if defined(OPTION_STRICT_ALIGNMENT)
+        }
+        else
+        {
+            for (i = 0; i < n; i++, bp1+=8)
+                regs->GR_G((r1 + i) & 0xF) = fetch_dw (bp1);
+        }
+#endif
     }
     else
     {
@@ -4130,6 +4157,13 @@ U64    *p1, *p2;                        /* Mainstor pointers         */
 
         if (likely((m & 0x7) == 0))
         {
+            /* FIXME: This code blows up on at least Mac OS X Snow Leopard
+               (10.6) when compiled for a 32-bit Intel host using gcc 4.2.1
+               unless the PTT call below is present. The problem appears to
+               be in the gcc 4.2.1 optimizer, as the code works when
+               compiled with -O0. DO NOT REMOVE this until it's been found
+               and fixed. -- JRM, 11 Feb 2010 */
+//            PTT(PTT_CL_INF,"LMG2KIN",p2,0,0);
             /* Addresses are double-word aligned */
             m >>= 3;
             for (i = 0; i < m; i++, p1++)
@@ -4302,6 +4336,7 @@ int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
 int     i, m, n;                        /* Integer work areas        */
 U64    *p1, *p2;                        /* Mainstor pointers         */
+BYTE   *bp1;                            /* Unaligned Mainstor ptr    */
 
     RSY(inst, regs, r1, r3, b2, effective_addr2);
 
@@ -4312,20 +4347,38 @@ U64    *p1, *p2;                        /* Mainstor pointers         */
     m = 0x800 - ((VADR_L)effective_addr2 & 0x7ff);
 
     /* Get address of first page */
-    p1 = (U64*)MADDR(effective_addr2, b2, regs, ACCTYPE_WRITE, regs->psw.pkey);
+    bp1 = (BYTE*)MADDR(effective_addr2, b2, regs, ACCTYPE_WRITE, regs->psw.pkey);
+    p1=(U64*)bp1;
 
     if (likely(n <= m))
     {
-        /* boundary not crossed */
+        /* Boundary not crossed */
         n >>= 3;
+#if defined(OPTION_STRICT_ALIGNMENT)
+        if(likely(!(((uintptr_t)effective_addr2)&0x07)))
+        {
+#endif
 #if defined(OPTION_SINGLE_CPU_DW) && defined(ASSIST_STORE_DW)
         if (regs->cpubit == regs->sysblk->started_mask)
             for (i = 0; i < n; i++)
                 *p1++ = CSWAP64(regs->GR_G((r1 + i) & 0xF));
         else
 #endif
-        for (i = 0; i < n; i++)
-            store_dw (p1++, regs->GR_G((r1 + i) & 0xF));
+            for (i = 0; i < n; i++)
+                store_dw (p1++, regs->GR_G((r1 + i) & 0xF));
+#if defined(OPTION_STRICT_ALIGNMENT)
+        }
+        else
+        {
+            for (i = 0; i < n; i++,bp1+=8)
+                store_dw (bp1, regs->GR_G((r1 + i) & 0xF));
+        }
+#endif
+    }
+    if (likely(n <= m))
+    {
+        /* boundary not crossed */
+        n >>= 3;
     }
     else
     {
@@ -4909,14 +4962,80 @@ DEF_INST(perform_timing_facility_function)
             regs->psw.cc = 0;
             break;
         default:
+            PTT(PTT_CL_ERR,"*PTFF",regs->GR_L(0),regs->GR_L(1),regs->psw.IA_L);
             regs->psw.cc = 3;
     }
 }
 #endif /*defined(FEATURE_TOD_CLOCK_STEERING)*/
 
 
+#if defined(FEATURE_CONFIGURATION_TOPOLOGY_FACILITY)
+/*-------------------------------------------------------------------*/
+/* B9A2 PTF   - Perform Topology Function                      [RRE] */
+/*-------------------------------------------------------------------*/
+DEF_INST(perform_topology_function)
+{
+int     r1, unused;                     /* Values of R fields        */
+int     fc, rc = 0;                     /* Function / Reason Code    */
+
+    RRE(inst, regs, r1, unused);
+
+    PTT(PTT_CL_INF,"PTF",regs->GR_G(r1),0,regs->psw.IA_L);
+
+    PRIV_CHECK(regs);
+
+    SIE_INTERCEPT(regs);
+
+    /* Specification Exception if bits 0-55 of general register R1
+       are not zeros */
+    if (regs->GR_G(r1) & 0xFFFFFFFFFFFFFF00ULL)
+    {
+        PTT(PTT_CL_ERR,"*PTF",regs->GR_G(r1),rc,regs->psw.IA_L);
+        regs->program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+    }
+
+    /* Extract function code */
+    fc = (int)(regs->GR_G(r1) & 0x00000000000000FFULL);
+
+    /* Perform requested function */
+    switch (fc)
+    {
+    case 0:                     /* Request horizontal polarization */
+        regs->psw.cc = 2;       /* Request rejected */
+        rc = 1;                 /* Already polarized as specified */
+        break;
+
+    case 1:                     /* Request vertical polarization */
+        regs->psw.cc = 2;       /* Request rejected */
+        rc = 0;                 /* No reason specified */
+        break;
+
+    case 2:                     /* Check topology-change status */
+        OBTAIN_INTLOCK(NULL);
+        regs->psw.cc = sysblk.topchnge ? 1    /* (report was pending) */
+                                       : 0;   /* (report not pending) */
+        sysblk.topchnge = 0;                  /* (clear pending flag) */
+        RELEASE_INTLOCK(NULL);
+        break;
+
+    default:
+        /* Undefined function code */
+        PTT(PTT_CL_ERR,"*PTF",regs->GR_G(r1),rc,regs->psw.IA_L);
+        regs->program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
+    }
+
+    /* Set reason code in bits 48-55 when condition code is 2 */
+    if (regs->psw.cc == 2)
+        regs->GR_G(r1) |= rc << 8;
+
+    if (regs->psw.cc != 0)
+        PTT(PTT_CL_ERR,"*PTF",regs->GR_G(r1),rc,regs->psw.IA_L);
+}
+#endif /*defined(FEATURE_CONFIGURATION_TOPOLOGY_FACILITY)*/
+
+
 #if defined(FEATURE_ESAME) || defined(FEATURE_ESAME_N3_ESA390)
-BYTE ARCH_DEP(stfl_data)[8] = {
+BYTE ARCH_DEP(stfl_data)[] = {
                  0
 #if defined(FEATURE_ESAME_N3_ESA390) || defined(FEATURE_ESAME)
                  | STFL_0_N3
@@ -5013,6 +5132,9 @@ BYTE ARCH_DEP(stfl_data)[8] = {
 #endif /*defined(FEATURE_EXECUTE_EXTENSIONS_FACILITY)*/         /*208*/
                  ,
                  0
+#if defined(FEATURE_SET_PROGRAM_PARAMETER_FACILITY)
+                 | STFL_5_SET_PROG_PARAM
+#endif /*defined(FEATURE_SET_PROGRAM_PARAMETER_FACILITY)*/
 #if defined(FEATURE_FPS_ENHANCEMENT)
                  | STFL_5_FPS_ENHANCEMENT
 #endif /*defined(FEATURE_FPS_ENHANCEMENT)*/
@@ -5027,37 +5149,111 @@ BYTE ARCH_DEP(stfl_data)[8] = {
                  0
                  ,
                  0
+                 ,
+                 0
+#if defined(FEATURE_CPU_MEASUREMENT_COUNTER_FACILITY)
+                 | STFL_8_CPU_MEAS_COUNTER
+#endif /*defined(FEATURE_CPU_MEASUREMENT_COUNTER_FACILITY)*/
+#if defined(FEATURE_CPU_MEASUREMENT_SAMPLING_FACILITY)
+                 | STFL_8_CPU_MEAS_SAMPLNG
+#endif /*defined(FEATURE_CPU_MEASUREMENT_SAMPLING_FACILITY)*/
+                 ,
+                 0
+                 ,
+                 0
+                 ,
+                 0
+                 ,
+                 0
+                 ,
+                 0
+                 ,
+                 0
+                 ,
+                 0
                  };
 
 /*-------------------------------------------------------------------*/
 /* Adjust the facility list to account for runtime options           */
 /*-------------------------------------------------------------------*/
-void ARCH_DEP(adjust_stfl_data) ()
+BYTE * ARCH_DEP(adjust_stfl_data) (int *data_len, REGS *regs)
 {
-#if defined(_900) || defined(FEATURE_ESAME)
-    /* ESAME might be installed but not active */
-    if(sysblk.arch_z900)
-        ARCH_DEP(stfl_data)[0] |= STFL_0_ESAME_INSTALLED;
+int   stfl_len;     /* Length of STFL data                           */
+BYTE *stfl_data;    /* -> STFL data being modified. Depends upon     */
+                    /* installed architecture, but not the current   */
+                    /* architecture mode being executed.             */
+                    /* ARCH_DEP is unreliable choice for STFL data   */
+                    /* post IPL of a z/Architecture machine but      */
+                    /* before the CPU has been placed in             */
+                    /* in z/Architecture mode.  In this case,        */
+                    /* ARCH_DEP selects ESA/390 STFL data which is   */
+                    /* incomplete when z/Architecture is installed.  */
+                    /* This creates problems for OS's that expect to */
+                    /* detect z/Architecture features before         */
+                    /* entering z/Architecture mode and only find    */
+                    /* ESA/390 features.                             */
+
+    if (sysblk.arch_z900)
+    {   
+        /* 'ARCHMODE z/Arch' in configuration (or console configured) */
+
+        /* Locate the STFL data for a z/Architecture system */
+        stfl_data=get_stfl_data(ARCH_900, &stfl_len);
+
+        /* A little overkill, but deals with the possible corner case */
+        if (!stfl_data)
+        {   
+            stfl_len=sizeof(ARCH_DEP(stfl_data));
+            stfl_data=&ARCH_DEP(stfl_data)[0];
+        }
+
+        stfl_data[0] |= STFL_0_ESAME_INSTALLED;
+
+        /* Set whether z/Arch is active based upon CPU mode */
+        if (regs->arch_mode == ARCH_900)
+            stfl_data[0] |= STFL_0_ESAME_ACTIVE;
+        else
+            stfl_data[0] &= ~STFL_0_ESAME_ACTIVE;
+    }
     else
-        ARCH_DEP(stfl_data)[0] &= ~STFL_0_ESAME_INSTALLED;
-#endif /*defined(_900) || defined(FEATURE_ESAME)*/
+    {
+        /* 'ARCHMODE ESA/390' in configuration (or console configured) */
+        
+        /* Locate the STFL data for an ESA/390 system */
+        stfl_data=get_stfl_data(ARCH_390, &stfl_len);
+        
+        /* Same overkill, but just in case */
+        if (!stfl_data)
+        {   
+            stfl_len=sizeof(ARCH_DEP(stfl_data));
+            stfl_data=&ARCH_DEP(stfl_data)[0];
+        }
+        
+        stfl_data[0] &= ~STFL_0_ESAME_INSTALLED;
+        stfl_data[0] &= ~STFL_0_ESAME_ACTIVE;
+    }
 
 #if defined(FEATURE_MESSAGE_SECURITY_ASSIST)
     /* MSA is enabled only if the dyncrypt DLL module is loaded */
     if(ARCH_DEP(cipher_message))
-        ARCH_DEP(stfl_data)[2] |= STFL_2_MSG_SECURITY;
+        stfl_data[2] |= STFL_2_MSG_SECURITY;
     else
-        ARCH_DEP(stfl_data)[2] &= ~STFL_2_MSG_SECURITY;
+        stfl_data[2] &= ~STFL_2_MSG_SECURITY;
 #endif /*defined(FEATURE_MESSAGE_SECURITY_ASSIST)*/
 
-#if defined(FEATURE_ASN_AND_LX_REUSE)
+#if defined(_FEATURE_ASN_AND_LX_REUSE)
     /* ALRF enablement is an option in the configuration file */
     if(sysblk.asnandlxreuse)
-        ARCH_DEP(stfl_data)[0] |= STFL_0_ASN_LX_REUSE;
+        stfl_data[0] |= STFL_0_ASN_LX_REUSE;
     else
-        ARCH_DEP(stfl_data)[0] &= ~STFL_0_ASN_LX_REUSE;
+        stfl_data[0] &= ~STFL_0_ASN_LX_REUSE;
 #endif /*defined(FEATURE_ASN_AND_LX_REUSE)*/
+
+    *data_len=stfl_len;
+    return stfl_data;
 } /* end ARCH_DEP(adjust_stfl_data) */
+
+
 
 /*-------------------------------------------------------------------*/
 /* B2B1 STFL  - Store Facility List                              [S] */
@@ -5066,7 +5262,10 @@ DEF_INST(store_facility_list)
 {
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
+int     data_len;                       /* Size of STFL data         */
+        /* Note: data_len not used here, but STFLE needs it          */
 PSA    *psa;                            /* -> Prefixed storage area  */
+BYTE   *stfl_data;                      /* -> STFL data              */
 
     S(inst, regs, b2, effective_addr2);
 
@@ -5074,8 +5273,16 @@ PSA    *psa;                            /* -> Prefixed storage area  */
 
     SIE_INTERCEPT(regs);
 
+    PTT(PTT_CL_INF,"STFL",b2,(U32)(effective_addr2 & 0xffffffff),regs->psw.IA_L);
+
     /* Adjust the facility list to account for runtime options */
-    ARCH_DEP(adjust_stfl_data)();
+    stfl_data = ARCH_DEP(adjust_stfl_data)(&data_len, regs);
+
+#if 0
+    logmsg ("store_facility_list STFL data length %i\n",data_len);
+    logmsg ("STFL=%2.2X %2.2X %2.2X %2.2X\n",
+            *stfl_data,*(stfl_data+1),*(stfl_data+2),*(stfl_data+3));
+#endif
 
     /* Set the main storage reference and change bits */
     STORAGE_KEY(regs->PX, regs) |= (STORKEY_REF | STORKEY_CHANGE);
@@ -5083,7 +5290,7 @@ PSA    *psa;                            /* -> Prefixed storage area  */
     /* Point to PSA in main storage */
     psa = (void*)(regs->mainstor + regs->PX);
 
-    memcpy(psa->stfl, ARCH_DEP(stfl_data), sizeof(psa->stfl));
+    memcpy(psa->stfl, stfl_data, sizeof(psa->stfl));
 
 } /* end DEF_INST(store_facility_list) */
 
@@ -5096,23 +5303,27 @@ DEF_INST(store_facility_list_extended)
 {
 int     b2;                             /* Base of effective addr    */
 VADR    effective_addr2;                /* Effective address         */
+int     data_len;                       /* Size of STFL data         */
 int     nmax;                           /* #of doublewords defined   */
 int     ndbl;                           /* #of doublewords to store  */
 int     cc;                             /* Condition code            */
+BYTE   *stfl_data;                      /* -> STFL data              */
 
     S(inst, regs, b2, effective_addr2);
 
     SIE_INTERCEPT(regs);
+
+    PTT(PTT_CL_INF,"STFLE",regs->GR_L(0),(U32)(effective_addr2 & 0xffffffff),regs->psw.IA_L);
 
     /* Note: STFLE is NOT a privileged instruction (unlike STFL) */
 
     DW_CHECK(effective_addr2, regs);
 
     /* Adjust the facility list to account for runtime options */
-    ARCH_DEP(adjust_stfl_data)();
+    stfl_data = ARCH_DEP(adjust_stfl_data)(&data_len, regs);
 
     /* Calculate number of doublewords of facilities defined */
-    nmax = sizeof(ARCH_DEP(stfl_data)) / 8;
+    nmax = (data_len+7) / 8;
 
     /* Obtain operand length from register 0 bits 56-63 */
     ndbl = regs->GR_LHLCL(0) + 1;
@@ -5125,11 +5336,12 @@ int     cc;                             /* Condition code            */
     }
     else
     {
+        PTT(PTT_CL_ERR,"*STFLE", ndbl, nmax, regs->psw.IA_L);
         cc = 3;
     }
 
     /* Store facility list at operand location */
-    ARCH_DEP(vstorec) ( &ARCH_DEP(stfl_data), ndbl*8-1,
+    ARCH_DEP(vstorec) ( stfl_data, ndbl*8-1,
                         effective_addr2, b2, regs );
 
     /* Save number of doublewords minus 1 into register 0 bits 56-63 */
@@ -5562,7 +5774,7 @@ int     tccc;                   /* Test-Character-Comparison Control */
         regs->psw.cc = len ? 3 : 0;
 
         /* exit on the cpu determined number of bytes */
-        if((len != 0) && (!(addr1 & 0xfff) || !addr2 & 0xfff))
+        if((len != 0) && (!(addr1 & 0xfff) || !(addr2 & 0xfff)))
             break;
 
     } /* end while */
@@ -5657,7 +5869,7 @@ int     tccc;                   /* Test-Character-Comparison Control */
         regs->psw.cc = len ? 3 : 0;
 
         /* exit on the cpu determined number of bytes */
-        if((len != 0) && (!(addr1 & 0xfff) || !addr2 & 0xfff))
+        if((len != 0) && (!(addr1 & 0xfff) || !(addr2 & 0xfff)))
             break;
 
     } /* end while */
@@ -5758,7 +5970,7 @@ int     tccc;                   /* Test-Character-Comparison Control */
         regs->psw.cc = len ? 3 : 0;
 
         /* exit on the cpu determined number of bytes */
-        if((len != 0) && (!(addr1 & 0xfff) || !addr2 & 0xfff))
+        if((len != 0) && (!(addr1 & 0xfff) || !(addr2 & 0xfff)))
             break;
 
     } /* end while */
@@ -5858,7 +6070,7 @@ int     tccc;                   /* Test-Character-Comparison Control */
         regs->psw.cc = len ? 3 : 0;
 
         /* exit on the cpu determined number of bytes */
-        if((len != 0) && (!(addr1 & 0xfff) || !addr2 & 0xfff))
+        if((len != 0) && (!(addr1 & 0xfff) || !(addr2 & 0xfff)))
             break;
 
     } /* end while */
@@ -7969,5 +8181,29 @@ int     n;                              /* Position of leftmost one  */
  #include "esame.c"
 #endif
 
+/*-------------------------------------------------------------------*/
+/* Locate STFL data independent of current architecture mode setting */
+/*-------------------------------------------------------------------*/
+/* Note: this function must be here so that all ARCH_DEP(stlf_data)  */
+/*       with correct architecture settings have been defined with   */
+/*       architecture sensitive features                             */
+BYTE* get_stfl_data(int mode, int *data_len)
+{
+    switch(mode) 
+    {
+#if defined(_390)
+        case ARCH_390:
+            *data_len=sizeof(s390_stfl_data);
+            return &s390_stfl_data[0];
+#endif
+#if defined(_900)
+        case ARCH_900:
+            *data_len=sizeof(z900_stfl_data);
+            return &z900_stfl_data[0];
+#endif
+    }
+    *data_len=0;
+    return NULL;
+}
 
 #endif /*!defined(_GEN_ARCH)*/

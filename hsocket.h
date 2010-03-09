@@ -1,12 +1,12 @@
-/* HSOCKET.H    (c) Copyright Roger Bowler, 2005-2007                */
+/* HSOCKET.H    (c) Copyright Roger Bowler, 2005-2009                */
 /*              Equates for socket functions                         */
 
 /*  This header file contains equates for the socket functions       */
 /*  and constants whose values differ between Unix and Winsock       */
 
-// $Id: hsocket.h,v 1.10 2007/06/23 00:04:11 ivan Exp $
+// $Id: hsocket.h 5125 2009-01-23 12:01:44Z bernard $
 //
-// $Log: hsocket.h,v $
+// $Log$
 // Revision 1.10  2007/06/23 00:04:11  ivan
 // Update copyright notices to include current year (2007)
 //

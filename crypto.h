@@ -1,9 +1,9 @@
-/* CRYPTO.H     (c) Copyright Jan Jaeger, 2000-2007                  */
+/* CRYPTO.H     (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              Cryptographic instructions                           */
 
-// $Id: crypto.h,v 1.11 2007/06/23 00:04:05 ivan Exp $
+// $Id: crypto.h 5572 2009-12-29 13:13:15Z bernard $
 //
-// $Log: crypto.h,v $
+// $Log$
 // Revision 1.11  2007/06/23 00:04:05  ivan
 // Update copyright notices to include current year (2007)
 //
@@ -25,8 +25,7 @@
 
 CRY_DLL_IMPORT void ( ATTR_REGPARM(2) *ARCH_DEP( cipher_message                      ) ) ( BYTE*, REGS* );
 CRY_DLL_IMPORT void ( ATTR_REGPARM(2) *ARCH_DEP( cipher_message_with_chaining        ) ) ( BYTE*, REGS* );
-CRY_DLL_IMPORT void ( ATTR_REGPARM(2) *ARCH_DEP( compute_intermediate_message_digest ) ) ( BYTE*, REGS* );
-CRY_DLL_IMPORT void ( ATTR_REGPARM(2) *ARCH_DEP( compute_last_message_digest         ) ) ( BYTE*, REGS* );
+CRY_DLL_IMPORT void ( ATTR_REGPARM(2) *ARCH_DEP( compute_message_digest              ) ) ( BYTE*, REGS* );
 CRY_DLL_IMPORT void ( ATTR_REGPARM(2) *ARCH_DEP( compute_message_authentication_code ) ) ( BYTE*, REGS* );
 
 #endif /*defined(_FEATURE_MESSAGE_SECURITY_ASSIST)*/

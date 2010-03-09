@@ -1,13 +1,13 @@
 ////////////////////////////////////////////////////////////////////////////////////
 //    w32ctca.c    CTCI-W32 (Channel to Channel link to Win32 TCP/IP stack)
 ////////////////////////////////////////////////////////////////////////////////////
-// (c) Copyright "Fish" (David B. Trout), 2002-2007. Released under the Q Public License
+// (c) Copyright "Fish" (David B. Trout), 2002-2009. Released under the Q Public License
 // (http://www.hercules-390.org/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: w32ctca.c,v 1.26 2007/11/30 14:54:33 jmaynard Exp $
+// $Id: w32ctca.c 5368 2009-06-02 03:58:49Z fish $
 //
-// $Log: w32ctca.c,v $
+// $Log$
 // Revision 1.26  2007/11/30 14:54:33  jmaynard
 // Changed conmicro.cx to hercules-390.org or conmicro.com, as needed.
 //
@@ -37,7 +37,7 @@ int w32ctca_dummy = 0;
 
 #define TT32_PROCADDRS( name )                                  \
                                                                 \
-ptuntap32_ ## name ## _ex   g_tt32_pfn_ ##name ## _ex  = NULL;  \
+ptuntap32_ ## name ## _ex   g_tt32_pfn_ ## name ## _ex = NULL;  \
 ptuntap32_ ## name          g_tt32_pfn_ ## name        = NULL
 
 #define GET_TT32_PROCADDRS( name )                                \
@@ -336,38 +336,94 @@ int  display_tt32_stats( int fd )
         errno =                                   errnum;
     }
 
-    logmsg
-    (
-        "%s Statistics:\n\n"
-        "Size of Kernel Hold Buffer:      %5luK\n"
-        "Size of DLL I/O Buffer:          %5luK\n"
-        "Maximum DLL I/O Bytes Received:  %5luK\n\n"
-        "%12" I64_FMT "d Write Calls\n"
-        "%12" I64_FMT "d Write I/Os\n"
-        "%12" I64_FMT "d Read Calls\n"
-        "%12" I64_FMT "d Read I/Os\n"
-        "%12" I64_FMT "d Packets Read\n"
-        "%12" I64_FMT "d Packets Written\n"
-        "%12" I64_FMT "d Bytes Read\n"
-        "%12" I64_FMT "d Bytes Written\n"
-        "%12" I64_FMT "d Internal Packets\n"
-        "%12" I64_FMT "d Ignored Packets\n"
-        ,
-        g_tt32_dllname
-        ,(stats.dwKernelBuffSize   + 1023) / 1024
-        ,(stats.dwReadBuffSize     + 1023) / 1024
-        ,(stats.dwMaxBytesReceived + 1023) / 1024
-        ,stats.n64WriteCalls
-        ,stats.n64WriteIOs
-        ,stats.n64ReadCalls
-        ,stats.n64ReadIOs
-        ,stats.n64PacketsRead
-        ,stats.n64PacketsWritten
-        ,stats.n64BytesRead
-        ,stats.n64BytesWritten
-        ,stats.n64InternalPackets
-        ,stats.n64IgnoredPackets
-    );
+    if (stats.dwStructSize >= sizeof(stats))
+    {
+        // New version 3.3 stats
+
+        logmsg
+        (
+            "\n%s Statistics:\n\n"
+
+            "Size of Kernel Hold Buffer:      %5luK\n"
+            "Size of DLL I/O Buffer:          %5luK\n"
+            "Maximum DLL I/O Bytes Received:  %5luK\n\n"
+
+            "%12" I64_FMT "d  Total Write Calls\n"
+            "%12" I64_FMT "d  Total Write I/Os\n"
+            "%12" I64_FMT "d  Packets To All Zeroes MAC Written\n"
+            "%12" I64_FMT "d  Total Packets Written\n"
+            "%12" I64_FMT "d  Total Bytes Written\n\n"
+
+            "%12" I64_FMT "d  Total Read Calls\n"
+            "%12" I64_FMT "d  Total Read I/Os\n"
+            "%12" I64_FMT "d  Internally Handled ARP Packets\n"
+            "%12" I64_FMT "d  Packets From Ourself\n"
+            "%12" I64_FMT "d  Total Ignored Packets\n"
+            "%12" I64_FMT "d  Packets To All Zeroes MAC Read\n"
+            "%12" I64_FMT "d  Total Packets Read\n"
+            "%12" I64_FMT "d  Total Bytes Read\n\n"
+
+            ,g_tt32_dllname
+
+            ,(stats.dwKernelBuffSize   + 1023) / 1024
+            ,(stats.dwReadBuffSize     + 1023) / 1024
+            ,(stats.dwMaxBytesReceived + 1023) / 1024
+
+            ,stats.n64WriteCalls
+            ,stats.n64WriteIOs
+            ,stats.n64ZeroMACPacketsWritten
+            ,stats.n64PacketsWritten
+            ,stats.n64BytesWritten
+
+            ,stats.n64ReadCalls
+            ,stats.n64ReadIOs
+            ,stats.n64InternalPackets
+            ,stats.n64OwnPacketsIgnored
+            ,stats.n64IgnoredPackets
+            ,stats.n64ZeroMACPacketsRead
+            ,stats.n64PacketsRead
+            ,stats.n64BytesRead
+        );
+    }
+    else
+    {
+        // Old pre version 3.3 stats
+
+        logmsg
+        (
+            "\n%s Statistics:\n\n"
+
+            "Size of Kernel Hold Buffer:      %5luK\n"
+            "Size of DLL I/O Buffer:          %5luK\n"
+            "Maximum DLL I/O Bytes Received:  %5luK\n\n"
+
+            "%12" I64_FMT "d Write Calls\n"
+            "%12" I64_FMT "d Write I/Os\n"
+            "%12" I64_FMT "d Read Calls\n"
+            "%12" I64_FMT "d Read I/Os\n"
+            "%12" I64_FMT "d Packets Read\n"
+            "%12" I64_FMT "d Packets Written\n"
+            "%12" I64_FMT "d Bytes Read\n"
+            "%12" I64_FMT "d Bytes Written\n"
+            "%12" I64_FMT "d Internal Packets\n"
+            "%12" I64_FMT "d Ignored Packets\n\n"
+            ,
+            g_tt32_dllname
+            ,(stats.dwKernelBuffSize   + 1023) / 1024
+            ,(stats.dwReadBuffSize     + 1023) / 1024
+            ,(stats.dwMaxBytesReceived + 1023) / 1024
+            ,stats.n64WriteCalls
+            ,stats.n64WriteIOs
+            ,stats.n64ReadCalls
+            ,stats.n64ReadIOs
+            ,stats.n64PacketsRead
+            ,stats.n64PacketsWritten
+            ,stats.n64BytesRead
+            ,stats.n64BytesWritten
+            ,stats.n64InternalPackets
+            ,stats.n64IgnoredPackets
+        );
+    }
 
     return 0;
 }

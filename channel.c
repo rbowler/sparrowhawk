@@ -1,7 +1,7 @@
-/* CHANNEL.C    (c) Copyright Roger Bowler, 1999-2007                */
+/* CHANNEL.C    (c) Copyright Roger Bowler, 1999-2009                */
 /*              ESA/390 Channel Emulator                             */
 
-// $Id: channel.c,v 1.147 2008/11/04 05:56:30 fish Exp $
+// $Id: channel.c 5654 2010-03-07 03:15:17Z fish $
 
 /*-------------------------------------------------------------------*/
 /* This module contains the channel subsystem functions for the      */
@@ -14,7 +14,7 @@
 /*      Fix program check on NOP due to addressing - Jan Jaeger      */
 /*      Fix program check on TIC as first ccw on RSCH - Jan Jaeger   */
 /*      Fix PCI intermediate status flags             - Jan Jaeger   */
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 /*      64-bit IDAW support - Roger Bowler v209                  @IWZ*/
 /*      Incorrect-length-indication-suppression - Jan Jaeger         */
 /*      Read backward support contributed by Hackules   13jun2002    */
@@ -22,7 +22,7 @@
 /*      MIDAW support - Roger Bowler                    03aug2005 @MW*/
 /*-------------------------------------------------------------------*/
 
-// $Log: channel.c,v $
+// $Log$
 // Revision 1.147  2008/11/04 05:56:30  fish
 // Put ensure consistent create_thread ATTR usage change back in
 //
@@ -1212,6 +1212,15 @@ void device_reset (DEVBLK *dev)
     dev->pciioint.pcipending = 1;
     dev->attnioint.dev = dev;
     dev->attnioint.attnpending = 1;
+
+#if defined(FEATURE_VM_BLOCKIO)
+    if (dev->vmd250env)
+    {
+       free(dev->vmd250env);
+       dev->vmd250env = 0 ;
+    }
+#endif /* defined(FEATURE_VM_BLOCKIO) */
+
     release_lock (&dev->lock);
 } /* end device_reset() */
 
@@ -1370,8 +1379,6 @@ int     current_priority;               /* Current thread priority   */
             SET_THREAD_NAME(thread_name);
 
             sysblk.ioq = dev->nextioq;
-            if (sysblk.ioq && sysblk.devtwait)
-                signal_condition(&sysblk.ioqcond);
             dev->tid = thread_id();
 
             /* Set priority to requested device priority */
@@ -1398,7 +1405,6 @@ int     current_priority;               /* Current thread priority   */
         /* Wait for work to arrive */
         sysblk.devtwait++;
         wait_condition (&sysblk.ioqcond, &sysblk.ioqlock);
-        sysblk.devtwait--;
     }
 
     sysblk.devtnbr--;
@@ -1468,9 +1474,9 @@ static void ARCH_DEP(raise_pci) (
     release_lock (&dev->lock);
 
     /* Update interrupt status */
-    OBTAIN_INTLOCK(dev->regs);
+    OBTAIN_INTLOCK(devregs(dev));
     UPDATE_IC_IOPENDING();
-    RELEASE_INTLOCK(dev->regs);
+    RELEASE_INTLOCK(devregs(dev));
 
 } /* end function raise_pci */
 
@@ -2164,9 +2170,9 @@ DLL_EXPORT int ARCH_DEP(device_attention) (DEVBLK *dev, BYTE unitstat)
     release_lock (&dev->lock);
 
     /* Update interrupt status */
-    OBTAIN_INTLOCK(dev->regs);
+    OBTAIN_INTLOCK(devregs(dev));
     UPDATE_IC_IOPENDING();
-    RELEASE_INTLOCK(dev->regs);
+    RELEASE_INTLOCK(devregs(dev));
 
     return 0;
 } /* end function device_attention */
@@ -2350,7 +2356,10 @@ DEVBLK *previoq, *ioq;                  /* Device I/O queue pointers */
         /* Signal a device thread if one is waiting, otherwise create
            a device thread if the maximum number hasn't been created */
         if (sysblk.devtwait)
+        {
+            sysblk.devtwait--;
             signal_condition(&sysblk.ioqcond);
+        }
         else if (sysblk.devtmax == 0 || sysblk.devtnbr < sysblk.devtmax)
         {
             rc = create_thread (&dev->tid, DETACHED,
@@ -2568,9 +2577,9 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         release_lock (&dev->lock);
 
         /* Update interrupt status */
-        OBTAIN_INTLOCK(dev->regs);
+        OBTAIN_INTLOCK(devregs(dev));
         UPDATE_IC_IOPENDING();
-        RELEASE_INTLOCK(dev->regs);
+        RELEASE_INTLOCK(devregs(dev));
 
         if (dev->ccwtrace || dev->ccwstep || tracethis)
             logmsg (_("HHCCP069I Device %4.4X initial status interrupt\n"),
@@ -2610,9 +2619,9 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             release_lock (&dev->lock);
 
             /* Update interrupt status */
-            OBTAIN_INTLOCK(dev->regs);
+            OBTAIN_INTLOCK(devregs(dev));
             UPDATE_IC_IOPENDING();
-            RELEASE_INTLOCK(dev->regs);
+            RELEASE_INTLOCK(devregs(dev));
 
             if (dev->ccwtrace || dev->ccwstep || tracethis)
                 logmsg (_("HHCCP070I Device %4.4X attention completed\n"),
@@ -2681,9 +2690,9 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             release_lock (&dev->lock);
 
             /* Update interrupt status */
-            OBTAIN_INTLOCK(dev->regs);
+            OBTAIN_INTLOCK(devregs(dev));
             UPDATE_IC_IOPENDING();
-            RELEASE_INTLOCK(dev->regs);
+            RELEASE_INTLOCK(devregs(dev));
 
             if (dev->ccwtrace || dev->ccwstep || tracethis)
                 logmsg (_("HHCCP071I Device %4.4X clear completed\n"),
@@ -2741,9 +2750,9 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
             release_lock (&dev->lock);
 
             /* Update interrupt status */
-            OBTAIN_INTLOCK(dev->regs);
+            OBTAIN_INTLOCK(devregs(dev));
             UPDATE_IC_IOPENDING();
-            RELEASE_INTLOCK(dev->regs);
+            RELEASE_INTLOCK(devregs(dev));
 
             if (dev->ccwtrace || dev->ccwstep || tracethis)
                 logmsg (_("HHCCP072I Device %4.4X halt completed\n"),
@@ -2902,9 +2911,9 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
                     /* Update interrupt status */
                     release_lock (&dev->lock);
-                    OBTAIN_INTLOCK(dev->regs);
+                    OBTAIN_INTLOCK(devregs(dev));
                     UPDATE_IC_IOPENDING();
-                    RELEASE_INTLOCK(dev->regs);
+                    RELEASE_INTLOCK(devregs(dev));
                     obtain_lock (&dev->lock);
                 }
 
@@ -3335,10 +3344,10 @@ resume_suspend:
     release_lock (&dev->lock);
 
     /* Present the interrupt */
-    OBTAIN_INTLOCK(dev->regs);
+    OBTAIN_INTLOCK(devregs(dev));
     if (dev->regs) dev->regs->hostregs->syncio = 0;
     UPDATE_IC_IOPENDING();
-    RELEASE_INTLOCK(dev->regs);
+    RELEASE_INTLOCK(devregs(dev));
 
     return NULL;
 
@@ -3462,7 +3471,7 @@ int     i;                              /* Interruption subclass     */
 /* I/O address and I/O interruption parameter (for channel subsystem)*/
 /* or the I/O address and CSW (for S/370 channels).                  */
 /* This routine does not perform a PSW switch.                       */
-/* The CSW pointer is NULL in the case of TPI`                       */
+/* The CSW pointer is NULL in the case of TPI.                       */
 /* The return value is the condition code for the TPI instruction:   */
 /* 0 if no allowable pending interrupt exists, otherwise 1.          */
 /* Note: The caller MUST hold the interrupt lock (sysblk.intlock).   */

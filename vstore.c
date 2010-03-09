@@ -1,10 +1,10 @@
 /* VSTORE.C */
 
-/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
+/* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: vstore.c,v 1.11 2007/06/23 00:04:19 ivan Exp $
+// $Id: vstore.c 5127 2009-01-23 13:25:01Z bernard $
 //
-// $Log: vstore.c,v $
+// $Log$
 // Revision 1.11  2007/06/23 00:04:19  ivan
 // Update copyright notices to include current year (2007)
 //

@@ -3,21 +3,10 @@
 # --------------------------------------------------------------------------
 # (c) Copyright Roger Bowler, 2005-2007
 # --------------------------------------------------------------------------
-# $Id: PCRE_DIR.msvc,v 1.2 2008/05/05 21:50:10 rbowler Exp $
+# $Id: PCRE_DIR.msvc 5407 2009-06-14 18:34:54Z fish $
 #
 #  Handles support for PCRE (Perl Compatible Regular Expressions),
-#  for MSVC, needed by HAO (Hercules Automatic Operator) facility...
-#
-#
-#                           CHANGE HISTORY
-# $Log: PCRE_DIR.msvc,v $
-# Revision 1.2  2008/05/05 21:50:10  rbowler
-# Default PCRE_DIR to winbuild/pcre if it exists
-#
-#
-# DD/MM/YY Description
-#
-# 26/12/06 Fish: created by extraction from existing makefile-dllmod.msvc
+#  for MSVC, needed by HAO (Hercules Automatic Operator) facility
 #
 # ***************************************************************************
 
@@ -32,19 +21,39 @@
 # DLL names are correct, making whatever adjustments may be necessary.
 # ---------------------------------------------------------------------
 
-!IFDEF PCRE_DIR
-!IF "$(PCRE_DIR)" == "NONE"
-!UNDEF PCRE_DIR
+!IFNDEF PCRE_DIR
+# Undefined: use default value, if it exists.
+# PCRE_DIR defaults to winbuild\pcre relative to current directory
+!IF "$(CPU)" == "i386" && EXIST(winbuild\pcre)
+PCRE_DIR = winbuild\pcre
+!ELSEIF "$(CPU)" == "AMD64" && EXIST(winbuild\pcre\x64)
+PCRE_DIR = winbuild\pcre\x64
+!ELSEIF "$(CPU)" == "IA64" && EXIST(winbuild\pcre\ia64)
+PCRE_DIR = winbuild\pcre\ia64
 !ENDIF
 !ELSE
-# PCRE_DIR defaults to winbuild\pcre relative to current directory
-!IF EXIST(winbuild\pcre)
-PCRE_DIR = winbuild\pcre
+# Defined: use explicit directory or subdirectory
+# unless "NONE" is specified or it doesn't exist.
+!IF "$(PCRE_DIR)" == "NONE"
+!UNDEF PCRE_DIR
+!ELSE
+!IF "$(CPU)" == "i386"
+!IF !EXIST($(PCRE_DIR))
+!UNDEF PCRE_DIR
+!ENDIF
+!ELSEIF "$(CPU)" == "AMD64"
+!IF EXIST($(PCRE_DIR)\x64)
+PCRE_DIR = $(PCRE_DIR)\x64
+!ENDIF
+!ELSEIF "$(CPU)" == "IA64"
+!IF EXIST($(PCRE_DIR)\ia64)
+PCRE_DIR = $(PCRE_DIR)\ia64
+!ENDIF
+!ENDIF
 !ENDIF
 !ENDIF
 
 !IFDEF PCRE_DIR
-
 PCRE_INCNAME  = pcreposix.h
 PCRE_LIBNAME1 = pcre.lib
 PCRE_LIBNAME2 = pcreposix.lib
@@ -56,7 +65,6 @@ PCRE_LIBPATH1 = $(PCRE_DIR)\lib\$(PCRE_LIBNAME1)
 PCRE_LIBPATH2 = $(PCRE_DIR)\lib\$(PCRE_LIBNAME2)
 PCRE_DLLPATH1 = $(PCRE_DIR)\bin\$(PCRE_DLLNAME1)
 PCRE_DLLPATH2 = $(PCRE_DIR)\bin\$(PCRE_DLLNAME2)
-
 !IF !EXIST("$(PCRE_INCPATH)")
 !ERROR PCRE_DIR "$(PCRE_INCPATH)" does not exist. Check PCRE_DIR
 !ELSEIF !EXIST("$(PCRE_LIBPATH1)")
@@ -68,9 +76,7 @@ PCRE_DLLPATH2 = $(PCRE_DIR)\bin\$(PCRE_DLLNAME2)
 !ELSEIF !EXIST("$(PCRE_DLLPATH2)")
 !ERROR PCRE_DIR "$(PCRE_DLLPATH2)" does not exist. Check PCRE_DIR
 !ENDIF
-
 !MESSAGE PCRE support will be included from "$(PCRE_DIR)" 
-
 !ELSE
 !MESSAGE PCRE support will not be generated
 !ENDIF

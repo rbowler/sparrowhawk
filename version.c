@@ -1,14 +1,20 @@
-/* VERSION.C    (c) Copyright Roger Bowler, 1999-2007                */
+/* VERSION.C    (c) Copyright Roger Bowler, 1999-2009                */
 /*              Hercules Version Display Module                      */
 
-// $Id: version.c,v 1.50 2007/12/07 12:50:22 rbowler Exp $
+// $Id: version.c 5480 2009-10-09 13:10:39Z fish $
 
 /*-------------------------------------------------------------------*/
 /* This module displays the Hercules program name, version, build    */
 /* date and time, and copyright notice to the indicated file.        */
 /*-------------------------------------------------------------------*/
 
-// $Log: version.c,v $
+// $Log$
+// Revision 1.52  2009/01/23 13:12:19  bernard
+// copyright notice
+//
+// Revision 1.51  2009/01/14 15:23:20  jj
+// Move modpath logic to hsccmd.c
+//
 // Revision 1.50  2007/12/07 12:50:22  rbowler
 // Show multi_byte assist status at startup
 //
@@ -33,16 +39,18 @@
 
 static const char *build_info[] = {
 
-#if defined(CUSTOM_BUILD_STRING)
-    CUSTOM_BUILD_STRING,
-#endif
-
 #if defined(_MSVC_)
-    "Win32 (MSVC) "
+    "Windows (MSVC) "
   #if defined(DEBUG)
     "** DEBUG ** "
   #endif
-    "build",
+    "build for " MSTRING(HOST_ARCH)
+  #if defined(CUSTOM_BUILD_STRING)
+    ": \"" CUSTOM_BUILD_STRING "\""
+  #endif
+    ,
+#elif defined(CUSTOM_BUILD_STRING)
+    CUSTOM_BUILD_STRING,
 #endif
 
 #if !defined(_ARCHMODE2)
@@ -84,9 +92,6 @@ static const char *build_info[] = {
 #endif
 #if defined(OPTION_DYNAMIC_LOAD)
     "Dynamic loading support",
-#if defined(MODULESDIR)
-    "Loadable module default base directory is "MODULESDIR,
-#endif
 #else
     "No Dynamic loading support",
 #endif
