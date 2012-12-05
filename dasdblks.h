@@ -1,7 +1,7 @@
 /* DASDBLKS.H   (c) Copyright Roger Bowler, 1999-2009                */
 /*              DASD control block structures                        */
 
-// $Id: dasdblks.h 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This header file contains definitions of OS Data Management       */

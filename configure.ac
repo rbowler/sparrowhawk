@@ -2,16 +2,16 @@
 # CONFIGURE.AC: Process this file with AutoConf to produce a configure script.
 ###############################################################################
 
-# $Id: configure.ac 5657 2010-03-07 12:22:25Z jmaynard $
+# $Id$
 
 #    AC is AutoConfigure, AM is AutoMake, and AH is AutoHeader. The
 #    'HC_XXXX..' macros are custom Hercules autoconf macros defined
 #    in the 'hercules.m4' file in the 'autoconf' subdirectory.
 
 AC_INIT(hercules.h)                     # (package, version, bugreport email, etc)
-AC_REVISION($Revision: 5657 $)          # (the version of this configure.ac)
+AC_REVISION($Revision$)          # (the version of this configure.ac)
 AC_CONFIG_AUX_DIR(autoconf)             # (directory containing auxillary build tools)
-AM_INIT_AUTOMAKE(hercules,3.07)         # (the version of our software package)
+AM_INIT_AUTOMAKE(hercules,3.08)         # (the version of our software package)
 AM_CONFIG_HEADER(config.h)              # (the file the resulting configure script will produce)
 AM_MAINTAINER_MODE()
 AC_CANONICAL_HOST()                     # (sets $host_cpu, $host_vendor, and $host_os)
@@ -255,7 +255,6 @@ AH_TEMPLATE( [BUILD_HERCIFC],           [Define if hercifc program is to be buil
 AH_TEMPLATE( [WIN32],                   [Define when building under Win32 (MinGW or Cygwin)] )
 AH_TEMPLATE( [EXTERNALGUI],             [Define to build interface to external Windows GUI] )
 AH_TEMPLATE( [OPTION_FTHREADS],         [Define to use included threads implementation (fthreads)] )
-AH_TEMPLATE( [FISH_HANG],               [Define to debug correct fthreads LOCK handling (requires fthreads)] )
 
 AH_TEMPLATE( [TIMESPEC_IN_TIME_H],      [Define if 'struct timespec' defined in <time.h>] )
 AH_TEMPLATE( [TIMESPEC_IN_SYS_TYPES_H], [Define if 'struct timespec' defined in <sys/types.h>] )
@@ -1384,7 +1383,7 @@ AC_ARG_ENABLE( external-gui,
 
     AC_HELP_STRING( [--disable-external-gui],
 
-        [disable external Windows GUI interface]
+        [disable external GUI interface]
     ),
     [
         case "${enableval}" in
@@ -1395,7 +1394,7 @@ AC_ARG_ENABLE( external-gui,
              ;;
         esac
     ],
-    [hc_cv_opt_external_gui=$hc_cv_is_windows]
+    [hc_cv_opt_external_gui=yes]
 )
 
 AC_ARG_ENABLE( fthreads,
@@ -1416,36 +1415,18 @@ AC_ARG_ENABLE( fthreads,
     [hc_cv_opt_fthreads=$hc_cv_is_windows]
 )
 
-AC_ARG_ENABLE( fishhang,
-
-    AC_HELP_STRING( [--enable-fishhang],
-
-        [debug correct lock handling (fthreads only)]
-    ),
-    [
-        case "${enableval}" in
-        yes) hc_cv_opt_fishhang=yes                      ;;
-        no)  hc_cv_opt_fishhang=no                       ;;
-        *)   AC_MSG_RESULT( [ERROR: invalid 'fishhang' option] )
-             hc_error=yes
-             ;;
-        esac
-    ],
-    [hc_cv_opt_fishhang=no]
-)
-
 AC_ARG_ENABLE( multi-cpu,
 
     AC_HELP_STRING( [--enable-multi-cpu=yes|no|NUMBER],
 
-        [enable/disable multi-cpu support (1-64, default 8)]
+        [enable/disable multi-cpu support (1-128, default 8)]
     ),
     [
         case "${enableval}" in
         yes)             hc_cv_opt_num_cpu_engines=8                  ;;
         no)              hc_cv_opt_num_cpu_engines=1                  ;;
         *)
-            if test 0 -lt "${enableval}" -a 64 -ge "${enableval}"
+            if test 0 -lt "${enableval}" -a 128 -ge "${enableval}"
             then
                 hc_cv_opt_num_cpu_engines=${enableval}
             else
@@ -1666,15 +1647,6 @@ fi
 
 #------------------------------------------------------------------------------
 
-if test "$hc_cv_opt_fishhang"  = "yes"  &&
-   test "$hc_cv_opt_fthreads" != "yes"; then
-
-   AC_MSG_RESULT( [ERROR: fishhang requires fthreads] )
-   hc_error=yes
-fi
-
-#------------------------------------------------------------------------------
-
 if test "$hc_cv_is_apple"                          = "yes"  &&
    test "$hc_cv_pp_macro_arg_counting_broke"       = "yes"  &&
    test "$hc_cv_traditional_cpp_is_K_AND_R_C_type" = "yes"; then
@@ -1878,7 +1850,6 @@ test "$hc_cv_opt_enhanced_configincludes" = "yes"  &&  AC_DEFINE(OPTION_ENHANCED
 test "$hc_cv_opt_auto_oper"               = "yes"  &&  AC_DEFINE(OPTION_HAO)
 test "$hc_cv_opt_dynamic_load"            = "yes"  &&  AC_DEFINE(OPTION_DYNAMIC_LOAD)
 test "$hc_cv_opt_fthreads"                = "yes"  &&  AC_DEFINE(OPTION_FTHREADS)
-test "$hc_cv_opt_fishhang"                = "yes"  &&  AC_DEFINE(FISH_HANG)
 test "$hc_cv_hdl_build_shared"            = "yes"  &&  AC_DEFINE(HDL_BUILD_SHARED)
 test "$hc_cv_have_lt_dlopen"              = "yes"  &&  AC_DEFINE(HDL_USE_LIBTOOL)
 test "$hc_cv_is_windows"                  = "yes"  &&  AC_DEFINE(WIN32)
@@ -1987,7 +1958,6 @@ AC_CACHE_SAVE()
 
 AM_CONDITIONAL( OPTION_DYNAMIC_LOAD, [ test "$hc_cv_opt_dynamic_load" = "yes" ] )
 AM_CONDITIONAL( BUILD_FTHREADS,      [ test "$hc_cv_opt_fthreads"     = "yes" ] )
-AM_CONDITIONAL( BUILD_FISHHANG,      [ test "$hc_cv_opt_fishhang"     = "yes" ] )
 AM_CONDITIONAL( BUILD_HERCIFC,       [ test "$hc_cv_build_hercifc"    = "yes" ] )
 AM_CONDITIONAL( SETUID_HERCIFC,      [ test "$hc_cv_setuid_hercifc"   = "yes" ] )
 AM_CONDITIONAL( HERCIFC_GROUPSET,    [ test "x$hc_cv_hercifc_groupname" != "x"] )

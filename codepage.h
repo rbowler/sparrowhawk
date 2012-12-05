@@ -1,7 +1,7 @@
 /* CODEPAGE.H   (c) Copyright Jan Jaeger, 1999-2009                  */
 /*              Code Page conversion                                 */
 
-// $Id: codepage.h 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.11  2007/06/23 00:04:04  ivan

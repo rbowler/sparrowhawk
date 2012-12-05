@@ -1,7 +1,7 @@
 /* Code borrowed from dasdpdsu Copyright 1999-2009 Roger Bowler      */
 /* Changes and additions Copyright 2001-2009, James M. Morrison      */
 
-// $Id: dasdseq.c 5608 2010-02-07 09:36:35Z fish $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /*                                                                   */

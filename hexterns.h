@@ -7,7 +7,7 @@
 //      The <config.h> header and other required headers are
 //      presumed to have already been #included ahead of it...
 
-// $Id: hexterns.h 5654 2010-03-07 03:15:17Z fish $
+// $Id$
 
 #ifndef _HEXTERNS_H
 #define _HEXTERNS_H
@@ -226,7 +226,7 @@ HPAN_DLL_IMPORT void update_maxrates_hwm(); // (update high-water-mark values)
 
 /* Functions in module hao.c (Hercules Automatic Operator) */
 #if defined(OPTION_HAO)
-HAO_DLL_IMPORT void hao_initialize(void);       /* initialize hao */
+HAO_DLL_IMPORT int hao_initialize(void);        /* initialize hao */
 HAO_DLL_IMPORT void hao_command(char *command); /* process hao command */
 HAO_DLL_IMPORT void hao_message(char *message); /* process message */
 #endif /* defined(OPTION_HAO) */
@@ -430,5 +430,10 @@ int  ecpsvm_virttmr_ext(REGS *regs);
 HSYS_DLL_IMPORT int  (*debug_tt32_stats)   (int);
 HSYS_DLL_IMPORT void (*debug_tt32_tracing) (int);
 #endif // defined(OPTION_W32_CTCI)
+
+/* Function in crypto.c */
+#if defined(_FEATURE_MESSAGE_SECURITY_ASSIST)
+void renew_wrapping_keys(void);
+#endif
 
 #endif // _HEXTERNS_H

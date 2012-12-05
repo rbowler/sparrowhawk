@@ -12,7 +12,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: scsitape.h 5126 2009-01-23 13:05:56Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.20  2008/03/25 11:41:31  fish
@@ -78,8 +78,7 @@ extern void  blockid_32_to_22( BYTE *in_32blkid, BYTE *out_22blkid );
 extern void  blockid_22_to_32( BYTE *in_22blkid, BYTE *out_32blkid );
 
 extern void  create_automount_thread( DEVBLK* dev );
-extern void *scsi_tapemountmon_thread( void* devblk );
-extern void  shutdown_worker_threads( DEVBLK *dev );
+extern void *scsi_tapemountmon_thread( void* notused );
 extern void  define_BOT_pos( DEVBLK *dev );
 
 // PROGRAMMING NOTE: I'm not sure of what the the actual/proper value
@@ -106,7 +105,7 @@ extern void  define_BOT_pos( DEVBLK *dev );
 
 // This is because I happened to notice on some systems with moderate
 // host (Windows) workload, etc, querying the status of the tape drive,
-// while *usally* only taking 4 - 6 milliseonds maximum, would sometimes
+// while *usually* only taking 4-6 milliseconds maximum, would sometimes
 // take up to 113 or more milliseconds! (thereby sometimes causing the
 // guest to experience intermittent/sporadic unsolicited ATTN interrupts
 // on the tape drive as their tape jobs ran (since "not mounted" status

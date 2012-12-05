@@ -5,7 +5,7 @@
 /* Prime Maintainer: Ivan Warren                                     */
 /* Secondary Maintainer: "Fish" (David B. Trout)                     */
 
-// $Id: tapeccws.c 5637 2010-02-16 15:25:07Z fish $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module contains the CCW handling functions for tape devices. */
@@ -451,17 +451,15 @@ int             len;                    /* Length of data block      */
 long            num;                    /* Number of bytes to read   */
 int             drc;                    /* code disposition          */
 BYTE            rustat;                 /* Addl CSW stat on Rewind Unload */
-static BYTE     supvr_inhibit  = 0;     /* Supvr-Inhibit mode active */
-static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
 
     UNREFERENCED(ccwseq);
 
     /* Reset flags at start of CCW chain */
     if (dev->ccwseq == 0)
     {
-        supvr_inhibit  = 0;             /* (reset to default mode)   */
-        write_immed    = 0;             /* (reset to default mode)   */
-        dev->tapssdlen = 0;             /* (clear all subsys data)   */
+        dev->supvr_inhibit = 0;         /* (reset to default mode)   */
+        dev->write_immed   = 0;         /* (reset to default mode)   */
+        dev->tapssdlen     = 0;         /* (clear all subsys data)   */
     }
 
     /* If this is a data-chained READ, then return any data remaining
@@ -666,7 +664,10 @@ static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
         *residual = 0;
 
         /* Perform flush/sync and/or set normal completion status */
-        if (!write_immed || (rc = dev->tmh->sync( dev, unitstat, code )) == 0)
+        if (0
+            || !dev->write_immed
+            || (rc = dev->tmh->sync( dev, unitstat, code )) == 0
+        )
             build_senseX( TAPE_BSENSE_STATUSONLY, dev, unitstat, code );
 
         break;
@@ -982,7 +983,10 @@ static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
             int_scsi_rewind_unload( dev, unitstat, code );
         else
 #endif
+        {
             dev->tmh->close(dev);
+            *unitstat=0;
+        }
 
         /* Update matrix display if needed */
         if ( TAPEDISPTYP_UNLOADING == dev->tapedisptype )
@@ -1110,7 +1114,7 @@ static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
 
         /* Perform flush/sync and/or set normal completion status */
         if (0
-            || !write_immed
+            || !dev->write_immed
             || (rc = dev->tmh->sync( dev, unitstat, code )) == 0
         )
             build_senseX( TAPE_BSENSE_STATUSONLY, dev, unitstat, code );
@@ -1155,7 +1159,7 @@ static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
 
         /* Perform flush/sync and/or set normal completion status */
         if (0
-            || !write_immed
+            || !dev->write_immed
             || (rc = dev->tmh->sync( dev, unitstat, code )) == 0
         )
             build_senseX( TAPE_BSENSE_STATUSONLY, dev, unitstat, code );
@@ -1348,7 +1352,7 @@ static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
         */
 
         /* Command Reject if Supervisor-Inhibit */
-        if (supvr_inhibit)
+        if (dev->supvr_inhibit)
         {
             build_senseX (TAPE_BSENSE_BADCOMMAND, dev, unitstat, code);
             break;
@@ -1553,7 +1557,7 @@ static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
         }
 
         /* Command Reject if Supervisor-Inhibit */
-        if (supvr_inhibit)
+        if (dev->supvr_inhibit)
         {
             build_senseX (TAPE_BSENSE_BADCOMMAND, dev, unitstat, code);
             break;
@@ -1694,7 +1698,7 @@ static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
         argv[0] = strdup( newfile );
 
         /* Attempt reinitializing the device using the new filename... */
-        rc = tapedev_init_handler( dev, argc, argv );
+        rc = (int)(dev->hnd->init)( dev, argc, argv );
 
         /* (free temp copy of parms to prevent memory leak) */
         for (i=0; i < argc; i++)
@@ -1922,7 +1926,7 @@ static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
         */
 
         /* Command Reject if Supervisor-Inhibit */
-        if (supvr_inhibit)
+        if (dev->supvr_inhibit)
         {
             build_senseX (TAPE_BSENSE_BADCOMMAND, dev, unitstat, code);
             break;
@@ -2009,7 +2013,7 @@ static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
         BYTE  parm   = iobuf[2];
 
         /* Command Reject if Supervisor-Inhibit */
-        if (supvr_inhibit)
+        if (dev->supvr_inhibit)
         {
             build_senseX (TAPE_BSENSE_BADCOMMAND, dev, unitstat, code);
             break;
@@ -2586,7 +2590,7 @@ static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
 
         /* Perform flush/sync and/or set normal completion status */
         if (0
-            || !write_immed
+            || !dev->write_immed
             || (rc = dev->tmh->sync( dev, unitstat, code )) == 0
         )
             build_senseX( TAPE_BSENSE_STATUSONLY, dev, unitstat, code );
@@ -2601,7 +2605,7 @@ static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
     case 0x9F:
     {
         /* Command Reject if Supervisor-Inhibit */
-        if (supvr_inhibit)
+        if (dev->supvr_inhibit)
         {
             build_senseX (TAPE_BSENSE_BADCOMMAND, dev, unitstat, code);
             break;
@@ -2690,7 +2694,7 @@ static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
         */
 
         /* Command Reject if Supervisor-Inhibit */
-        if (supvr_inhibit)
+        if (dev->supvr_inhibit)
         {
             build_senseX (TAPE_BSENSE_BADCOMMAND, dev, unitstat, code);
             break;
@@ -2759,7 +2763,7 @@ static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
     case 0xB7:
     {
         /* Command Reject if Supervisor-Inhibit */
-        if (supvr_inhibit)
+        if (dev->supvr_inhibit)
         {
             build_senseX (TAPE_BSENSE_BADCOMMAND, dev, unitstat, code);
             break;
@@ -2925,7 +2929,7 @@ static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
         INCREMENT_MESSAGEID(dev);
 
         /* set write-immedediate mode and perform sync function */
-        write_immed = 1;
+        dev->write_immed = 1;
         if ((rc = dev->tmh->sync( dev, unitstat, code )) == 0)
             build_senseX( TAPE_BSENSE_STATUSONLY, dev, unitstat, code );
         break;
@@ -2938,7 +2942,7 @@ static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
     case 0xC7:
     {
         /* Command Reject if Supervisor-Inhibit */
-        if (supvr_inhibit)
+        if (dev->supvr_inhibit)
         {
             build_senseX (TAPE_BSENSE_BADCOMMAND, dev, unitstat, code);
             break;
@@ -3059,7 +3063,7 @@ static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
            supvr-inhibit mode hasn't already been established */
         if (0
             || count < len
-            || supvr_inhibit
+            || dev->supvr_inhibit
         )
         {
             build_senseX(TAPE_BSENSE_BADCOMMAND,dev,unitstat,code);
@@ -3071,10 +3075,10 @@ static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
 
         /* Process request */
         if (iobuf[0] & MSET_SUPVR_INHIBIT)
-            supvr_inhibit = 1;              /* set supvr-inhibit mode*/
+            dev->supvr_inhibit = 1;         /* set supvr-inhibit mode*/
 
         if (iobuf[0] & MSET_WRITE_IMMED)
-            write_immed = 1;                /* set write-immed. mode */
+            dev->write_immed = 1;           /* set write-immed. mode */
 
         build_senseX(TAPE_BSENSE_STATUSONLY,dev,unitstat,code);
         break;
@@ -3114,7 +3118,7 @@ static BYTE     write_immed    = 0;     /* Write-Immed. mode active  */
         */
 
         /* Command Reject if Supervisor-Inhibit */
-        if (supvr_inhibit)
+        if (dev->supvr_inhibit)
         {
             build_senseX (TAPE_BSENSE_BADCOMMAND, dev, unitstat, code);
             break;
@@ -3751,33 +3755,16 @@ void build_sense_3410_3420 (int ERCode, DEVBLK *dev, BYTE *unitstat, BYTE ccwcod
     switch(ERCode)
     {
     case TAPE_BSENSE_TAPEUNLOADED:
-        switch(ccwcode)
-        {
-        case 0x01: // write
-        case 0x02: // read
-        case 0x0C: // read backward
-            *unitstat = CSW_CE | CSW_UC | (dev->tdparms.deonirq?CSW_DE:0);
-            break;
-        case 0x03: // nop
-            *unitstat = CSW_UC;
-            break;
-        case 0x0f: // rewind unload
-            /*
-            *unitstat = CSW_CE | CSW_UC | CSW_DE | CSW_CUE;
-            */
-            *unitstat = CSW_UC | CSW_DE | CSW_CUE;
-            break;
-        default:
-            *unitstat = CSW_CE | CSW_UC | CSW_DE;
-            break;
-        } // end switch(ccwcode)
+        *unitstat = CSW_UC;
         dev->sense[0] = SENSE_IR;
         dev->sense[1] = SENSE1_TAPE_TUB;
         break;
     case TAPE_BSENSE_RUN_SUCCESS: /* RewUnld op */
-        *unitstat = CSW_UC | CSW_DE | CSW_CUE;
-        /*
+        /* FIXME : CE Should have been presented before */
+        /*         Same as for 348x drives */
         *unitstat = CSW_CE | CSW_UC | CSW_DE | CSW_CUE;
+        /*
+        *unitstat = CSW_UC | CSW_DE | CSW_CUE;
         */
         dev->sense[0] = SENSE_IR;
         dev->sense[1] = SENSE1_TAPE_TUB;
@@ -3818,7 +3805,7 @@ void build_sense_3410_3420 (int ERCode, DEVBLK *dev, BYTE *unitstat, BYTE ccwcod
         break;
     case TAPE_BSENSE_BADCOMMAND:
     case TAPE_BSENSE_INCOMPAT:
-        *unitstat = CSW_CE|CSW_DE|CSW_UC;
+        *unitstat = CSW_UC;
         dev->sense[0] = SENSE_CR;
         dev->sense[4] = 0x01;
         break;
@@ -3851,6 +3838,8 @@ void build_sense_3410_3420 (int ERCode, DEVBLK *dev, BYTE *unitstat, BYTE ccwcod
     {
         dev->sense[0] |= SENSE_IR;
         dev->sense[1] |= SENSE1_TAPE_FP;
+        dev->sense[1] &= ~SENSE1_TAPE_TUA;
+        dev->sense[1] |= SENSE1_TAPE_TUB;
     }
     else
     {
@@ -3858,6 +3847,8 @@ void build_sense_3410_3420 (int ERCode, DEVBLK *dev, BYTE *unitstat, BYTE ccwcod
         dev->sense[1] |= IsAtLoadPoint( dev ) ? SENSE1_TAPE_LOADPT : 0;
         dev->sense[1] |= dev->readonly || dev->tdparms.logical_readonly ?
             SENSE1_TAPE_FP : 0;
+        dev->sense[1] |= SENSE1_TAPE_TUA;
+        dev->sense[1] &= ~SENSE1_TAPE_TUB;
     }
     if (dev->tmh->passedeot(dev))
     {
@@ -3905,7 +3896,7 @@ void build_sense_3420 (int ERCode, DEVBLK *dev, BYTE *unitstat, BYTE ccwcode)
 /*-------------------------------------------------------------------*/
 void build_sense_3480_etal (int ERCode,DEVBLK *dev,BYTE *unitstat,BYTE ccwcode)
 {
-int sns4mat = 0x20;
+int sns4mat = TAPE_SNS7_FMT_20_3480;
 
     // NOTE: caller should have cleared sense area to zeros
     //       if this isn't a 'TAPE_BSENSE_STATUSONLY' call
@@ -3913,123 +3904,119 @@ int sns4mat = 0x20;
     switch(ERCode)
     {
     case TAPE_BSENSE_TAPEUNLOADED:
-        switch(ccwcode)
-        {
-        case 0x01: // write
-        case 0x02: // read
-        case 0x0C: // read backward
-            *unitstat = CSW_CE | CSW_UC;
-            break;
-        case 0x03: // nop
-            *unitstat = CSW_UC;
-            break;
-        case 0x0f: // rewind unload
-            *unitstat = CSW_CE | CSW_UC | CSW_DE | CSW_CUE;
-            break;
-        default:
-            *unitstat = CSW_CE | CSW_UC | CSW_DE;
-            break;
-        } // end switch(ccwcode)
-        dev->sense[0] = SENSE_IR;
-        dev->sense[3] = 0x43; /* ERA 43 = Int Req */
+        dev->sense[0] = TAPE_SNS0_INTVREQ;
+        dev->sense[3] = TAPE_ERA_DRIVE_NOT_READY; /* ERA 43 = Int Req */
+        *unitstat = CSW_UC;
         break;
     case TAPE_BSENSE_RUN_SUCCESS:        /* Not an error */
-        *unitstat = CSW_CE|CSW_DE;
-        dev->sense[0] = SENSE_IR;
-        dev->sense[3] = 0x2B;
-        sns4mat = 0x21;
+        /* NOT an error, But according to GA32-0219-02 2.1.2.2
+           Rewind Unload always ends with with DE+UC on secondary status */
+        /* FIXME! */
+        /* Note that Initial status & Secondary statuses are merged here */
+        /* when they should be presented separatly */
+        *unitstat = CSW_CE|CSW_DE|CSW_UC;
+        dev->sense[0] = TAPE_SNS0_INTVREQ;
+        dev->sense[3] = TAPE_ERA_ENVIRONMENTAL_DATA_PRESENT;
+        sns4mat = TAPE_SNS7_FMT_22_3480_EOV_STATS;
         break;
     case TAPE_BSENSE_TAPELOADFAIL:
         *unitstat = CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0] = SENSE_IR|0x02;
-        dev->sense[3] = 0x33; /* ERA 33 = Load Failed */
+        dev->sense[0] = TAPE_SNS0_INTVREQ|TAPE_SNS0_DEFUNITCK;
+        dev->sense[3] = TAPE_ERA_LOAD_FAILURE; /* ERA 33 = Load Failed */
         break;
     case TAPE_BSENSE_READFAIL:
         *unitstat = CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0] = SENSE_DC;
-        dev->sense[3] = 0x23;
+        dev->sense[0] = TAPE_SNS0_DATACHK;
+        dev->sense[3] = TAPE_ERA_READ_DATA_CHECK;
         break;
     case TAPE_BSENSE_WRITEFAIL:
         *unitstat = CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0] = SENSE_DC;
-        dev->sense[3] = 0x25;
+        dev->sense[0] = TAPE_SNS0_DATACHK;
+        dev->sense[3] = TAPE_ERA_WRITE_DATA_CHECK;
         break;
     case TAPE_BSENSE_BADCOMMAND:
-        *unitstat = CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0] = SENSE_CR;
-        dev->sense[3] = 0x27;
+        *unitstat = CSW_UC;
+        dev->sense[0] = TAPE_SNS0_CMDREJ;
+        dev->sense[3] = TAPE_ERA_COMMAND_REJECT;
         break;
     case TAPE_BSENSE_INCOMPAT:
         *unitstat = CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0] = SENSE_CR;
-        dev->sense[3] = 0x29;
+        dev->sense[0] = TAPE_SNS0_CMDREJ;
+        dev->sense[3] = TAPE_ERA_FUNCTION_INCOMPATIBLE;
         break;
     case TAPE_BSENSE_WRITEPROTECT:
         *unitstat = CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0] = SENSE_CR;
-        dev->sense[3] = 0x30;
+        dev->sense[0] = TAPE_SNS0_CMDREJ;
+        dev->sense[3] = TAPE_ERA_WRITE_PROTECTED;
         break;
     case TAPE_BSENSE_EMPTYTAPE:
         *unitstat = CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0] = SENSE_DC;
-        dev->sense[3] = 0x31;
+        dev->sense[0] = TAPE_SNS0_DATACHK;
+        dev->sense[3] = TAPE_ERA_TAPE_VOID;
         break;
     case TAPE_BSENSE_ENDOFTAPE:
         *unitstat = CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0] = SENSE_EC;
-        dev->sense[3] = 0x38;
+        dev->sense[0] = TAPE_SNS0_EQUIPCHK;
+        dev->sense[3] = TAPE_ERA_PHYSICAL_END_OF_TAPE;
         break;
     case TAPE_BSENSE_LOADPTERR:
         *unitstat = CSW_CE|CSW_DE|CSW_UC;
         dev->sense[0] = 0;
-        dev->sense[3] = 0x39;
+        dev->sense[3] = TAPE_ERA_BACKWARD_AT_BOT;
         break;
     case TAPE_BSENSE_FENCED:
         *unitstat = CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0] = SENSE_EC|0x02; /* Deffered UC */
-        dev->sense[3] = 0x47;
+        dev->sense[0] = TAPE_SNS0_EQUIPCHK|TAPE_SNS0_DEFUNITCK; /* Deffered UC */
+        dev->sense[3] = TAPE_ERA_VOLUME_FENCED;
         break;
     case TAPE_BSENSE_BADALGORITHM:
         *unitstat = CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0] = SENSE_EC;
+        dev->sense[0] = TAPE_SNS0_EQUIPCHK;
         if (dev->devtype==0x3480)
         {
-            dev->sense[3] = 0x47;   // (volume fenced)
+            dev->sense[3] = TAPE_ERA_VOLUME_FENCED;   // (volume fenced)
         }
         else // 3490, 3590, etc.
         {
-            dev->sense[3] = 0x5E;   // (bad compaction algorithm)
+            dev->sense[3] = TAPE_ERA_COMPACT_ALGORITHM_INCOMPAT;   // (bad compaction algorithm)
         }
         break;
     case TAPE_BSENSE_LOCATEERR:
         *unitstat = CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0] = SENSE_EC;
-        dev->sense[3] = 0x44;
+        dev->sense[0] = TAPE_SNS0_EQUIPCHK;
+        dev->sense[3] = TAPE_ERA_LOCATE_BLOCK_FAILED;
         break;
     case TAPE_BSENSE_BLOCKSHORT:
         *unitstat = CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0] = SENSE_EC;
-        dev->sense[3] = 0x36;
+        dev->sense[0] = TAPE_SNS0_EQUIPCHK;
+        dev->sense[3] = TAPE_ERA_END_OF_DATA;
         break;
     case TAPE_BSENSE_ITFERROR:
         *unitstat = CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0] = SENSE_EC;
-        dev->sense[3] = 0x22;
+        dev->sense[0] = TAPE_SNS0_EQUIPCHK;
+        dev->sense[3] = TAPE_ERA_PATH_EQUIPMENT_CHECK;
         break;
     case TAPE_BSENSE_REWINDFAILED:
         *unitstat = CSW_CE|CSW_DE|CSW_UC;
-        dev->sense[0] = SENSE_EC;
-        dev->sense[3] = 0x2C; /* Generic Equipment Malfunction ERP code */
+        dev->sense[0] = TAPE_SNS0_EQUIPCHK;
+        dev->sense[3] = TAPE_ERA_PERMANENT_EQUIPMENT_CHECK; /* Generic Equipment Malfunction ERP code */
         break;
     case TAPE_BSENSE_READTM:
         *unitstat = CSW_CE|CSW_DE|CSW_UX;
         break;
     case TAPE_BSENSE_UNSOLICITED:
         *unitstat = CSW_CE|CSW_DE;
-        dev->sense[3] = 0x00;
+        dev->sense[3] = TAPE_ERA_UNSOLICITED_SENSE;
         break;
     case TAPE_BSENSE_STATUSONLY:
     default:
+        if ( ccwcode == 0x24 )      // READ BUFFERED LOG
+        {
+            if ( dev->tdparms.compress == 0 )
+                sns4mat = TAPE_SNS7_FMT_21_3480_READ_BUF_LOG;
+            else
+                sns4mat = TAPE_SNS7_FMT_30_3480_READ_BUF_LOG;
+        }
         *unitstat = CSW_CE|CSW_DE;
         break;
     } // end switch(ERCode)
@@ -4039,32 +4026,62 @@ int sns4mat = 0x20;
 
     /* Fill in the common sense information */
 
-    switch(sns4mat)
+    if ( sns4mat == TAPE_SNS7_FMT_20_3480              ||
+         sns4mat == TAPE_SNS7_FMT_21_3480_READ_BUF_LOG || 
+         sns4mat == TAPE_SNS7_FMT_22_3480_EOV_STATS    ||
+         sns4mat == TAPE_SNS7_FMT_30_3480_READ_BUF_LOG )
     {
-        default:
-        case 0x20:
-        case 0x21:
-            dev->sense[7] = sns4mat;
-            memset(&dev->sense[8],0,31-8);
-            break;
-    } // end switch(sns4mat)
+        dev->sense[7] = sns4mat;
+        memset(&dev->sense[8],0,31-8);
+    
+        if ( sns4mat == TAPE_SNS7_FMT_20_3480 )
+        {
+            dev->sense[25] = 0x06;                  // IDRC Installed & Upgraded Buffer
+            if ( sysblk.tamdir != NULL )            // is AUTOLOADER ENABLED
+            {
+                dev->sense[25] |= 0x01;             // ACL is installed
+            }
+        }
+
+        if ( dev->devtype == 0x3480 )
+        {
+            dev->sense[27] = 0xf0;                  // indicate 3480-A22/B22
+        }
+        else if ( dev->devtype==0x3490 )
+        {
+            dev->sense[27] = 0xe0;                  // indicate 3490-D31/D32
+        }
+        else if ( dev->devtype==0x3590 )
+        {
+            dev->sense[27] = 0xe0;                  // indicate same as 3490 for now
+        }
+        else ;
+
+        /* create a serial Number */
+        dev->sense[27] |= 0x0C;
+        dev->sense[28] = (BYTE)( ( dev->devnum >> 12 ) & 0xFF );
+        dev->sense[29] = (BYTE)( ( dev->devnum >>  4 ) & 0xFF );
+
+        dev->sense[30] = (BYTE)( dev->devnum & 0x000F ) | ( (BYTE)((BYTE)( dev->devnum & 0x000F )) << 4 );    
+    }
 
     if (strcmp(dev->filename,TAPE_UNLOADED) == 0
         || !dev->tmh->tapeloaded(dev,NULL,0))
     {
-        dev->sense[0] |= SENSE_IR;
-        dev->sense[1] |= SENSE1_TAPE_FP;
+        dev->sense[0] |= TAPE_SNS0_INTVREQ;
+        dev->sense[1] |= TAPE_SNS1_FILEPROT;
     }
     else
     {
-        dev->sense[0] &= ~SENSE_IR;
-        dev->sense[1] &= ~(SENSE1_TAPE_LOADPT|SENSE1_TAPE_FP);
-        dev->sense[1] |= IsAtLoadPoint( dev ) ? SENSE1_TAPE_LOADPT : 0;
+        dev->sense[0] &= ~TAPE_SNS0_INTVREQ;
+        dev->sense[1] &= ~(TAPE_SNS1_BOT|TAPE_SNS1_FILEPROT);
+        dev->sense[1] |= IsAtLoadPoint( dev ) ? TAPE_SNS1_BOT : 0;
         dev->sense[1] |= dev->readonly || dev->tdparms.logical_readonly ?
-            SENSE1_TAPE_FP : 0;
+            TAPE_SNS1_FILEPROT : 0;
     }
 
-    dev->sense[1] |= SENSE1_TAPE_TUA;
+    dev->sense[1] |= TAPE_SNS1_ONLINE;
+    dev->sense[2] |= TAPE_SNS2_REPORTING_CHAN_A;
 
 } /* end function build_sense_3480_etal */
 
@@ -4076,7 +4093,7 @@ void build_sense_3490 (int ERCode, DEVBLK *dev, BYTE *unitstat, BYTE ccwcode)
     // Until we know for sure that we have to do something different,
     // we should be able to safely use the 3480 sense function here...
 
-    build_sense_3480_etal ( ERCode, dev, unitstat, ccwcode );
+    build_sense_3480_etal( ERCode, dev, unitstat, ccwcode );
 }
 
 /*-------------------------------------------------------------------*/
@@ -4084,10 +4101,33 @@ void build_sense_3490 (int ERCode, DEVBLK *dev, BYTE *unitstat, BYTE ccwcode)
 /*-------------------------------------------------------------------*/
 void build_sense_3590 (int ERCode, DEVBLK *dev, BYTE *unitstat, BYTE ccwcode)
 {
+    unsigned char ERA;
     // Until we know for sure that we have to do something different,
     // we should be able to safely use the 3480 sense function here...
 
-    build_sense_3480_etal ( ERCode, dev, unitstat, ccwcode );
+    build_sense_3480_etal( ERCode, dev, unitstat, ccwcode );
+
+    ERA = dev->sense[3];
+    switch ( ERA )
+    {
+    case TAPE_ERA_LOAD_DISPLAY_CHECK:
+    case TAPE_ERA_ENVIRONMENTAL_DATA_PRESENT:
+    case TAPE_ERA_READ_BUFFERED_LOG:
+    case TAPE_ERA_END_OF_VOLUME_PROCESSING:
+    case TAPE_ERA_END_OF_VOLUME_COMPLETE:
+        dev->sense[2] |= TAPE_SNS2_NTP_BRAC_01_CONTINUE;
+        break;
+    case TAPE_ERA_DATA_STREAMING_NOT_OPER:
+    case TAPE_ERA_UNSOL_ENVIRONMENTAL_DATA:
+    case TAPE_ERA_DEGRADED_MODE:
+    case TAPE_ERA_RECOVERED_CHECKONE_FAILURE:
+    case TAPE_ERA_CONTROLLING_COMP_RETRY_REQ:
+        dev->sense[2] |= TAPE_SNS2_NTP_BRAC_10_REISSUE;
+        break;
+    default:
+        dev->sense[2] |= TAPE_SNS2_NTP_BRAC_00_PERM_ERR;
+        break;
+    }
 }
 
 /*-------------------------------------------------------------------*/
@@ -4102,31 +4142,12 @@ void build_sense_Streaming (int ERCode, DEVBLK *dev, BYTE *unitstat, BYTE ccwcod
     switch(ERCode)
     {
     case TAPE_BSENSE_TAPEUNLOADED:
-        switch(ccwcode)
-        {
-        case 0x01: // write
-        case 0x02: // read
-        case 0x0C: // read backward
-            *unitstat = CSW_CE | CSW_UC | (dev->tdparms.deonirq?CSW_DE:0);
-            break;
-        case 0x03: // nop
-            *unitstat = CSW_UC;
-            break;
-        case 0x0f: // rewind unload
-            /*
-            *unitstat = CSW_CE | CSW_UC | CSW_DE | CSW_CUE;
-            */
-            *unitstat = CSW_UC | CSW_DE | CSW_CUE;
-            break;
-        default:
-            *unitstat = CSW_CE | CSW_UC | CSW_DE;
-            break;
-        } // end switch(ccwcode)
+        *unitstat = CSW_UC;
         dev->sense[0] = SENSE_IR;
         dev->sense[3] = 6;        /* Int Req ERAC */
         break;
     case TAPE_BSENSE_RUN_SUCCESS: /* RewUnld op */
-        *unitstat = CSW_UC | CSW_DE | CSW_CUE;
+        *unitstat = CSW_UC | CSW_CE | CSW_DE | CSW_CUE;
         /*
         *unitstat = CSW_CE | CSW_UC | CSW_DE | CSW_CUE;
         */
@@ -4164,7 +4185,7 @@ void build_sense_Streaming (int ERCode, DEVBLK *dev, BYTE *unitstat, BYTE ccwcod
     case TAPE_BSENSE_BADCOMMAND:
         dev->sense[0] = SENSE_CR;
         dev->sense[3] = 0x0C;     /* Bad Command */
-        *unitstat = CSW_CE|CSW_DE|CSW_UC;
+        *unitstat = CSW_UC;
         break;
     case TAPE_BSENSE_WRITEPROTECT:
         dev->sense[0] = SENSE_CR;
@@ -4364,7 +4385,7 @@ void BuildTapeSense( BYTE era, DEVBLK *dev, BYTE *unitstat, BYTE ccwcode )
         break;
 
     case TAPE_ERA_UNSOL_ENVIRONMENTAL_DATA:     // ERA 2A
-        
+
         fmt = 0x21;
         break;
 
@@ -4385,12 +4406,12 @@ void BuildTapeSense( BYTE era, DEVBLK *dev, BYTE *unitstat, BYTE ccwcode )
         break;
 
     case TAPE_ERA_END_OF_VOLUME_COMPLETE:       // ERA 52
-        
+
         fmt = 0x22;
         break;
 
     case TAPE_ERA_FORMAT_3480_2_XF_INCOMPAT:    // ERA 5C
-        
+
         fmt = 0x24;
         break;
 

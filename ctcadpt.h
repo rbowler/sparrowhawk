@@ -5,7 +5,7 @@
 // Copyright (C) 2002-2009 by James A. Pierson    (original author)
 // Copyright (C) 2002-2009 by David B. Trout      (current maintainer)
 
-// $Id: ctcadpt.h 5497 2009-10-27 20:17:03Z fish $
+// $Id$
 //
 // $Log$
 // Revision 1.27  2008/08/19 21:36:37  fish

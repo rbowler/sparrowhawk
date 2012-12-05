@@ -4,7 +4,7 @@
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: esa390.h 5631 2010-02-14 22:26:40Z rbowler $
+// $Id$
 
 #ifndef _ESA390_H
 #define _ESA390_H
@@ -203,6 +203,8 @@ typedef struct _DAT {
       } DAT;
 
 /* Bit definitions for control register 0 */
+#define CR0_MCX_AUTH    0x0001000000000000 /* Measurement Counter 
+                                           Extraction Authority      */
 #define CR0_BMPX        0x80000000      /* Block multiplex ctl  S/370*/
 #define CR0_SSM_SUPP    0x40000000      /* SSM suppression control   */
 #define CR0_TOD_SYNC    0x20000000      /* TOD clock sync control    */
@@ -217,7 +219,7 @@ typedef struct _DAT {
 #define CR0_PAGE_SIZE   0x00C00000      /* Page size for S/370...    */
 #define CR0_PAGE_SZ_2K  0x00400000      /* ...2K pages               */
 #define CR0_PAGE_SZ_4K  0x00800000      /* ...4K pages               */
-#define CR0_ZPAG_SZ_1M  0x00800000      /* ...1M pages           EDAT*/
+#define CR0_ED          0x00800000      /* Enhanced DAT enable  ESAME*/
 #define CR0_SEG_SIZE    0x00380000      /* Segment size for S/370... */
 #define CR0_SEG_SZ_64K  0x00000000      /* ...64K segments           */
 #define CR0_SEG_SZ_1M   0x00100000      /* ...1M segments            */
@@ -235,6 +237,7 @@ typedef struct _DAT {
 #define CR0_XM_ITIMER   0x00000080      /* Interval timer mask  S/370*/
 #define CR0_XM_INTKEY   0x00000040      /* Interrupt key mask        */
 #define CR0_XM_EXTSIG   0x00000020      /* External signal mask S/370*/
+#define CR0_XM_MALERT   0x00000020      /* Measurement alert mask    */
 #define CR0_XM_ETR      0x00000010      /* External timer mask       */
 #define CR0_PC_FAST     0x00000008      /* PC fast control        390*/
 #define CR0_CRYPTO      0x00000004      /* Crypto control       ESAME*/
@@ -275,6 +278,7 @@ typedef struct _DAT {
 /* CR7 is the secondary segment table descriptor or secondary ASCE */
 
 /* Bit definitions for control register 8 */
+#define CR8_ENHMCMASK   0x0000FFFF00000000ULL /* Enh Monitor masks   */
 #define CR8_EAX         0xFFFF0000      /* Extended auth index       */
 #define CR8_MCMASK      0x0000FFFF      /* Monitor masks             */
 
@@ -757,8 +761,9 @@ typedef struct _PSA_900 {               /* Prefixed storage area     */
 /*00F0*/ FWORD  mckext;                 /* Machine check int code ext*/
 /*00F4*/ FWORD  xdmgcode;               /* External damage code      */
 /*00F8*/ DBLWRD mcstorad;               /* Failing storage address   */
-/*0100*/ DBLWRD resv0100;               /* Reserved                  */
-/*0108*/ DBLWRD resv0108;               /* Reserved                  */
+/*0100*/ DBLWRD cao;                    /* Enh Mon Counter Array Orig*/
+/*0108*/ FWORD  cal;                    /* Enh Mon Counter Array Len */
+/*010C*/ FWORD  ec;                     /* Enh Mon Exception Count   */
 /*0110*/ DBLWRD bea;                    /* Breaking event address @Z9*/
 /*0118*/ DBLWRD resv0118;               /* Reserved                  */
 /*0120*/ QWORD  rstold;                 /* Restart old PSW           */
@@ -792,6 +797,8 @@ typedef struct _PSA_900 {               /* Prefixed storage area     */
 
 /* Bit settings for translation exception address */
 #define TEA_SECADDR     0x80000000      /* Secondary addr (370,390)  */
+#define TEA_FETCH       0x800           /* Fetch exception        810*/
+#define TEA_STORE       0x400           /* Store exception        810*/
 #define TEA_PROT_A      0x008           /* Access-list prot (ESAME)  */
 #define TEA_PROT_AP     0x004           /* Access-list/page protected*/
 #define TEA_MVPG        0x004           /* MVPG exception (ESAME)    */
@@ -943,6 +950,7 @@ typedef struct _PSA_900 {               /* Prefixed storage area     */
 #define EXT_EMERGENCY_SIGNAL_INTERRUPT                  0x1201
 #define EXT_EXTERNAL_CALL_INTERRUPT                     0x1202
 #define EXT_ETR_INTERRUPT                               0x1406
+#define EXT_MEASUREMENT_ALERT_INTERRUPT                 0x1407
 #define EXT_SERVICE_SIGNAL_INTERRUPT                    0x2401
 #define EXT_IUCV_INTERRUPT                              0x4000
 #if defined(FEATURE_ECPSVM)
@@ -957,7 +965,6 @@ typedef struct _PSA_900 {               /* Prefixed storage area     */
 #define IS_CCW_READ(c)          (((c)&0x03)==0x02)
 #define IS_CCW_CONTROL(c)       (((c)&0x03)==0x03)
 #define IS_CCW_NOP(c)           ((c)==0x03)
-#define IS_CCW_SET_EXTENDED(c)  ((c)==0xC3)
 #define IS_CCW_SENSE(c)         (((c)&0x0F)==0x04)
 #define IS_CCW_TIC(c)           (((c)&0x0F)==0x08)
 #define IS_CCW_RDBACK(c)        (((c)&0x0F)==0x0C)
@@ -1036,12 +1043,13 @@ typedef struct _PMCW {
 #define PMCW5_V         0x01            /* Subchannel valid          */
 
 /* Bit definitions for PMCW flag byte 25 */
-#define PMCW25_VISC     0x1F            /* Guest ISC                 */
+#define PMCW25_VISC     0x07            /* Guest ISC                 */
 #define PMCW25_TYPE     0xE0            /* Subchannel Type           */
 #define PMCW25_TYPE_0   0x00            /* I/O Subchannel            */
 #define PMCW25_TYPE_1   0x20            /* CHSC subchannel           */
 #define PMCW25_TYPE_2   0x40            /* Message subchannel        */
 #define PMCW25_TYPE_3   0x60            /* ADM subchannel            */
+#define PMCW25_RESV     0x18            /* Reserved bits             */
 
 
 /* Bit definitions for PMCW flag byte 27 */
@@ -1288,6 +1296,22 @@ typedef struct _MBK {
 #define PLO_CSTSTGR             22      /* C/S/TS              ESAME */
 #define PLO_CSTSTX              23      /* C/S/TS              ESAME */
 
+/* Perform Frame Management Function definitions */
+#define PFMF_FMFI            0x000f0000 
+#define PFMF_FMFI_RESV       0x000c0000 /* Reserved must be zero     */
+#define PFMF_FMFI_SK         0x00020000 /* Set-Key Control           */
+#define PFMF_FMFI_CF         0x00010000 /* Clear-Frame Control       */
+#define PFMF_FMFI_UI         0x00008000 /* Usage Indication          */
+#define PFMF_FMFI_FSC        0x00007000 /* Frame-Size Code           */
+#define PFMF_FMFI_FSC_4K     0x00000000 /* 4K                        */
+#define PFMF_FMFI_FSC_1M     0x00001000 /* 1M                        */
+#define PFMF_FMFI_FSC_RESV   0x00006000 /* Reserved                  */
+#define PFMF_FMFI_NQ         0x00000800 /* Quiesce (SK must be one)  */
+#define PFMF_FMFI_MR         0x00000400 /* Reference Bit Update Mask */
+#define PFMF_FMFI_MC         0x00000200 /* Change Bit Update Mask    */
+#define PFMF_FMFI_KEY        0x000000F7 /* Storage Key               */
+#define PFMF_RESERVED        0xFFF00101 /* Reserved                  */
+
 /* Bit definitions for Store Facilities List instruction */
 /* Byte STFL_0: STFL/STFLE bits 0-7 */
 #define STFL_0_N3               0x80    /* Instructions marked N3 in
@@ -1315,6 +1339,10 @@ typedef struct _MBK {
                                            is installed           407*/
 #define STFL_1_CONFIG_TOPOLOGY  0x10    /* STSI-enhancement for
                                            configuration topology    */
+#define STFL_1_IPTE_RANGE       0x04    /* IPTE-Range facility      810
+                                           installed              810*/
+#define STFL_1_NONQ_KEY_SET     0x02    /* Nonquiescing Key-Setting 810
+                                           Facility installed     810*/
 /* Byte STFL_2: STFL/STFLE bits 16-23 */
 #define STFL_2_TRAN_FAC2        0x80    /* Extended translation
                                            facility 2 is installed   */
@@ -1356,8 +1384,12 @@ typedef struct _MBK {
                                            facility is installed  208*/
 #define STFL_4_EXECUTE_EXTN     0x10    /* Execute-Extensions     208
                                            facility is installed  208*/
+#define STFL_4_ENH_MONITOR      0x08    /* Enhanced-Monitor
+                                           facility installed     810*/
+#define STFL_4_FP_EXTENSION     0x04    /* Floating-point extension
+                                           facility installed     810*/
 /* Byte STFL_5: STFLE bits 40-47 */
-#define STFL_5_SET_PROG_PARAM   0x80    /* 40:Set-Program-Parameter
+#define STFL_5_LOAD_PROG_PARAM  0x80    /* Load-Program-Parameter
                                            facility installed (ESAME)*/
 #define STFL_5_FPS_ENHANCEMENT  0x40    /* Floating point support
                                            enhancements (FPR-GR-loading
@@ -1367,13 +1399,26 @@ typedef struct _MBK {
                                            (DFP) facility            */
 #define STFL_5_DFP_HPERF        0x10    /* DFP has high performance  */
 #define STFL_5_PFPO             0x08    /* PFPO instruction installed*/
+#define STFL_5_FAST_BCR_SERIAL  0x04    /* Fast-BCR-serialization
+                                           Facility installed     810*/
+#define STFL_5_CMPSC_ENH        0x01    /* CMPSC-enhancement
+                                           Facility installed     810*/
 /* Byte STFL_6: STFLE bits 48-55 */
 /* Byte STFL_7: STFLE bits 56-63 */
 /* Byte STFL_8: STFLE bits 64-71 */
-#define STFL_8_CPU_MEAS_COUNTER 0x10    /* 67:CPU-measurement counter
+#define STFL_8_RES_REF_BITS_MUL 0x20    /* Reset-Reference-Bits-Multiple
+                                           Facility installed 810*/
+#define STFL_8_CPU_MEAS_COUNTER 0x10    /* CPU-measurement counter
                                            facility installed (ESAME)*/
-#define STFL_8_CPU_MEAS_SAMPLNG 0x08    /* 68:CPU-measurement sampling
+#define STFL_8_CPU_MEAS_SAMPLNG 0x08    /* CPU-measurement sampling
                                            facility installed (ESAME)*/
+/* Byte STFL_9: STFLE bits 72-79 */
+#define STFL_9_ACC_EX_FS_INDIC  0x10    /* Access-exception fetch/store
+                                           indication facility    810*/
+#define STFL_9_MSA_EXTENSION_3  0x08    /* Message Security Assist
+                                           Extension 3 installed  810*/
+#define STFL_9_MSA_EXTENSION_4  0x04    /* Message Security Assist
+                                           Extension 4 installed  810*/
 
 /* Bit definitions for the Vector Facility */
 #define VSR_M    0x0001000000000000ULL  /* Vector mask mode bit      */
@@ -1457,6 +1502,7 @@ typedef struct _SIE1BK {                /* SIE State Descriptor      */
 #define SIE_IC0_OPEREX  0x80            /* Intercept operation exc.  */
 #define SIE_IC0_PRIVOP  0x40            /* Intercept priv. op. exc.  */
 #define SIE_IC0_PGMALL  0x20            /* Intercept program ints    */
+#define SIE_IC0_STFL    0x10            /* Intercept STFL/STFLE      */
 #define SIE_IC0_TS1     0x08            /* Intercept TS cc1          */
 #define SIE_IC0_CS1     0x04            /* Intercept CS cc1          */
 #define SIE_IC0_CDS1    0x02            /* Intercept CDS cc1         */
@@ -1874,6 +1920,21 @@ typedef struct _ZPB2 {
 #define ZPB2_ES_VALID 0x00FFFFFFFFFFFFFFULL
 } ZPB2;
 
+typedef struct _SCAENT {
+        FWORD   scn;
+        FWORD   resv1;
+        DBLWRD  sda;                    /* Address of SIEBK          */
+        DBLWRD  resv2[2];
+} SCAENT;
+
+typedef struct _SCABLK {
+        DBLWRD  ipte_control;
+        DBLWRD  resv1[5];
+        DBLWRD  mcn;                    /* Bitmap of VCPUs config    */
+        DBLWRD  resv2;
+        SCAENT  vcpu[64];
+} SCABLK;
+
 #define LKPG_GPR0_LOCKBIT       0x00000200
 #define LKPG_GPR0_RESV          0x0000FD00
 
@@ -2078,7 +2139,10 @@ typedef struct _PTFFQSI {               /* Query Steering Information*/
 #define FPC_DXC_X       0x00000800
 #define FPC_DXC_Y       0x00000400
 #define FPC_DRM         0x00000070
-#define FPC_BRM         0x00000003
+#define FPC_BRM_3BIT    0x00000007                              /*810*/
+#define FPC_BIT29       0x00000004                              /*810*/
+#define FPC_BRM_2BIT    0x00000003                              /*810*/
+#define FPC_RESV_FPX    0x03030088                              /*810*/
 #define FPC_RESERVED    0x0707008C
 
 /* Shift counts to allow alignment of each field in the FPC register */
@@ -2128,9 +2192,27 @@ typedef struct _PTFFQSI {               /* Query Steering Information*/
 #define BRM_RTZ                 1       /* Round toward zero         */
 #define BRM_RTPI                2       /* Round toward +infinity    */
 #define BRM_RTMI                3       /* Round toward -infinity    */
+#define BRM_RESV4               4       /* Reserved (invalid)     810*/
+#define BRM_RESV5               5       /* Reserved (invalid)     810*/
+#define BRM_RESV6               6       /* Reserved (invalid)     810*/
+#define BRM_RFSP                7       /* Prep shorter precision 810*/
 
 /* Mask bits for conditional SSKE facility */
+#define SSKE_MASK_NQ            0x08    /* NonQuiesce                */
 #define SSKE_MASK_MR            0x04    /* Reference bit update mask */
 #define SSKE_MASK_MC            0x02    /* Change bit update mask    */
+#define SSKE_MASK_MB            0x01    /* Multiple Block            */
 
+/* Measurement alert external interruption parameter */
+#define MAEIP_IEA         0x80000000   /* Invalid Entry Address      */
+#define MAEIP_ISDBTE      0x80000000   /* Incorrect sample-data-block-
+                                          table entry                */
+#define MAEIP_PRA         0x20000000   /* Program request alert      */
+#define MAEIP_SACA        0x00800000   /* Sampling authorisation 
+                                          change alert               */
+#define MAEIP_LSDA        0x00400000   /* Loss of sample data alert  */
+#define MAEIP_CACA        0x00000080   /* Counter Authorisation 
+                                          change alert               */
+#define MAEIP_LCDA        0x00000040   /* Loss of counter data alert */
+                                          
 #endif // _ESA390_H

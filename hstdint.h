@@ -1,7 +1,7 @@
 /* HSTDINT.H    (c)Copyright Roger Bowler, 2009                      */
 /*              Hercules standard integer definitions                */
 
-// $Id: hstdint.h 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.2  2007/06/23 00:04:11  ivan

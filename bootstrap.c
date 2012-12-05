@@ -2,7 +2,7 @@
 /*              (c) Copyright "Fish" (David B. Trout), 2005-2009     */
 /*              Hercules executable main module                      */
 
-// $Id: bootstrap.c 5586 2009-12-31 10:29:11Z rbowler $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module is the initial entry point of the Hercules emulator.  */
@@ -79,6 +79,7 @@ static LPCTSTR  g_pszTempTitle = _T("{98C1C303-2A9E-11d4-9FF5-0060677l8D04}");
 // (forward reference)
 
 static void ProcessException( EXCEPTION_POINTERS* pExceptionPtrs );
+static HWND FindConsoleHandle();
 
 // (helper macro)
 
@@ -104,6 +105,9 @@ int main(int ac,char *av[])
     // Request the highest possible time-interval accuracy...
 
     timeBeginPeriod( 1 );   // (one millisecond time interval accuracy)
+
+    EnableMenuItem( GetSystemMenu( FindConsoleHandle(), FALSE ),
+                    SC_CLOSE, MF_BYCOMMAND | MF_GRAYED );
 
     // If we're being debugged, then let the debugger
     // catch the exception. Otherwise, let our exception
@@ -159,6 +163,9 @@ int main(int ac,char *av[])
     // Each call to "timeBeginPeriod" must be matched with a call to "timeEndPeriod"
 
     timeEndPeriod( 1 );     // (no longer care about accurate time intervals)
+
+    EnableMenuItem( GetSystemMenu( FindConsoleHandle(), FALSE ),
+                SC_CLOSE, MF_BYCOMMAND | MF_ENABLED );
 
     return rc;
 }

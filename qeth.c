@@ -1,7 +1,7 @@
 /* QETH.C       (c) Copyright Jan Jaeger,   1999-2009                */
 /*              OSA Express                                          */
 
-// $Id: qeth.c 5126 2009-01-23 13:05:56Z bernard $
+// $Id$
 
 /* This module contains device handling functions for the            */
 /* OSA Express emulated card                                         */

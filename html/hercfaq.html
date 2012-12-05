@@ -33,8 +33,8 @@
 <TR><TD><A HREF="#3.01">3.01</A></TD><TD>What PC hardware do I need to run Hercules?</TD></TR>
 <TR><TD><A HREF="#3.02">3.02</A></TD><TD>What sort of MIPS rate can I expect?</TD></TR>
 <TR><TD><A HREF="#3.03">3.03</A></TD><TD>What PC software do I need to run Hercules?</TD></TR>
-<TR><TD><A HREF="#3.04">3.04</A></TD><TD>What software do I need to build Hercules?</TD></TR>
-<TR><TD><A HREF="#3.05">3.05</A></TD><TD>Why do I get an unexpected fixed-point divide exception (program check 0009 or abend 0C9) on a CVB instruction?</TD></TR>
+<TR><TD><A HREF="#3.04">3.04</A></TD><TD>What software do I need to build Hercules on Linux and Unix?</TD></TR>
+<TR><TD><A HREF="#3.05">3.05</A></TD><TD>What software do I need to build Hercules on Windows?</TD></TR>
 <TR><TD><A HREF="#3.06">3.06</A></TD><TD>Can Hercules be ported to run on other platforms?</TD></TR>
 <TR><TD>&nbsp;</TD></TR>
 <TR><TD><A HREF="#4.01">4.01</A></TD><TD>How can I create a virtual DASD volume?</TD></TR>
@@ -471,9 +471,7 @@ is <A HREF="http://www.linuxvm.org/">http://www.linuxvm.org/</A>
 <P>
     The following software platforms are supported:
     <li>Linux (kernel 2.4 or later)
-    <li>Windows 98, Windows NT, Windows 2000, or Windows XP
-        with <a href="http://sources.redhat.com/cygwin">Cygwin</a>
-    <li>Windows 98, Windows NT, Windows 2000, or Windows XP (without Cygwin)
+    <li>Windows XP, Windows Vista, or Windows 7
     <li>Mac OS X 10.3 or later
     <li>Solaris 2.9 or later (Sparc or Intel)
     <li>FreeBSD
@@ -524,47 +522,42 @@ is <A HREF="http://www.linuxvm.org/">http://www.linuxvm.org/</A>
     as OS/360 or MVS consoles.
 </P>
 <H4><A NAME="3.04">3.04</A>
-    What software do I need to build Hercules?
+    What software do I need to build Hercules on Linux and Unix?
 </H4>
 <P>
     To build Hercules for Linux
-    and other Unix-like environments (including Cygwin under Windows),
+    and other Unix-like environments
     you need to use the <a href="http://gcc.gnu.org">gcc</a> compiler,
-    version 2.95, or
     version 3.x or above.
-    <i>Note that gcc version 2.96 is not an official version and is not supported</i>.
     You will also need a full set of GNU development tools, including recent versions
     of autoconf, automake, libiconv, make, perl, sed, and m4.
-    Refer to the util/cvslvlck file in the Hercules distribution for details.
-    Note that you will also need a reasonably powerful machine (Pentium 1GHz+)
-    with ample RAM (at least 256Mb) because the compilation process is extremely
-    resource hungry.
-</P>
-<P>
-    To build Hercules for the Windows native environment (without Cygwin),
-    you need to use the Microsoft C/C++ compiler (MSVC)
-    version 13.x or later.
-    This compiler is available for download from Microsoft as
-    Visual C++ Toolkit 2003 (Version 13.x) or
-    Microsoft Visual C++ 2005 Express (Version 14.x).
-    You also need the current version of the Microsoft Platform SDK, which is also
-    available for download from Microsoft.
-    For further information, see Fish's MSVC Hercules Build page at
-    <a href="http://www.softdevlabs.com/Hercules/hercules-msvc-build.html">
-    http://www.softdevlabs.com/Hercules/hercules-msvc-build.html</a>
-    Alternatively, the Microsoft Visual Studio 7.0 and 8.0 products may be used.
-    In addition, Hercules now also supports building with
-    the Microsoft Visual Studio 9.0 product, or with
-    Microsoft Visual C++ 2008 Express (Version 15.x)
-    available for download from the Microsoft web-site.
+    Refer to the util/bldlvlck file in the Hercules distribution for details.
 </P>
 <H4><A NAME="3.05">3.05</A>
-    Why do I get an unexpected fixed-point divide exception (program check
-    0009 or abend 0C9) on a CVB instruction?
+    What software do I need to build Hercules on Windows?
 </H4>
 <P>
-    You are using an old gcc compiler.
-    See previous question for the required compiler level.
+    To build Hercules for the Windows environment
+    you need to use the Microsoft C/C++ compiler (MSVC)
+    version 14.x or later.
+    The 32-bit compiler and SDK are packaged as
+    Microsoft Visual C++ 2010 Express (Version 16.x)
+    available for download from Microsoft.
+</P>
+<P>
+    Although no longer available for download,
+    Microsoft Visual C++ 2005 Express (Version 14.x)
+    or
+    Microsoft Visual C++ 2008 Express (Version 15.x)
+    may also be used.
+    Alternatively, Microsoft Visual Studio 8.0, 9.0, or 10.0 may be used.
+    For further information, see the README.WIN32 file.
+</P>
+<P>
+    To build Hercules for 64-bit Windows platforms you will need
+    either Microsoft Visual C++ 2010 Express and the Microsoft Windows SDK 7.1, or
+    Microsoft Visual Studio 9.0 or 10.0 Professional.
+    For further information, see the README.WIN64 file.
 </P>
 <H4><A NAME="3.06">3.06</A>
     Can Hercules be ported to run on other platforms?
@@ -804,17 +797,32 @@ is <A HREF="http://www.linuxvm.org/">http://www.linuxvm.org/</A>
 <li>Integrated 3270 (SYSG) Console
 <li>Configuration-Topology Facility
 <li>HFP-Unnormalized-Extensions Facility
+<li>CMPSC-Enhancement Facility
+<li>High-Word Facility
+<li>Interlocked-Access Facility
+<li>Load/Store-on-Condition Facility
+<li>Distinct-Operands Facility
+<li>Population-Count Facility
+<li>Message-Security-Assist Extension 3
+<li>Message-Security-Assist Extension 4
+<li>Fast-BCR-Serialization Facility
+<li>Enhanced-Monitor Facility
+<li>Reset-Reference-Bits-Multiple Facility
+<li>Access-Exception-Fetch/Store-Indication Facility
+<li>Load-Program-Parameter Facility
+<li>IPTE-Range Facility
+<li>Enhanced-DAT Facility
 </ul>
 
 <P>The following optional features of z/Architecture have not yet been implemented:</P>
 <ul>
-<li>Enhanced-DAT Facility
 <li>PFPO Facility
 <li>Restore-Subchannel Facility
 <li>Integrated ASCII (SYSA) Console
-<li>Set-Program-Parameter Facility
 <li>CPU-Measurement Counter Facility
 <li>CPU-Measurement Sampling Facility
+<li>Floating-Point-Extension Facility
+<li>Nonquiescing Key-Setting Facility
 </ul>
 
 <P>The following standard feature has not yet been implemented: </P>
@@ -867,12 +875,14 @@ maintainer)
 <li>David Barth
 <li><A HREF="http://www.clueful.co.uk/mbeattie/">Malcolm Beattie</A>
 <li>Mario Bezzi
+<li>Florian Bilek
 <li>Mike Cairns
 <li><a href="http://www.isoc.org.pl/user/3">Marcin Cieslak</a>
 <li><a href="http://au.linkedin.com/in/clementclarke">Clem Clarke</a>
 <li><a href="http://veejoe.com.au/vic/index.htm">Vic Cross</a>
 <li><a href="http://www.mvsdasd.org/about.html">Jacob Dekel</a>
 <li>Guy Desbiens
+<li>Jacques Dilbert
 <li>Juergen Dobrinski
 <li>Fritz Elfert
 <li>Tomas Fott
@@ -884,8 +894,11 @@ maintainer)
 <li>Graham Goodwin
 <li>Paul Gorlinsky
 <li>Harold Grovesteen
+<li>John P. Hartmann
 <li>Glen Herrmannsfeldt
 <li>Brandon Hill
+<li>Laddie Hanus
+<li>Robert Hodge
 <li>Gabor Hoffer
 <li>Dan Horak
 <li>Soren Jorvang
@@ -908,9 +921,12 @@ maintainer)
 <li><a href="http://www.lightlink.com/mhp/3705/">Max H. Parke</a>
 <li>Reed H. Petty
 <li>Jim Pierson
+<li>Richard Pinion
 <li><a href="http://www.timpinkawa.net/hercules">Tim Pinkawa</a>
 <li><A HREF="http://upi.iki.fi/">Pasi Pirhonen</A>
 <li>Valery Pogonchenko
+<li>Andy Polyakov
+<li><a href="http://www.debian.org/News/2010/20100831">Frans Pop</a>
 <li><a href="http://www.xing.com/profile/Wolfhard_Reimer">Wolfhard Reimer</a>
 <li>Emerson Santos
 <li><a href="http://blogs.sun.com/jsavit/">Jeff Savit</a>
@@ -918,6 +934,7 @@ maintainer)
 <li>Paul Scott
 <li>Daniel Seagraves
 <li>Victor Shkamerda
+<li>Ian Shorter
 <li><a href="http://www.linuxvm.org/community/gsmith.html">Greg Smith<a>
 <li>Enrico Sorichetti
 <li>John Summerfield
@@ -931,6 +948,7 @@ maintainer)
 <li>Kris Van Hees
 <li>Kees Verruijt
 <li><A HREF="http://www.ivansoftware.com/">Ivan Warren</A>
+<li><a href="https://www1.ethz.ch/id/people/allid_list/juergen">Juergen Winkelmann</a>
 <li>Rod Zazubek
 <li>Bjoern A. Zeeb
 <li><a href="http://en.wikipedia.org/wiki/Matt_Zimmerman_(technologist)">Matt Zimmerman</a>
@@ -973,6 +991,6 @@ Please see our <a href="hercsupp.html">Technical Support</a> web page.
 <p><center><hr width=15% noshade>
 <a href="index.html"><img src="images/back.gif" border=0 alt="back"></a>
 </center>
-<p class="lastupd">Last updated $Date: 2010-03-03 08:14:26 -0600 (Wed, 03 Mar 2010) $ $Revision: 5645 $</p>
+<p class="lastupd">Last updated $Date$ $Revision$</p>
 </BODY>
 </HTML>

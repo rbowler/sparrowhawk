@@ -4,7 +4,7 @@
 /*              Defines all Hercules Configuration statements        */
 /*              and panel commands                                   */
 
-// $Id: cmdtab.h 5653 2010-03-06 17:03:20Z fish $
+// $Id$
 
 
 //          command    type          function      one-line description...
@@ -73,6 +73,11 @@ COMMAND ( "cpu",       PANEL,        cpu_cmd,
     "in your multiprocessor configuration which you wish all panel commands\n"
     "to apply to. For example, entering 'cpu 1F' followed by \"gpr\" will\n"
     "display the general purpose registers for cpu 31 of your configuration.\n" )
+
+COMMAND ( "fcb",     PANEL,        fcb_cmd,
+  "display the current FCB (if only the printer is given)\n",
+   "Reset the fcb to the standard one \n" 
+   "Load a fcb image \n" )
 
 COMMAND ( "start",     PANEL,        start_cmd,
   "start CPU (or printer device if argument given)",
@@ -585,19 +590,6 @@ COMMAND ( "maxrates",  PANEL,        maxrates_cmd,
 COMMAND ( "asn_and_lx_reuse", CONFIG, alrf_cmd, "Enable/Disable ASN and LX reuse facility", NULL )
 COMMAND ( "alrf"            , CONFIG, alrf_cmd, "Alias for asn_and_lx_reuse\n", NULL )
 #endif /* defined(_FEATURE_ASN_AND_LX_REUSE) */
-
-#if defined(FISH_HANG)
-COMMAND ( "FishHangReport",   PANEL, FishHangReport_cmd,
-  "Display thread/lock/event objects (DEBUG)\n",
-    "When built with --enable-fthreads --enable-fishhang, a detailed record of\n"
-    "every thread, lock and event that is created is maintained for debugging purposes.\n"
-    "If a lock is accessed before it has been initialized or if a thread exits while\n"
-    "still holding a lock, etc (including deadlock situations), the FishHang logic will\n"
-    "detect and report it. If you suspect one of hercules's threads is hung waiting for\n"
-    "a condition to be signalled for example, entering \"FishHangReport\" will display\n"
-    "the internal list of thread, locks and events to possibly help you determine where\n"
-    "it's hanging and what event (condition) it's hung on.\n"             )
-#endif
 
 #if defined(OPTION_CONFIG_SYMBOLS)
 COMMAND ( "defsym",    PANEL+CONFIG, defsym_cmd,

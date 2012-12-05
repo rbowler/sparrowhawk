@@ -6,7 +6,7 @@
 //              (C) Copyright James A. Pierson, 2002-2009
 //
 
-// $Id: hercifc.h 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.14  2008/02/07 00:29:04  rbowler

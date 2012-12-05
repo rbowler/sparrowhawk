@@ -4,7 +4,7 @@
 /*              Route all Hercules configuration statements          */
 /*              and panel commands to the appropriate functions      */
 
-// $Id: cmdtab.c 5457 2009-09-01 16:29:56Z bernard $
+// $Id$
 
 // $Log$
 // Revision 1.3  2009/01/19 12:16:57  rbowler

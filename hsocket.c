@@ -1,7 +1,7 @@
 /* HSOCKET.C    (c) Copyright Hercules development, 2003-2009        */
 /*              Socket read/write routines                           */
 
-// $Id: hsocket.c 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.8  2007/06/23 00:04:11  ivan

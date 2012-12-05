@@ -2,7 +2,7 @@
 
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: timer.c 5558 2009-12-24 01:49:18Z fish $
+// $Id$
 //
 // $Log$
 // Revision 1.67  2007/12/10 23:12:02  gsmith

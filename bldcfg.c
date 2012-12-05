@@ -3,7 +3,7 @@
 
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: bldcfg.c 5562 2009-12-24 14:29:38Z rbowler $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module builds the configuration tables for the Hercules      */
@@ -823,6 +823,11 @@ char    pathname[MAX_PATH];             /* file path in host format  */
 #ifdef OPTION_PTTRACE
     ptt_trace_init (0, 1);
 #endif
+
+#if defined(_FEATURE_MESSAGE_SECURITY_ASSIST)
+    /* Initialize the wrapping key registers lock */
+    initialize_lock(&sysblk.wklock);
+#endif /*defined(_FEATURE_MESSAGE_SECURITY_ASSIST)*/
 
 #if defined(OPTION_FISHIO)
     InitIOScheduler                     // initialize i/o scheduler...

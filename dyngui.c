@@ -6,7 +6,7 @@
 /*                                                                   */
 /*********************************************************************/
 
-// $Id: dyngui.c 5643 2010-02-24 00:47:55Z fish $
+// $Id$
 
 #include "hstdinc.h"
 #include "hercules.h"       // (#includes "config." w/#define for VERSION)

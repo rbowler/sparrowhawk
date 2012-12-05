@@ -1,7 +1,7 @@
 /* DIAGMSSF.C   (c) Copyright Jan Jaeger, 1999-2009                  */
 /*              ESA/390 Diagnose Functions                           */
 
-// $Id: diagmssf.c 5427 2009-07-11 11:26:54Z ivan $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module implements various diagnose functions                 */

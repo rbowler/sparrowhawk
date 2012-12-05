@@ -3,20 +3,9 @@
 # --------------------------------------------------------------------------
 # (c) Copyright Roger Bowler, 2005-2007
 # --------------------------------------------------------------------------
-# $Id: HERC_FLAGS.msvc 5479 2009-10-09 10:30:31Z fish $
+# $Id$
 #
 #  Sets additional Hercules-related compiler/linker flags & #defines...
-#
-#
-#                           CHANGE HISTORY
-# $Log$
-# Revision 1.2  2008/10/11 23:46:01  fish
-# Add CVS "Id" and "Log"
-#
-#
-# DD/MM/YY Description
-#
-# 26/12/06 Fish: created by extraction from existing makefile-dllmod.msvc
 #
 # ***************************************************************************
 
@@ -62,19 +51,10 @@ cflags = $(cflags) /D HOST_ARCH=$(CPU)
 # The following instructs the declaration of DLL export symbols
 cflags = $(cflags) /D HDL_BUILD_SHARED /D OPTION_DYNAMIC_LOAD
 
-# fish test
-##FISH_HANG = yes
-
-!IFDEF FISH_HANG
-cflags = $(cflags) -D FISH_HANG
-!ENDIF
-
 # Suppress some deprecation warnings that aren't really deprecation warnings
-!IF $(vsversion) >= 8
 cflags = $(cflags) -D _CRT_SECURE_NO_DEPRECATE
 cflags = $(cflags) -D _CRT_NONSTDC_NO_DEPRECATE
 ldebug = $(ldebug) /MANIFEST
-!ENDIF
 
 # Override win32.mak options for WIN64 to eliminate the following warnings
 # C4200: nonstandard extension used : zero-sized array in struct/union
@@ -109,3 +89,7 @@ ldebug = $(ldebug) /base:0x400000
 !IF "$(CPU)" == "AMD64"
 cflags = $(cflags) /favor:AMD64
 !ENDIF
+
+# Increase the sockets set size limit/default to be the
+# same value as used on most non-Windows platforms (1024)
+cflags  = $(cflags)  /D FD_SETSIZE=1024

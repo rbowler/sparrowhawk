@@ -1,7 +1,7 @@
 /* FLOAT.C      (c) Copyright Peter Kuschnerus, 2000-2009            */
 /*              ESA/390 Hex Floatingpoint Instructions               */
 
-// $Id: float.c 5569 2009-12-27 14:01:09Z hsg001 $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module implements the ESA/390 Hex Floatingpoint Instructions */
@@ -363,7 +363,7 @@
 /*                                                                   */
 /* ms   most significant 64 bit of operand                           */
 /* ls   least significant 64 bit of operand                          */
-/* dig  lesast significant 4 bits removed by right shift             */
+/* dig  least significant 4 bits removed by right shift              */
 /*                                                                   */
 /* all operands are expected to be defined as U64                    */
 /*-------------------------------------------------------------------*/
@@ -385,7 +385,7 @@
 #define shift_left4_U128(ms, ls, dig) \
     (dig) = (ms) >> 60; \
     (ms) = ((ms) << 4) | ((ls) >> 60); \
-    (ls) <<= 1
+    (ls) <<= 4
 
 
 /*-------------------------------------------------------------------*/
@@ -557,29 +557,6 @@ static inline void store_ef( EXTENDED_FLOAT *fl, U32 *fpr )
 
 #if defined(FEATURE_HFP_UNNORMALIZED_EXTENSION)
 /*-------------------------------------------------------------------*/
-/* Store extended float to register pair unnormalized                */
-/*                                                                   */
-/* Input:                                                            */
-/*      fl      Internal float format to be converted from           */
-/*      fpr     Pointer to register to be converted to               */
-/*-------------------------------------------------------------------*/
-static inline void ARCH_DEP(store_ef_unnorm)( EXTENDED_FLOAT *fl, U32 *fpr )
-{
-    fpr[0] = ((U32)fl->sign << 31)
-           | (((U32)fl->expo & 0x7f) << 24)
-           | (fl->ms_fract >> 24);
-    fpr[1] = (fl->ms_fract << 8)
-           | (fl->ls_fract >> 56);
-    fpr[FPREX] = ((U32)fl->sign << 31)
-               | ((fl->ls_fract >> 32) & 0x00FFFFFF);
-    fpr[FPREX+1] = fl->ls_fract;
-
-    fpr[FPREX] |= ((((U32)fl->expo - 14) << 24) & 0x7f000000);
-
-} /* end ARCH_DEP(store_ef_unnorm) */
-
-
-/*-------------------------------------------------------------------*/
 /* Store extended float high-order part to register unnormalized     */
 /*                                                                   */
 /* Input:                                                            */
@@ -590,7 +567,7 @@ static inline void ARCH_DEP(store_ef_unnorm_hi)( EXTENDED_FLOAT *fl, U32 *fpr )
 {
     fpr[0] = ((U32)fl->sign << 31)
            | (((U32)fl->expo & 0x7f) << 24)
-           | (fl->ms_fract >> 24);
+           | ((fl->ms_fract >> 24) & 0x00FFFFFF);
     fpr[1] = (fl->ms_fract << 8)
            | (fl->ls_fract >> 56);
 
@@ -612,6 +589,20 @@ static inline void ARCH_DEP(store_ef_unnorm_lo)( EXTENDED_FLOAT *fl, U32 *fpr )
     fpr[1] = fl->ls_fract;
 
 } /* end ARCH_DEP(store_ef_unnorm_lo) */
+
+/*-------------------------------------------------------------------*/
+/* Store extended float to register pair unnormalized                */
+/*                                                                   */
+/* Input:                                                            */
+/*      fl      Internal float format to be converted from           */
+/*      fpr     Pointer to register to be converted to               */
+/*-------------------------------------------------------------------*/
+static inline void ARCH_DEP(store_ef_unnorm)( EXTENDED_FLOAT *fl, U32 *fpr )
+{
+    ARCH_DEP(store_ef_unnorm_hi)(fl,fpr);
+    ARCH_DEP(store_ef_unnorm_lo)(fl,fpr+FPREX);
+
+} /* end ARCH_DEP(store_ef_unnorm) */
 
 
 /*-------------------------------------------------------------------*/
@@ -7479,7 +7470,6 @@ EXTENDED_FLOAT fx1;                     /* Intermediate result       */
 DEF_INST(multiply_add_unnormal_float_long_to_ext_reg)
 {
 int            r1, r2, r3;              /* Values of R fields        */
-int            i1;                      /* Index of FP register      */
 LONG_FLOAT     fl2, fl3;                /* Multiplier/Multiplicand   */
 LONG_FLOAT     fl1;                     /* Addend                    */
 EXTENDED_FLOAT fxp1;                    /* Intermediate product      */
@@ -7490,11 +7480,9 @@ EXTENDED_FLOAT fxres;                   /* Extended result           */
     HFPREG2_CHECK(r2, r3, regs);
     HFPREG_CHECK(r1, regs);
     /* Either the low- or high-numbered register of a pair is valid */
-    r1 &= 13;               /* Convert to the low numbered register */
-    i1 = FPR2I(r1);
 
     /* Get the operands */
-    get_lf(&fl1, regs->fpr + i1);
+    get_lf(&fl1, regs->fpr + FPR2I(r1));
     get_lf(&fl2, regs->fpr + FPR2I(r2));
     get_lf(&fl3, regs->fpr + FPR2I(r3));
 
@@ -7508,6 +7496,7 @@ EXTENDED_FLOAT fxres;                   /* Extended result           */
     ARCH_DEP(add_ef_unnorm)(&fxp1, &fxadd, &fxres);
 
     /* Place result in register */
+    r1 &= 13;               /* Convert to the low numbered register */
     ARCH_DEP(store_ef_unnorm)(&fxres, regs->fpr + FPR2I(r1));
 
 } /* end DEF_INST(multiply_add_unnormal_float_long_to_ext_reg) */
@@ -7678,7 +7667,6 @@ DEF_INST(multiply_add_unnormal_float_long_to_ext)
 int            r1, r3;                  /* Values of R fields        */
 int            b2;                      /* Base of effective addr    */
 VADR           effective_addr2;         /* Effective address         */
-int            i1;                      /* Index of FP register      */
 LONG_FLOAT     fl2, fl3;                /* Multiplier/Multiplicand   */
 LONG_FLOAT     fl1;                     /* Addend                    */
 EXTENDED_FLOAT fxp1;                    /* Intermediate product      */
@@ -7688,11 +7676,9 @@ EXTENDED_FLOAT fxres;                   /* Extended result           */
     RXF(inst, regs, r1, r3, b2, effective_addr2);
     HFPREG2_CHECK(r1, r3, regs);
     /* Either the low- or high-numbered register of a pair is valid */
-    r1 &= 13;               /* Convert to the low numbered register */
-    i1 = FPR2I(r1);
 
     /* Get the operands */
-    get_lf(&fl1, regs->fpr + i1);
+    get_lf(&fl1, regs->fpr + FPR2I(r1));
     vfetch_lf(&fl2, effective_addr2, b2, regs );
     get_lf(&fl3, regs->fpr + FPR2I(r3));
 
@@ -7706,6 +7692,7 @@ EXTENDED_FLOAT fxres;                   /* Extended result           */
     ARCH_DEP(add_ef_unnorm)(&fxp1, &fxadd, &fxres);
 
     /* Place result in register */
+    r1 &= 13;               /* Convert to the low numbered register */
     ARCH_DEP(store_ef_unnorm)(&fxres, regs->fpr + FPR2I(r1));
 
 } /* end DEF_INST(multiply_add_unnormal_float_long_to_ext) */

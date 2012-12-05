@@ -1,7 +1,7 @@
 /* DASDTAB.H    (c) Copyright Roger Bowler, 1999-2009                */
 /*              DASD table structures                                */
 
-// $Id: dasdtab.h 5444 2009-08-09 16:36:42Z hsg001 $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This header file contains defines the table entries that          */
@@ -98,6 +98,7 @@ typedef struct _CKDCU {                 /* CKD Control Unit entry    */
         U32     ciw6;                   /* CIW 6                     */
         U32     ciw7;                   /* CIW 7                     */
         U32     ciw8;                   /* CIW 8                     */
+        U8      senselength;            /* Sense length              */
       } CKDCU;
 #define CKDCU_SIZE sizeof(CKDCU)
 

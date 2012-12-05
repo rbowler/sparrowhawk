@@ -1,7 +1,7 @@
 /* TAPEMAP.C   (c) Copyright Jay Maynard, 2000-2009                  */
 /*              Map AWSTAPE format tape image                        */
 
-// $Id: tapemap.c 5127 2009-01-23 13:25:01Z bernard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This program reads an AWSTAPE format tape image file and produces */
@@ -92,7 +92,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
 
     /* Open the tape device */
     hostpath(pathname, filename, sizeof(pathname));
-    infd = open (pathname, O_RDONLY | O_BINARY);
+    infd = hopen(pathname, O_RDONLY | O_BINARY);
     if (infd < 0)
     {
         printf ("tapemap: Error opening %s: %s\n",

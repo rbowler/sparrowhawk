@@ -2,7 +2,7 @@
 # Makefile for Hercules S/370, ESA/390 and z/Architecture emulator
 # Process this file with 'automake' to produce Makefile.in
 #
-# $Id: Makefile.am 5617 2010-02-09 00:00:41Z fish $
+# $Id$
 #
 # $Log$
 # Revision 1.187  2009/01/18 00:52:19  jmaynard
@@ -99,19 +99,12 @@ endif
 
 fthreads_SRC  = fthreads.c
 fishio_SRC    = w32chan.c
-fishhang_SRC  = fishhang.c
 
 if BUILD_FTHREADS
   FTHREADS    = $(fthreads_SRC)
   FISHIO      = $(fishio_SRC)
-if BUILD_FISHHANG
-    FISHHANG  = $(fishhang_SRC)
-else
-    FISHHANG  =
-endif
 else
   FTHREADS    =
-  FISHHANG    =
   FISHIO      =
 endif
 
@@ -374,7 +367,6 @@ endif
                         parser.c     \
                         pttrace.c    \
                         $(FTHREADS)  \
-                        $(FISHHANG)  \
                         $(LTDL)
 
   libhercu_la_LDFLAGS = $(LIB_LD_FLAGS)
@@ -447,7 +439,6 @@ endif
                        ecpsvm.c
 
   EXTRA_libherc_la_SOURCES = $(fthreads_SRC)  \
-                             $(fishhang_SRC)  \
                              $(fishio_SRC)    \
                              memrchr.c        \
                              $(dynamic_SRC)   \
@@ -643,22 +634,19 @@ EXTRA_DIST = autoconf/config.rpath \
              hercules.cnf          \
              cckdfix.c             \
              README.COMMADPT       \
-             README.CVS            \
+             README.SVN            \
              README.DYNMOD         \
              README.ECPSVM         \
              README.HAO            \
              README.HDL            \
-             README.ISSUES         \
-             README.MINGW          \
              README.NETWORKING     \
              README.OSX            \
              README.TAPE           \
              README.HERCLOGO       \
-             CHANGES               \
              RELEASE.NOTES         \
-             README.MSVC           \
+             README.WIN32          \
+             README.WIN64          \
              README.SUN            \
-             _TODO.txt             \
              makefile.msvc         \
              makefile-dllmod.msvc  \
              msvc.makefile.includes/BZIP2_DIR.msvc    \
@@ -681,12 +669,6 @@ EXTRA_DIST = autoconf/config.rpath \
              msvc.makefile.includes/ZLIB_DIR.msvc     \
              msvc.makefile.includes/ZLIB_FLAGS.msvc   \
              msvc.makefile.includes/ZLIB_RULES.msvc   \
-             makefile.bat          \
-             dynmake.bat           \
-             Hercules.dsp          \
-             Hercules.dsw          \
-             Hercules.vcproj       \
-             Hercules.sln          \
              hercver.rc            \
              build_pch.c           \
              conspawn.c            \
@@ -698,8 +680,7 @@ EXTRA_DIST = autoconf/config.rpath \
 #
 # Source Header files. No 'build' for those
 #
-noinst_HEADERS = fishhang.h     \
-                 hostinfo.h     \
+noinst_HEADERS = hostinfo.h     \
                  cpuint.h       \
                  feat370.h      \
                  feat390.h      \
@@ -727,6 +708,7 @@ noinst_HEADERS = fishhang.h     \
                  w32ctca.h      \
                  tt32api.h      \
                  linklist.h     \
+                 ieee-sol.h     \
                  ieee-w32.h     \
                  httpmisc.h     \
                  devtype.h      \

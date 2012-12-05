@@ -5,7 +5,7 @@
 /* compile option -DNO_ASM_BYTESWAP will expand 'C' code             */
 /* otherwise Intel (486+) assember will be generated                 */
 
-// $Id: hbyteswp.h 5039 2009-01-08 01:59:20Z jmaynard $
+// $Id$
 //
 // $Log$
 // Revision 1.11  2009/01/07 18:00:13  jmaynard

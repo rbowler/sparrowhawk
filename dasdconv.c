@@ -1,7 +1,7 @@
 /* DASDCONV.C   (c) Copyright Roger Bowler, 1999-2009                */
 /*              Hercules DASD Utilities: DASD image converter        */
 
-// $Id: dasdconv.c 5378 2009-06-02 21:23:43Z rbowler $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This program converts a CKD disk image from HDR-30 format         */
@@ -307,7 +307,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
         ifd = STDIN_FILENO;
     else
     {
-        ifd = open (pathname, O_RDONLY | O_BINARY);
+        ifd = hopen(pathname, O_RDONLY | O_BINARY);
 
         if (ifd < 0)
         {
@@ -507,7 +507,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
 
     /* Create the AWSCKD image file */
     hostpath(pathname, (char *)ofname, sizeof(pathname));
-    ofd = open (pathname,
+    ofd = hopen(pathname,
                 O_WRONLY | O_CREAT | O_BINARY | (repl ? 0 : O_EXCL),
                 S_IRUSR | S_IWUSR | S_IRGRP);
 

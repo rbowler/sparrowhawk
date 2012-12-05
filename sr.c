@@ -1,7 +1,7 @@
 /* SR.C         (c)Copyright Greg Smith, 2005-2009                   */
 /*              Suspend/Resume a Hercules session                    */
 
-// $Id: sr.c 5553 2009-12-23 17:34:16Z ivan $
+// $Id$
 
 #include "hstdinc.h"
 

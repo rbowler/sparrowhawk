@@ -1,7 +1,7 @@
 /* INLINE.H     (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              Inline function definitions                          */
 
-// $Id: inline.h 5126 2009-01-23 13:05:56Z bernard $
+// $Id$
 
 /* Original author Roger Bowler, 1999                                */
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
@@ -54,8 +54,8 @@ _DAT_C_STATIC void ARCH_DEP(invalidate_tlb) (REGS *regs, BYTE mask);
 _DAT_C_STATIC void z900_invalidate_tlb (REGS *regs, BYTE mask);
 #endif
 _DAT_C_STATIC void ARCH_DEP(invalidate_tlbe) (REGS *regs, BYTE *main);
-_DAT_C_STATIC void ARCH_DEP(invalidate_pte) (BYTE ibyte, int r1,
-        int r2, REGS *regs);
+_DAT_C_STATIC void ARCH_DEP(invalidate_pte) (BYTE ibyte, RADR op1,
+        U32 op2, REGS *regs);
 _LOGICAL_C_STATIC BYTE *ARCH_DEP(logical_to_main) (VADR addr, int arn,
         REGS *regs, int acctype, BYTE akey);
 

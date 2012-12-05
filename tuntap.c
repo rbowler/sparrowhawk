@@ -15,7 +15,7 @@
 // that works on all platforms with (hopefully) equal results.
 //
 
-// $Id: tuntap.c 5127 2009-01-23 13:25:01Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.46  2008/02/07 00:29:04  rbowler

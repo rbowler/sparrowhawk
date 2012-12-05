@@ -1,7 +1,7 @@
 /* ASSIST.C     (c) Copyright Roger Bowler, 1999-2009                */
 /*              ESA/390 MVS Assist Routines                          */
 
-// $Id: assist.c 5234 2009-03-03 19:32:50Z jj $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module contains routines which process the MVS Assist        */

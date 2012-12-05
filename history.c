@@ -1,4 +1,4 @@
-// $Id: history.c 4102 2006-12-08 09:43:35Z jj $
+// $Id$
 //
 // $Log$
 
@@ -59,6 +59,13 @@ int history_add(char *cmdline) {
     free(backup->cmdline);
     free(backup);
     backup = NULL;
+  }
+
+  /* If last line is exactly the same as this line 
+     ignore and return to caller */
+  if (history_lines != NULL && !strcmp(cmdline,history_lines_end->cmdline)) {
+      history_ptr = NULL;
+      return 0;
   }
 
   /* allocate space and copy string */

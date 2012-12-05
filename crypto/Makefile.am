@@ -3,7 +3,7 @@
 # Makefile for Hercules S/370, ESA/390 and z/Architecture emulator
 #
 
-# $Id: Makefile.am 4102 2006-12-08 09:43:35Z jj $
+# $Id$
 #
 # $Log$
 

@@ -1,7 +1,7 @@
 /* SERVICE.H    (c) Copyright Jan Jaeger, 1999-2009                  */
 /*              Service Processor Architectured fields               */
 
-// $Id: service.h 5452 2009-08-12 09:53:50Z rbowler $
+// $Id$
 
 #if !defined(_SERVICE_H)
 

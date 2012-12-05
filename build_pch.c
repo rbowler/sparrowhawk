@@ -1,7 +1,7 @@
 /* BUILD_PCH  (c)Copyright Ivan Warren, 2005-2009                    */
 /*            Dummy module for building pre-compiled header files    */
 
-// $Id: build_pch.c 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.5  2007/06/23 00:04:03  ivan

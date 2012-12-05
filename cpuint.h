@@ -1,7 +1,7 @@
 /* CPUINT.H     (c) Copyright Jan Jaeger, 2001-2009                  */
 /*              Hercules Interrupt State and Mask Definitions        */
 
-// $Id: cpuint.h 5553 2009-12-23 17:34:16Z ivan $
+// $Id$
 
 /**********************************************************************
  Interrupts_State & Interrupts_Mask bits definition (Initial_Mask=800E)

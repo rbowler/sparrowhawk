@@ -1,7 +1,7 @@
 /* FEATURE.H    (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              Architecture-dependent macro definitions             */
 
-// $Id: feature.h 5531 2009-12-11 18:23:29Z bernard $
+// $Id$
 
 #ifdef HAVE_CONFIG_H
   #include <config.h> // Hercules build configuration options/settings
@@ -764,7 +764,7 @@ do { \
  /*
   * Accelerated lookup
   */
-#define MADDR(_addr, _arn, _regs, _acctype, _akey) \
+#define MADDRL(_addr, _len, _arn, _regs, _acctype, _akey) \
  ( \
        likely((_regs)->aea_ar[(_arn)]) \
    &&  likely( \
@@ -781,9 +781,13 @@ do { \
        MAINADDR((_regs)->tlb.main[TLBIX(_addr)], (_addr)) \
      ) \
    : ( \
-       ARCH_DEP(logical_to_main) ((_addr), (_arn), (_regs), (_acctype), (_akey)) \
+       ARCH_DEP(logical_to_main_l) ((_addr), (_arn), (_regs), (_acctype), (_akey), (_len)) \
      ) \
  )
+
+/* Old style accelerated lookup (without length) */
+#define MADDR(_addr, _arn, _regs, _acctype, _akey) \
+    MADDRL( (_addr), 1, (_arn), (_regs), (_acctype), (_akey))
 
 /*
  * PER Successful Branch

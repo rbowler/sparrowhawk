@@ -3,7 +3,7 @@
 
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: vm.c 5532 2009-12-11 19:28:19Z bernard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module implements miscellaneous diagnose functions           */

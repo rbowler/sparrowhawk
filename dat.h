@@ -4,7 +4,7 @@
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: dat.h 5549 2009-12-16 16:50:50Z ivan $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module implements the DAT, ALET, and ASN translation         */
@@ -22,57 +22,6 @@
 /*      ESAME DAT support by Roger Bowler (SA22-7832)                */
 /*      ESAME ASN authorization and ALET translation - Roger Bowler  */
 /*-------------------------------------------------------------------*/
-
-// $Log$
-// Revision 1.112  2008/12/08 20:38:20  ivan
-// Fix SIE DAT Issue with ESA/390 Guest on z/Arch host with >2GB of storage
-//
-// Revision 1.111  2008/03/16 00:04:37  rbowler
-// Replace ACC_ARMODE by USE_ARMODE for LPTEA
-//
-// Revision 1.110  2008/03/15 23:41:16  rbowler
-// Correct end function comment for logical_to_main
-//
-// Revision 1.109  2008/01/25 00:50:18  gsmith
-// Fix invalidate_tlbe processing - Paul Leisy
-//
-// Revision 1.108  2007/08/31 10:01:01  ivan
-// Throw an addressing exception when a SIE host->guest DAT points beyond
-// addressable storage
-//
-// Revision 1.107  2007/06/23 00:04:08  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.106  2007/06/06 22:14:57  gsmith
-// Fix SYNCHRONIZE_CPUS when numcpu > number of host processors - Greg
-//
-// Revision 1.105  2007/03/21 01:28:20  gsmith
-// Fix missed (acctype != ACC...) compares
-//
-// Revision 1.104  2007/03/20 23:46:15  gsmith
-// Don't update TLB if ACC_NOTLB
-//
-// Revision 1.103  2007/03/20 22:27:25  gsmith
-// Simplify some code in logical_to_main
-//
-// Revision 1.102  2007/03/20 22:23:32  gsmith
-// Redefine ACC_ and ACCTYPE_ macros
-//
-// Revision 1.101  2007/03/20 02:06:02  gsmith
-// Rename IS_MCDS macro to MULTIPLE_CONTROLLED_DATA_SPACE
-//
-// Revision 1.100  2007/03/18 18:47:43  gsmith
-// Simplify MULTIPLE_CONTROLLED_DATA_SPACE tests
-//
-// Revision 1.99  2007/03/18 00:41:53  gsmith
-// Clarify load_address_space_designator code
-//
-// Revision 1.98  2007/01/04 23:12:03  gsmith
-// remove thunk calls for program_interrupt
-//
-// Revision 1.97  2006/12/08 09:43:20  jj
-// Add CVS message log
-//
 
 #if !defined(OPTION_NO_INLINE_DAT) || defined(_DAT_C)
 #if defined(FEATURE_DUAL_ADDRESS_SPACE)
@@ -810,6 +759,8 @@ U16     eax;                            /* Authorization index       */
 /*          ASCE-type or region-translation error: real address      */
 /*          is not set; exception code is X'0038' through X'003B'.   */
 /*          The LRA instruction converts this to condition code 3.   */
+/*      5 = For ACCTYPE_EMC (Enhanced MC access only):               */
+/*          A translation specification exception occured            */
 /*                                                                   */
 /*      For ACCTYPE_LPTEA, the return value is set to facilitate     */
 /*      setting the condition code by the LPTEA instruction:         */
@@ -895,10 +846,10 @@ U32     ptl;                            /* Page table length         */
        goto tran_spec_excp;
 
     /* Look up the address in the TLB */
-    if (   !(acctype & ACC_NOTLB)
-        && ((vaddr & TLBID_PAGEMASK) | regs->tlbID) == regs->tlb.TLB_VADDR(tlbix)
+    if (   ((vaddr & TLBID_PAGEMASK) | regs->tlbID) == regs->tlb.TLB_VADDR(tlbix)
         && (regs->tlb.common[tlbix] || regs->dat.asd == regs->tlb.TLB_ASD(tlbix))
-        && !(regs->tlb.common[tlbix] && regs->dat.private) )
+        && !(regs->tlb.common[tlbix] && regs->dat.private) 
+        && !(acctype & ACC_NOTLB) )
     {
         pte = regs->tlb.TLB_PTE(tlbix);
 
@@ -1050,10 +1001,10 @@ U32     ptl;                            /* Page table length         */
     regs->dat.private = ((regs->dat.asd & STD_PRIVATE) != 0);
 
     /* [3.11.4] Look up the address in the TLB */
-    if (   !(acctype & ACC_NOTLB)
-        && ((vaddr & TLBID_PAGEMASK) | regs->tlbID) == regs->tlb.TLB_VADDR(tlbix)
+    if (   ((vaddr & TLBID_PAGEMASK) | regs->tlbID) == regs->tlb.TLB_VADDR(tlbix)
         && (regs->tlb.common[tlbix] || regs->dat.asd == regs->tlb.TLB_ASD(tlbix))
-        && !(regs->tlb.common[tlbix] && regs->dat.private) )
+        && !(regs->tlb.common[tlbix] && regs->dat.private) 
+        && !(acctype & ACC_NOTLB) )
     {
         pte = regs->tlb.TLB_PTE(tlbix);
         if (regs->tlb.protect[tlbix])
@@ -1183,10 +1134,10 @@ U16     sx, px;                         /* Segment and page index,
 //  logmsg("asce=%16.16" I64_FMT "X\n",regs->dat.asd);
 
     /* [3.11.4] Look up the address in the TLB */
-    if (   !(acctype & ACC_NOTLB)
-        && ((vaddr & TLBID_PAGEMASK) | regs->tlbID) == regs->tlb.TLB_VADDR(tlbix)
+    if (   ((vaddr & TLBID_PAGEMASK) | regs->tlbID) == regs->tlb.TLB_VADDR(tlbix)
         && (regs->tlb.common[tlbix] || regs->dat.asd == regs->tlb.TLB_ASD(tlbix))
-        && !(regs->tlb.common[tlbix] && regs->dat.private) )
+        && !(regs->tlb.common[tlbix] && regs->dat.private) 
+        && !(acctype & ACC_NOTLB) )
     {
         pte = regs->tlb.TLB_PTE(tlbix);
         if (regs->tlb.protect[tlbix])
@@ -1281,6 +1232,12 @@ U16     sx, px;                         /* Segment and page index,
                 if ((rte & REGTAB_TT) != TT_R1TABL)
                     goto tran_spec_excp;
 
+#if defined(FEATURE_ENHANCED_DAT_FACILITY)
+                if ((regs->CR_L(0) & CR0_ED)
+                 && (rte & REGTAB_P))
+                    regs->dat.protect |= 1;
+#endif /*defined(FEATURE_ENHANCED_DAT_FACILITY)*/
+
                 /* Extract the region-second table origin, offset, and
                    length from the region-first table entry */
                 rto = rte & REGTAB_TO;
@@ -1328,6 +1285,12 @@ U16     sx, px;                         /* Segment and page index,
                 if ((rte & REGTAB_TT) != TT_R2TABL)
                     goto tran_spec_excp;
 
+#if defined(FEATURE_ENHANCED_DAT_FACILITY)
+                if ((regs->CR_L(0) & CR0_ED)
+                 && (rte & REGTAB_P))
+                    regs->dat.protect |= 1;
+#endif /*defined(FEATURE_ENHANCED_DAT_FACILITY)*/
+
                 /* Extract the region-third table origin, offset, and
                    length from the region-second table entry */
                 rto = rte & REGTAB_TO;
@@ -1374,6 +1337,12 @@ U16     sx, px;                         /* Segment and page index,
                    correct type of region table */
                 if ((rte & REGTAB_TT) != TT_R3TABL)
                     goto tran_spec_excp;
+
+#if defined(FEATURE_ENHANCED_DAT_FACILITY)
+                if ((regs->CR_L(0) & CR0_ED)
+                 && (rte & REGTAB_P))
+                    regs->dat.protect |= 1;
+#endif /*defined(FEATURE_ENHANCED_DAT_FACILITY)*/
 
                 /* Extract the segment table origin, offset, and
                    length from the region-third table entry */
@@ -1425,6 +1394,53 @@ U16     sx, px;                         /* Segment and page index,
             if (regs->dat.private && (ste & ZSEGTAB_C))
                 goto tran_spec_excp;
 
+#if defined(FEATURE_ENHANCED_DAT_FACILITY)
+            if ((regs->CR_L(0) & CR0_ED)
+              && (ste & ZSEGTAB_FC))
+            {
+            
+                /* Set protection indicator if page protection is indicated */
+                if (ste & ZSEGTAB_P)
+                    regs->dat.protect |= 1;
+
+                /* For LPTEA instruction, return the address of the STE */
+                if (unlikely(acctype & ACC_LPTEA))
+                {
+                    regs->dat.raddr = sto | (regs->dat.protect ? 0x04 : 0);
+//                  logmsg("raddr:%16.16" I64_FMT "X cc=2\n",regs->dat.raddr);
+                    regs->dat.xcode = 0;
+                    cc = 2;
+                    return cc;
+                } /* end if(ACCTYPE_LPTEA) */
+
+                /* Combine the page frame real address with the byte index
+                   of the virtual address to form the real address */
+                regs->dat.raddr = (ste & ZSEGTAB_SFAA) | (vaddr & ~ZSEGTAB_SFAA);
+                /* Fake 4K PFRA for TLB purposes */
+                regs->dat.rpfra = ((ste & ZSEGTAB_SFAA) | (vaddr & ~ZSEGTAB_SFAA)) & PAGEFRAME_PAGEMASK;
+
+//              logmsg("raddr:%16.16" I64_FMT "X cc=0\n",regs->dat.raddr);
+
+                /* [3.11.4.2] Place the translated address in the TLB */
+                if (!(acctype & ACC_NOTLB))
+                {
+                    regs->tlb.TLB_ASD(tlbix)   = regs->dat.asd;
+                    regs->tlb.TLB_VADDR(tlbix) = (vaddr & TLBID_PAGEMASK) | regs->tlbID;
+                    /* Fake 4K PTE for TLB purposes */
+                    regs->tlb.TLB_PTE(tlbix)   = ((ste & ZSEGTAB_SFAA) | (vaddr & ~ZSEGTAB_SFAA)) & PAGEFRAME_PAGEMASK;
+                    regs->tlb.common[tlbix]    = (ste & SEGTAB_COMMON) ? 1 : 0;
+                    regs->tlb.protect[tlbix]   = regs->dat.protect;
+                    regs->tlb.acc[tlbix]       = 0;
+                    regs->tlb.main[tlbix]      = NULL;
+                }
+
+                /* Clear exception code and return with zero return code */
+                regs->dat.xcode = 0;
+                return 0;
+
+            }
+#endif /*defined(FEATURE_ENHANCED_DAT_FACILITY)*/
+
             /* Extract the page table origin from segment table entry */
             pto = ste & ZSEGTAB_PTO;
 
@@ -1440,6 +1456,11 @@ U16     sx, px;                         /* Segment and page index,
                 regs->dat.raddr = pto;
                 regs->dat.xcode = 0;
                 cc = (ste & ZSEGTAB_P) ? 1 : 0;
+#if defined(FEATURE_ENHANCED_DAT_FACILITY)
+                if ((regs->CR_L(0) & CR0_ED)
+                  && regs->dat.protect)
+                    cc = 1;
+#endif /*defined(FEATURE_ENHANCED_DAT_FACILITY)*/
                 return cc;
             } /* end if(ACCTYPE_LPTEA) */
 
@@ -1525,6 +1546,14 @@ spec_oper_excp:
 #endif /*defined(FEATURE_ESAME)*/
 
 tran_prog_check:
+#if defined(FEATURE_ENHANCED_MONITOR_FACILITY)
+    /* No program interrupt for enhanced MC */
+    if(acctype & ACC_ENH_MC)
+    {
+        cc = 5;
+        return cc;
+    }
+#endif /*defined(FEATURE_ENHANCED_MONITOR_FACILITY)*/
     regs->program_interrupt (regs, regs->dat.xcode);
 
 /* Conditions which the caller may or may not program check */
@@ -1674,6 +1703,15 @@ tran_excp_addr:
         else
             regs->TEA |= regs->dat.stid;
 #endif /*!defined(FEATURE_ESAME)*/
+
+#if defined(FEATURE_ACCESS_EXCEPTION_FETCH_STORE_INDICATION)         /*810*/
+    /* Set the fetch/store indication bits 52-53 in the TEA */
+    if (acctype & ACC_READ) {
+        regs->TEA |= TEA_FETCH;
+    } else if (acctype & (ACC_WRITE|ACC_CHECK)) {
+        regs->TEA |= TEA_STORE;
+    }
+#endif /*defined(FEATURE_ACCESS_EXCEPTION_FETCH_STORE_INDICATION)*/  /*810*/
 
     /* Set the exception access identification */
     if (ACCESS_REGISTER_MODE(&regs->psw)
@@ -1950,8 +1988,8 @@ _DAT_C_STATIC void ARCH_DEP(invalidate_tlbe) (REGS *regs, BYTE *main)
 /* SYNCHRONIZE_CPUS issued while intlock is held.                    */
 /*                                                                   */
 /*-------------------------------------------------------------------*/
-_DAT_C_STATIC void ARCH_DEP(invalidate_pte) (BYTE ibyte, int r1,
-                                                    int r2, REGS *regs)
+_DAT_C_STATIC void ARCH_DEP(invalidate_pte) (BYTE ibyte, RADR op1,
+                                                    U32 op2, REGS *regs)
 {
 RADR    raddr;                          /* Addr of page table entry  */
 RADR    pte;
@@ -1972,14 +2010,14 @@ RADR    pfra;
         /* Combine the page table origin in the R1 register with
            the page index in the R2 register, ignoring carry, to
            form the 31-bit real address of the page table entry */
-        raddr = (regs->GR_L(r1) & SEGTAB_370_PTO)
+        raddr = (op1 & SEGTAB_370_PTO)
                     + (((regs->CR(0) & CR0_SEG_SIZE) == CR0_SEG_SZ_1M) ?
                       (((regs->CR(0) & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) ?
-                      ((regs->GR_L(r2) & 0x000FF000) >> 11) :
-                      ((regs->GR_L(r2) & 0x000FF800) >> 10)) :
+                      ((op2 & 0x000FF000) >> 11) :
+                      ((op2 & 0x000FF800) >> 10)) :
                       (((regs->CR(0) & CR0_PAGE_SIZE) == CR0_PAGE_SZ_4K) ?
-                      ((regs->GR_L(r2) & 0x0000F000) >> 11) :
-                      ((regs->GR_L(r2) & 0x0000F800) >> 10)));
+                      ((op2 & 0x0000F000) >> 11) :
+                      ((op2 & 0x0000F800) >> 10)));
         raddr &= 0x00FFFFFF;
 
         /* Fetch the page table entry from real storage, subject
@@ -2013,8 +2051,8 @@ RADR    pfra;
         /* Combine the page table origin in the R1 register with
            the page index in the R2 register, ignoring carry, to
            form the 31-bit real address of the page table entry */
-        raddr = (regs->GR_L(r1) & SEGTAB_PTO)
-                    + ((regs->GR_L(r2) & 0x000FF000) >> 10);
+        raddr = (op1 & SEGTAB_PTO)
+                    + ((op2 & 0x000FF000) >> 10);
         raddr &= 0x7FFFFFFF;
 
         /* Fetch the page table entry from real storage, subject
@@ -2037,8 +2075,8 @@ RADR    pfra;
         /* Combine the page table origin in the R1 register with
            the page index in the R2 register, ignoring carry, to
            form the 64-bit real address of the page table entry */
-        raddr = (regs->GR_G(r1) & ZSEGTAB_PTO)
-                    + ((regs->GR_G(r2) & 0x000FF000) >> 9);
+        raddr = (op1 & ZSEGTAB_PTO)
+                    + ((op2 & 0x000FF000) >> 9);
 
 #if defined(MODEL_DEPENDENT)
         raddr = APPLY_PREFIXING (raddr, regs->PX);
@@ -2099,6 +2137,7 @@ static inline int ARCH_DEP(check_sa_per2) (int arn, int acctype, REGS *regs)
 /*      regs    CPU register context                                 */
 /*      acctype Type of access requested: READ, WRITE, or instfetch  */
 /*      akey    Bits 0-3=access key, 4-7=zeroes                      */
+/*      len     Length of data access for PER SA purpose             */
 /* Returns:                                                          */
 /*      Absolute storage address.                                    */
 /*                                                                   */
@@ -2118,8 +2157,9 @@ static inline int ARCH_DEP(check_sa_per2) (int arn, int acctype, REGS *regs)
 /*      or translation exception then a program check is generated   */
 /*      and the function does not return.                            */
 /*-------------------------------------------------------------------*/
-_LOGICAL_C_STATIC BYTE *ARCH_DEP(logical_to_main) (VADR addr, int arn,
-                                    REGS *regs, int acctype, BYTE akey)
+_LOGICAL_C_STATIC BYTE *ARCH_DEP(logical_to_main_l) (VADR addr, int arn,
+                                    REGS *regs, int acctype, BYTE akey,
+                                    size_t len)
 {
 RADR    aaddr;                          /* Absolute address          */
 RADR    apfra;                          /* Abs page frame address    */
@@ -2218,17 +2258,18 @@ int     ix = TLBIX(addr);               /* TLB index                 */
         }
 #endif
     }
-
-    /* Do not apply host key access when SIE fetches/stores data */
-    if(SIE_ACTIVE(regs))
-        akey = 0;
 #endif /*defined(_FEATURE_SIE)*/
 
     /* Check protection and set reference and change bits */
     regs->dat.storkey = &(STORAGE_KEY(aaddr, regs));
 
+#if defined(_FEATURE_SIE)
+    /* Do not apply host key access when SIE fetches/stores data */
+    if (unlikely(SIE_ACTIVE(regs)))
+        return regs->mainstor + aaddr;
+#endif /*defined(_FEATURE_SIE)*/
 
-    if (acctype & ACC_READ)
+    if (likely(acctype & ACC_READ))
     {
         /* Program check if fetch protected location */
         if (unlikely(ARCH_DEP(is_fetch_protected) (addr, *regs->dat.storkey, akey, regs)))
@@ -2247,8 +2288,7 @@ int     ix = TLBIX(addr);               /* TLB index                 */
         regs->tlb.main[ix]       = NEW_MAINADDR (regs, addr, apfra);
 
     }
-    else
-    if (acctype & (ACC_WRITE|ACC_CHECK))
+    else /* if(acctype & (ACC_WRITE|ACC_CHECK)) */
     {
         /* Program check if store protected location */
         if (unlikely(ARCH_DEP(is_store_protected) (addr, *regs->dat.storkey, akey, regs)))
@@ -2277,12 +2317,13 @@ int     ix = TLBIX(addr);               /* TLB index                 */
             regs->tlb.acc[ix] = ACC_READ;
             if (arn != USE_REAL_ADDR
 #if defined(FEATURE_PER2)
-             && ( REAL_MODE(&regs->psw) ||
-                   ARCH_DEP(check_sa_per2) (arn, acctype, regs)
-                )
-#endif /*defined(FEATURE_PER2)*/
-             && PER_RANGE_CHECK(addr,regs->CR(10),regs->CR(11))
+            && ( REAL_MODE(&regs->psw) ||
+               ARCH_DEP(check_sa_per2) (arn, acctype, regs)
                )
+#endif /*defined(FEATURE_PER2)*/
+            /* Check the range altered enters the SA PER range */
+            && PER_RANGE_CHECK2(addr,addr+(len-1),regs->CR(10),regs->CR(11))
+            )
                 ON_IC_PER_SA(regs);
         }
 #endif /*defined(FEATURE_PER)*/
@@ -2326,7 +2367,14 @@ vabs_prog_check:
     regs->program_interrupt (regs, regs->dat.xcode);
 
     return NULL; /* prevent warning from compiler */
-} /* end function ARCH_DEP(logical_to_main) */
+} /* end function ARCH_DEP(logical_to_main_l) */
+
+/* Original logical_to_main() for compatiblity purpose */
+_LOGICAL_C_STATIC BYTE *ARCH_DEP(logical_to_main) (VADR addr, int arn,
+                                    REGS *regs, int acctype, BYTE akey)
+{
+    return ARCH_DEP(logical_to_main_l)(addr,arn,regs,acctype,akey,1);
+}
 
 #endif /*!defined(OPTION_NO_INLINE_LOGICAL) || defined(_DAT_C) */
 

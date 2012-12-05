@@ -1,7 +1,7 @@
 /* VMD250.H     (c) Copyright Harold Grovesteen, 2009                */
 /*              z/VM 5.4 DIAGNOSE call X'250'                        */
 
-// $Id: vmd250.h 5448 2009-08-10 08:20:51Z rbowler $
+// $Id$
 
 #if !defined(__VMD250_H__)
 #define __VMD250_H__

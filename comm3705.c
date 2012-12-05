@@ -114,6 +114,13 @@ static PARSER ptab[]={
     {"switched","%s"},
     {"lnctl","%s"},
     {"debug","%s"},
+    {"emu3791","%s"},
+    {"locsuba","%s"},
+    {"rmtsuba","%s"},
+    {"locncpnm","%s"},
+    {"rmtncpnm","%s"},
+    {"idblk","%s"},
+    {"idnum","%s"},
     {NULL,NULL}
 };
 
@@ -128,7 +135,14 @@ enum {
     COMMADPT_KW_ENABLETO,
     COMMADPT_KW_SWITCHED,
     COMMADPT_KW_LNCTL,
-    COMMADPT_KW_DEBUG
+    COMMADPT_KW_DEBUG,
+    COMMADPT_KW_EMU3791,
+    COMMADPT_KW_LOCSUBA,
+    COMMADPT_KW_RMTSUBA,
+    COMMADPT_KW_LOCNCPNM,
+    COMMADPT_KW_RMTNCPNM,
+    COMMADPT_KW_IDBLK,
+    COMMADPT_KW_IDNUM
 } comm3705_kw;
 
 //////////////////////////////////////////////////////////////////////
@@ -366,62 +380,6 @@ struct sockaddr_in *sin;
 }
 
 #endif
-/*-------------------------------------------------------------------*/
-/* SUBROUTINE TO REMOVE ANY IAC SEQUENCES FROM THE DATA STREAM       */
-/* Returns the new length after deleting IAC commands                */
-/*-------------------------------------------------------------------*/
-static int
-remove_iac (BYTE *buf, int len)
-{
-int     m, n, c;
-
-    for (m=0, n=0; m < len; ) {
-        /* Interpret IAC commands */
-        if (buf[m] == IAC) {
-            /* Treat IAC in last byte of buffer as IAC NOP */
-            c = (++m < len)? buf[m++] : NOP;
-            /* Process IAC command */
-            switch (c) {
-            case IAC: /* Insert single IAC in buffer */
-                buf[n++] = IAC;
-                break;
-            case BRK: /* Set ATTN indicator */
-                break;
-            case IP: /* Set SYSREQ indicator */
-                break;
-            case WILL: /* Skip option negotiation command */
-            case WONT:
-            case DO:
-            case DONT:
-                m++;
-                break;
-            case SB: /* Skip until IAC SE sequence found */
-                for (; m < len; m++) {
-                    if (buf[m] != IAC) continue;
-                    if (++m >= len) break;
-                    if (buf[m] == SE) { m++; break; }
-                } /* end for */
-            default: /* Ignore NOP or unknown command */
-                break;
-            } /* end switch(c) */
-        } else {
-            /* Copy data bytes */
-            if (n < m) buf[n] = buf[m];
-            m++; n++;
-        }
-    } /* end for */
-
-    if (n < m) {
-        TNSDEBUG3("console: DBG001: %d IAC bytes removed, newlen=%d\n",
-                m-n, n);
-        packet_trace (buf, n);
-    }
-
-    return n;
-
-} /* end function remove_iac */
-
-
 /*-------------------------------------------------------------------*/
 /* SUBROUTINE TO DOUBLE UP ANY IAC BYTES IN THE DATA STREAM          */
 /* Returns the new length after inserting extra IAC bytes            */
@@ -1210,7 +1168,7 @@ static void commadpt_read_tty(COMMADPT *ca, BYTE * bfr, int len)
 		ca->eol_flag = 0;
 		if (ca->is_3270) {
                    if (eor) {
-		       ca->inpbufl = remove_iac(ca->inpbuf, ca->rlen3270);
+		       ca->inpbufl = ca->rlen3270;
                        ca->rlen3270 = 0; /* for next msg */
                    }
 		} else {
@@ -1286,7 +1244,7 @@ static void *telnet_thread(void *vca) {
                 ca->is_3270 = 0;
             }
 	    socket_set_blocking_mode(ca->sfd,0);  // set to non-blocking mode
-            make_sna_requests4(ca, 0, (ca->is_3270) ? 0x02 : 0x01);   // send REQCONT
+            if (ca->emu3791 == 0) {make_sna_requests4(ca, 0, (ca->is_3270) ? 0x02 : 0x01);}   // send REQCONT
 	    ca->hangup = 0;
 	    for (;;) {
 		usleep(50000);
@@ -1309,11 +1267,11 @@ static void *telnet_thread(void *vca) {
                     }
 		    break;
 //                    make_sna_requests4(ca, 1);   // send REQDISCONT
-                    make_sna_requests5(ca);
+                    if (ca->emu3791 == 0) {make_sna_requests5(ca);}
                 }
 		if (rc == 0) {
 //                    make_sna_requests4(ca, 1);   // send REQDISCONT
-                    make_sna_requests5(ca);
+                    if (ca->emu3791 == 0) {make_sna_requests5(ca);}
                     break;
 		}
                 commadpt_read_tty(ca,bfr,rc);
@@ -1403,7 +1361,6 @@ static int commadpt_init_handler (DEVBLK *dev, int argc, char *argv[])
     int pc; /* Parse code */
     int errcnt;
     struct in_addr in_temp;
-    int etospec;        /* ETO= Specified */
     union {
         int num;
         char text[80];
@@ -1436,7 +1393,15 @@ static int commadpt_init_handler (DEVBLK *dev, int argc, char *argv[])
         dev->commadpt->sfd=-1;
         dev->commadpt->lport=0;
         dev->commadpt->debug_sna=0;
-        etospec=0;
+        dev->commadpt->emu3791=0;
+        dev->commadpt->locsuba = 0x3800;              /* local  subarea = 7 (maxsuba=31)        */
+        dev->commadpt->rmtsuba = 0x4000;              /* remote subarea = 8 (maxsuba=31)        */
+        strcpy(dev->commadpt->locncpnm,"MHP3705 ");   /* local  NCP name                        */
+        strcpy(dev->commadpt->rmtncpnm,"MHPRMT1 ");   /* remote NCP name                        */
+        translate_to_ebcdic(dev->commadpt->locncpnm); /* convert to EBCDIC                      */
+        translate_to_ebcdic(dev->commadpt->rmtncpnm); /* convert to EBCDIC                      */
+        dev->commadpt->idblk = 0x17;                  /* IDBLK of switched PU (default=0x017)   */
+        dev->commadpt->idnum = 0x17;                  /* IDNUM of switched PU (default=0x00017) */
 
         for(i=0;i<argc;i++)
         {
@@ -1483,6 +1448,34 @@ static int commadpt_init_handler (DEVBLK *dev, int argc, char *argv[])
                         msg013e(dev,"LHOST",res.text);
                         errcnt++;
                     }
+                    break;
+                case COMMADPT_KW_EMU3791:
+                    if(strcasecmp(res.text,"yes")==0 || strcmp(res.text,"1"))
+                        dev->commadpt->emu3791=1;
+                    break;
+                case COMMADPT_KW_LOCSUBA:
+                        dev->commadpt->locsuba = (atoi(res.text)<<11); /* (maxsuba=31) */
+                    break;
+                case COMMADPT_KW_RMTSUBA:
+                        dev->commadpt->rmtsuba = (atoi(res.text)<<11); /* (maxsuba=31) */
+                    break;
+                case COMMADPT_KW_LOCNCPNM:
+                        strcpy(dev->commadpt->locncpnm,"        ");
+                        strcpy(dev->commadpt->locncpnm,res.text);
+                        memcpy(&dev->commadpt->locncpnm[strlen(res.text)]," ",1);
+                        translate_to_ebcdic(dev->commadpt->locncpnm);
+                    break;
+                case COMMADPT_KW_RMTNCPNM:
+                        strcpy(dev->commadpt->rmtncpnm,"        ");
+                        strcpy(dev->commadpt->rmtncpnm,res.text);
+                        memcpy(&dev->commadpt->rmtncpnm[strlen(res.text)]," ",1);
+                        translate_to_ebcdic(dev->commadpt->rmtncpnm);
+                    break;
+                case COMMADPT_KW_IDBLK:
+                        sscanf(res.text,"%3x",&dev->commadpt->idblk);
+                    break;
+                case COMMADPT_KW_IDNUM:
+                        sscanf(res.text,"%5x",&dev->commadpt->idnum);
                     break;
                 default:
                     break;
@@ -1602,10 +1595,11 @@ static int commadpt_close_device ( DEVBLK *dev )
 }
 
 void make_seq (COMMADPT * ca, BYTE * reqptr) {
-    if (reqptr[4] == 0x38) {
+    if (reqptr[4] == (ca->locsuba >> 8)) { /* local NCP  */
         reqptr[6] = (unsigned char)(++ca->ncpa_sscp_seqn >> 8) & 0xff;
         reqptr[7] = (unsigned char)(  ca->ncpa_sscp_seqn     ) & 0xff;
-    } else {
+    } else
+    if (reqptr[4] == (ca->rmtsuba >> 8)){ /* remote NCP */
         reqptr[6] = (unsigned char)(++ca->ncpb_sscp_seqn >> 8) & 0xff;
         reqptr[7] = (unsigned char)(  ca->ncpb_sscp_seqn     ) & 0xff;
     }
@@ -1703,7 +1697,7 @@ static void make_sna_requests2 (COMMADPT *ca) {
                 logmsg("no buffers trying to send SNA request2\n");
                 return;
         }
-        respbuf = 4 + (BYTE*)eleptr;
+        respbuf = SIZEOF_INT_P + (BYTE*)eleptr;
 
         /* first do the ten-byte FID1 TH */
         respbuf[0] = 0x1C;
@@ -1777,7 +1771,7 @@ static void make_sna_requests3 (COMMADPT *ca) {
                 logmsg("no buffers trying to send SNA request3\n");
                 return;
         }
-        respbuf = 4 + (BYTE*)eleptr;
+        respbuf = SIZEOF_INT_P + (BYTE*)eleptr;
 
         /* first do the ten-byte FID1 TH */
         respbuf[0] = 0x1D;
@@ -1815,13 +1809,14 @@ static void make_sna_requests4 (COMMADPT *ca, int flag, BYTE pu_type) {
         BYTE    *respbuf;
         BYTE    *ru_ptr;
         int     ru_size;
+        U32     stids;
         void    *eleptr;
         eleptr = get_bufpool(&ca->freeq);
         if (!eleptr)  {
                 logmsg("no buffers trying to send SNA request4\n");
                 return;
         }
-        respbuf = 4 + (BYTE*)eleptr;
+        respbuf = SIZEOF_INT_P + (BYTE*)eleptr;
 
         /* first do the ten-byte FID1 TH */
         respbuf[0] = 0x1C;
@@ -1853,17 +1848,18 @@ static void make_sna_requests4 (COMMADPT *ca, int flag, BYTE pu_type) {
             ru_ptr[ru_size++] = 0x02;
             ru_ptr[ru_size++] = 0x84;
 
-            ru_ptr[ru_size++] = 0x40;      // network address of link
+            ru_ptr[ru_size++] = (ca->rmtsuba >> 8); // network address of link
             ru_ptr[ru_size++] = 0x01;
 
             ru_ptr[ru_size++] = pu_type;      // PU type
 
             ru_ptr[ru_size++] = 0x00;
 
-            ru_ptr[ru_size++] = 0x01;      // IDBLK=017,IDNUM=00017
-            ru_ptr[ru_size++] = 0x70;
-            ru_ptr[ru_size++] = 0x00;
-            ru_ptr[ru_size++] = 0x17;
+            stids = ((ca->idblk << 20) & 0xfff00000) | (ca->idnum & 0x000fffff); // 12 bit IDBLK, 20 bit IDNUM
+            ru_ptr[ru_size++] = (stids >> 24) &0xff;
+            ru_ptr[ru_size++] = (stids >> 16) &0xff;
+            ru_ptr[ru_size++] = (stids >>  8) &0xff;
+            ru_ptr[ru_size++] =  stids        &0xff;
         } else {
             ru_ptr[ru_size++] = 0x01;      // REQDISCONT (REQUEST DISCONTACT)
             ru_ptr[ru_size++] = 0x02;
@@ -1888,7 +1884,7 @@ static void make_sna_requests5 (COMMADPT *ca) {
                 logmsg("no buffers trying to send SNA request5\n");
                 return;
         }
-        respbuf = 4 + (BYTE*)eleptr;
+        respbuf = SIZEOF_INT_P + (BYTE*)eleptr;
 
         /* first do the ten-byte FID1 TH */
         respbuf[0] = 0x1C;
@@ -1933,7 +1929,7 @@ void make_sna_requests (BYTE * requestp, COMMADPT *ca) {
                 logmsg("no buffers trying to send SNA request\n");
                 return;
         }
-        respbuf = 4 + (BYTE*)eleptr;
+        respbuf = SIZEOF_INT_P + (BYTE*)eleptr;
 
         /* first do the ten-byte FID1 TH */
 //        respbuf[0] = requestp[0];
@@ -2014,7 +2010,7 @@ void make_sna_response (BYTE * requestp, COMMADPT *ca) {
                 logmsg("no buffers trying to send SNA response\n");
                 return;
         }
-        respbuf = 4 + (BYTE*)eleptr;
+        respbuf = SIZEOF_INT_P + (BYTE*)eleptr;
 
         /* first do the ten-byte FID1 TH */
         respbuf[0] = requestp[0];
@@ -2043,25 +2039,14 @@ void make_sna_response (BYTE * requestp, COMMADPT *ca) {
 	    ca->ncp_addr1 = requestp[3];
 //            ca->ncp_sscp_seqn = 0;
             ru_ptr[ru_size++] = 0x02;
-            if (requestp[2] == 0x40) {  /* DAF subarea field = 8? */
-                ru_ptr[ru_size++] = 0xd4;   /* DS CL8'MHPRMT1 ' - NCP load mod name */
-                ru_ptr[ru_size++] = 0xc8;
-                ru_ptr[ru_size++] = 0xd7;
-                ru_ptr[ru_size++] = 0xd9;
-                ru_ptr[ru_size++] = 0xd4;
-                ru_ptr[ru_size++] = 0xe3;
-                ru_ptr[ru_size++] = 0xf1;
-                ru_ptr[ru_size++] = 0x40;
+            if (requestp[2] == (ca->rmtsuba >> 8)){      /* remote NCP    */
+                memcpy(&ru_ptr[ru_size],ca->rmtncpnm,8); /* load mod name */
+                ru_size += 8;
                 ca->ncpb_sscp_seqn = 0;
-            } else {
-                ru_ptr[ru_size++] = 0xd4;   /* DS CL8'MHP3705 ' - NCP load mod name */
-                ru_ptr[ru_size++] = 0xc8;   /* checked by host at ACTPU time        */
-                ru_ptr[ru_size++] = 0xd7;
-                ru_ptr[ru_size++] = 0xf3;
-                ru_ptr[ru_size++] = 0xf7;
-                ru_ptr[ru_size++] = 0xf0;
-                ru_ptr[ru_size++] = 0xf5;
-                ru_ptr[ru_size++] = 0x40;
+            } else
+            if (requestp[2] == (ca->locsuba >> 8)){      /* local  NCP    */
+                memcpy(&ru_ptr[ru_size],ca->locncpnm,8); /* load mod name */
+                ru_size += 8;
                 ca->ncpa_sscp_seqn = 0;
             }
         }
@@ -2122,6 +2107,64 @@ void make_sna_response (BYTE * requestp, COMMADPT *ca) {
         put_bufpool(&ca->sendq, eleptr);
 }
 
+enum fid_remap {
+	MAP_FID1_FID2,
+	MAP_FID2_FID1
+};
+
+static void th_remap(enum fid_remap r, BYTE * thptr, U16 locsuba)
+{ /* for 3791 support, remaps SNA FID1 <--> FID2 TH headers */
+int     thmpf;
+int     thm2;
+int     thdaf;
+int     thoaf;
+int     thsnf;
+int     len;
+
+    if (r == MAP_FID1_FID2)
+    {
+        thmpf = thptr[0];
+        thm2  = thptr[1];
+        thdaf = (thptr[2] << 8) + thptr[3];
+        thoaf = (thptr[4] << 8) + thptr[5];
+        thsnf = (thptr[6] << 8) + thptr[7];
+        len = (thptr[8] << 8) + thptr[9];
+        len += 10;
+        thptr[0] = (len >> 8) & 0xff;
+        thptr[1] = len & 0xff;
+        thptr[2] = 0x00;
+        thptr[3] = 0x00;
+        thptr[4] = 0x20 | (thmpf & 0x0f);
+        thptr[5] = thm2;
+        thptr[6] = thdaf & 0xff;
+        thptr[7] = thoaf & 0xff;
+        thptr[8] = (thsnf >> 8) & 0xff;
+        thptr[9] = thsnf & 0xff;
+    }
+    else
+    { /* map fid2 to fid1 */
+        len = (thptr[0] << 8) + thptr[1];
+        thmpf = thptr[4];
+        thm2  = thptr[5];
+        thdaf = thptr[6];
+        thoaf = thptr[7];
+        thsnf = (thptr[8] << 8) + thptr[9];
+        thdaf |= locsuba; 
+        thoaf |= 0x0800;   /* SSCP subarea = 1 (maxsuba=31) */
+        len -= 10;
+        thptr[0] = 0x10 | (thmpf & 0x0f);
+        thptr[1] = thm2;
+        thptr[2] = (thdaf >> 8) & 0xff;
+        thptr[3] = thdaf & 0xff;
+        thptr[4] = (thoaf >> 8) & 0xff;
+        thptr[5] = thoaf & 0xff;
+        thptr[6] = (thsnf >> 8) & 0xff;
+        thptr[7] = thsnf & 0xff;
+        thptr[8] = (len >> 8) & 0xff;
+        thptr[9] = len & 0xff;
+    }
+}
+
 /*-------------------------------------------------------------------*/
 /* Execute a Channel Command Word                                    */
 /*-------------------------------------------------------------------*/
@@ -2133,6 +2176,8 @@ U32 num;                        /* Work : Actual CCW transfer count             
 BYTE    *piudata;
 int     piusize;
 void    *eleptr;
+int     llsize;
+    
     UNREFERENCED(flags);
     UNREFERENCED(chained);
     UNREFERENCED(prevcode);
@@ -2171,11 +2216,17 @@ void    *eleptr;
                 eleptr = get_bufpool(&dev->commadpt->sendq);
                 *residual=count;
                 if (eleptr) {
-                    piudata = 4 + (BYTE*)eleptr;
+                    piudata = SIZEOF_INT_P + (BYTE*)eleptr;
                     piusize = (piudata[8] << 8) + piudata[9];
                     piusize += 10;    // for FID1 TH
                     iobuf[0] = BUFPD;
                     memcpy (&iobuf[BUFPD], piudata, piusize);
+                    if (dev->commadpt->emu3791) {
+                        llsize = piusize + BUFPD;
+                        iobuf[0] = (llsize >> 8) & 0xff;
+                        iobuf[1] = llsize & 0xff;
+                        th_remap(MAP_FID1_FID2, &iobuf[BUFPD], dev->commadpt->locsuba);
+                    }
                     *residual=count - (piusize + BUFPD);
                     logdump("READ", dev, &iobuf[BUFPD], piusize);
                     if (dev->commadpt->debug_sna)
@@ -2192,6 +2243,15 @@ void    *eleptr;
                 break;
 
         /*---------------------------------------------------------------*/
+        /* 3791 WRITE BLOCK                                              */
+        /*---------------------------------------------------------------*/
+        case 0x05:
+                logdump("WRITE BLOCK", dev, iobuf, count);
+                *residual=0;
+                *unitstat=CSW_CE|CSW_DE;
+                break;
+
+        /*---------------------------------------------------------------*/
         /* WRITE type CCWs                                               */
         /*---------------------------------------------------------------*/
         case 0x09:   /* WRITE BREAK */
@@ -2199,6 +2259,8 @@ void    *eleptr;
                 dev->commadpt->write_ccw_count++;
                 dev->commadpt->unack_attn_count = 0;
                 logdump("WRITE", dev, iobuf, count);
+                if (dev->commadpt->emu3791 && (iobuf[4] & 0xf0) == 0x20)
+                    th_remap(MAP_FID2_FID1, iobuf, dev->commadpt->locsuba);
                 if ((iobuf[0] & 0xf0) == 0x10) {  // if FID1
                     if (dev->commadpt->debug_sna)
                         format_sna(iobuf, "WR", dev->devnum);

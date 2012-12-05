@@ -1,7 +1,7 @@
 /* DECIMAL.C    (c) Copyright Roger Bowler, 1991-2009                */
 /*              ESA/390 Packed Decimal Routines                      */
 
-// $Id: decimal.c 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module contains packed decimal subroutines for ESA/390.      */

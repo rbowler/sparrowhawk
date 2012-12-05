@@ -149,6 +149,8 @@ and how they are used.
     0590      <a href="#3420">3480</a>    /dev/nst0 <a href="#Quantum">--no-erg</a> <a href="#Quantum">--blkid-32</a>   # <a href="#Quantum">Quantum DLT SCSI</a>
 
     0023      <a href="#comline">2703</a>    lport=3780 rhost=localhost rport=3781 dial=no
+    00C3      <a href="#remtty">2703</a>     lport=32003 dial=IN tty=1
+
 
 </pre></code>
 </td></tr></table>
@@ -320,11 +322,19 @@ and how they are used.
             <td>037 United States/Canada</td>
         <tr><td align="center"><code>437/500</code></td>
             <td>437 PC United States</td>
-            <td>500 Latin 1</td>
+            <td>500 International</td>
         </tr>
-        <tr><td align="center"><code>850/273</code></td>
-            <td>850 PC Latin 1</td>
-            <td>273 Austria/Germany</td>
+        <tr><td align="center"><code>437/1047</code></td>
+            <td>437 PC United States</td>
+            <td>1047 Open Systems Latin 1</td>
+        </tr>
+        <tr><td align="center"><code>819/037</code></td>
+            <td>819 ISO-8859-1</td>
+            <td>037 United States/Canada</td>
+        </tr>
+        <tr><td align="center"><code>819/037v2</code></td>
+            <td>819 ISO-8859-1</td>
+            <td>037 United States/Canada version 2</td>
         </tr>
         <tr><td align="center"><code>819/273</code></td>
             <td>819 ISO-8859-1</td>
@@ -358,27 +368,40 @@ and how they are used.
             <td>819 ISO-8859-1</td>
             <td>500 International</td>
         </tr>
-        <tr><td align="center"><code>437/1047</code></td>
-            <td>437 PC United States</td>
-            <td>1047 Open Systems Latin 1</td>
-        </tr>
         <tr><td align="center"><code>819/1047</code></td>
             <td>819 ISO-8859-1</td>
             <td>1047 Open Systems Latin 1</td>
         </tr>
-        <tr><td align="center"><code>1252/1047</code></td>
-            <td>1252 Windows Latin 1</td>
-            <td>1047 Open Systems Latin 1</td>
+        <tr><td align="center"><code>850/273</code></td>
+            <td>850 PC Latin 1</td>
+            <td>273 Austria/Germany</td>
         </tr>
         <tr><td align="center"><code>850/1047</code></td>
             <td>850 PC Latin 1</td>
             <td>1047 Open Systems Latin 1</td>
         </tr>
+        <tr><td align="center"><code>1252/037</code></td>
+            <td>1252 Windows Latin 1</td>
+            <td>037 United States/Canada</td>
+        </tr>
+        <tr><td align="center"><code>1252/037v2</code></td>
+            <td>1252 Windows Latin 1</td>
+            <td>037 United States/Canada version 2</td>
+        </tr>
+        <tr><td align="center"><code>1252/1047</code></td>
+            <td>1252 Windows Latin 1</td>
+            <td>1047 Open Systems Latin 1</td>
+        </tr>
+        <tr><td align="center"><code>1252/1140</code></td>
+            <td>1252 Windows Latin 1</td>
+            <td>1140 United States/Canada with Euro</td>
+        </tr>
     </table>
     </blockquote>
     <p>
 
-    Iconv single byte codepages may also be used (e.g. <code>UTF8/EBCDIC-CP-NL</code>).
+    Iconv single byte codepages may also be used (e.g. <code>UTF8/EBCDIC-CP-NL</code>)
+    if the host environment supports iconv.
     <p>
 
     If no codepage is specified then the environment variable HERCULES_CP
@@ -606,16 +629,13 @@ and how they are used.
     <p>
 
 <a name="ENGINES"></a>
-<dt><code>ENGINES &nbsp; [<em>nn</em>*] CP
-    &#124; IL
-    &#124; AP
-    &#124; IP
-    [,...]</code>
+<dt><code>ENGINES &nbsp; [<em>nn</em>*]CP&#124;IL&#124;AP&#124;IP[,...]</code>
 <dd><p>
     specifies the type of engine for each installed processor.
     The default engine type is CP.
     <p>
     <em>nn</em>* is an optional repeat count.
+    Spaces are not permitted.
     <p>
     Examples:
     <p>
@@ -825,7 +845,9 @@ and how they are used.
     <tt>SET MAX_CPU_ENGINES=<em>nn</em></tt>
     before performing nmake.
     <p>
-    <code>MAX_CPU_ENGINES</code> cannot exceed 64. For performance reasons,
+    <code>MAX_CPU_ENGINES</code> may be up to 128 on 64-bit Linux platforms.
+    On Windows, and on all 32-bit platforms, the maximum value is 64.
+    For performance reasons,
     values above 32 are not recommended for 32-bit platforms.
     If <code>MAX_CPU_ENGINES</code> is set to 1 then multiprocessing is disabled.
     See also <a href="#NUMCPU">NUMCPU</a> for a discussion of the performance
@@ -1805,6 +1827,11 @@ and how they are used.
                 <td>TCP Socket</td>
             </tr>
 
+            <tr><td>2703</td>
+                <td><a href="#remtty">Remote Teletype</a></td>
+                <td>TCP Socket</td>
+            </tr>
+           
             </table>
 
         </td>
@@ -1863,7 +1890,9 @@ and how they are used.
         as a terminal type suffix, then the connection will only be eligible for
         any terminal devices which do <i>not</i> have a group name specified on
         their device statements. The terminal group name, if specified, should
-        obviously <i>not</i> be a hexadecimal number.
+        be 1 to 8 alphanumeric characters, the first character being alphabetic,
+        and it should <i>not</i> be a hexadecimal number. Upper and lower case
+        letters in the group name are considered to be equivalent.
         <p>
 
     <a name="loc3270ipaddr"></a>
@@ -2177,6 +2206,63 @@ and how they are used.
         If the <code>noclear</code> argument is not specified, then
         any previous content of the file is destroyed when the file
         is opened for output.
+        <p>
+
+    <dt><code>fcbcheck</code>
+    <dd><p>
+        specifies that an attempt to skip to a FCB channel for which no
+        line number has been set will cause the command to be rejected
+        with a unit check. This is the default.
+        <p>
+
+    <dt><code>nofcbcheck</code>
+    <dd><p>
+        specifies that an attempt to skip to a FCB channel for which no
+        line number has been set will cause the next line of output to be
+        printed on the next line on the printer output. The opposite,
+        <code>fcbcheck</code>, is the default.
+        <p>
+
+    <dt><code>rawcc</code>
+    <dd><p>
+        specifies that printer output CCWs are not to be interpreted, but
+        simply dumped in hex to the printer output file. This is useful for
+        debugging. Default is to interpret printer CCWs normally.
+        <p>
+
+    <dt><code>fcb=<em>argument</em></code>
+    <dd><p>
+        specifies an initial FCB image to use for this printer. The argument
+        may either consist of 12 numbers separated by commas (these are the
+        line numbers for channels 1 to 12), or of pairs of numbers in the
+        format <em>nn</em><b>:</b><em>chan</em> where <em>chan</em> is the
+        channel number and <em>nn</em> is the line number that the channel
+        corresponds to. Use <code>00</code> to leave the line number unset
+        for a channel (see <code>fcbcheck</code> above). The default is
+        <code>fcb=1,7,13,19,25,31,37,43,63,49,55,61</code>
+        which is equivalent to
+        <code>fcb=1:1,7:2,13:3,19:4,25:5,31:6,37:7,43:8,63:9,49:10,55:11,61:12</code>
+        <p>
+
+    <dt><code>browse &#124; print</code>
+    <dd><p>
+        specifies whether the output should be optimized and cleaned up for
+        browsing, or optimized for printing. The default is <code>browse</code>.
+        <p>
+
+    <dt><code>index=<em>nn</em></code>
+    <dd><p>
+        specifies 3211 indexing. Valid values are 0 to 31. The default is 0.
+        <p>
+
+    <dt><code>lpi=6&#124;8</code>
+    <dd><p>
+        specifies vertical spacing of 6 or 8 lines per inch.
+        <p>
+
+    <dt><code>lpp=<em>nn</em></code>
+    <dd><p>
+        specifies the number of lines per page. The default is 66.
         <p>
 
     </dl>
@@ -3367,7 +3453,7 @@ ROUTE  00  172.021.003.032  255.255.255.224
 <hr width="50%"><p>
 
 <a name="comline"></a>
-<dt><em>Communication Line</em>
+<dt><em>Communication Line - BSC</em>
 <dd><p>
     ( Preliminary 2703 BSC Support )
     <p>
@@ -3460,6 +3546,41 @@ ROUTE  00  172.021.003.032  255.255.255.224
 
     </dl> <!-- end Communication Adapter tuning options -->
 
+<a name="remtty"></a>
+<dt><em>Communication Line - TTY</em>
+<dd><p>
+    ( Preliminary 2703 TELE2 TTY Support )
+    <p>
+
+    Describes a 2703 Telegraph Terminal Control Type II (TTY 33/35) stop/start line, providing access to the Host OS via a standard TELNET client.
+
+    <p>
+    To the host OS the line emulates an asynchronous TELE2 connection.  The communication is emulated over a TELNET connection. 
+    <p>
+
+    The following options define the line emulation behaviour:
+    <p>
+
+    <dl> <!-- begin Communication Adapter parms -->
+
+    <dt><code>lport=<em>port number</em></code>
+    <dd><p>
+        Specifies the TCPIP port to listen on for incoming TCP calls.
+        <p>
+
+    <dt><code>dial=IN</code>
+    <dd><p>
+        Specifies that this line is for in-bound calls. Required.
+        <p>
+
+    <dt><code>tty=1</code>
+    <dd><p>
+        Specifies that this definition is for a TTY port. Required
+        <p>
+
+    </dl> <!-- end Communication Adapter parms -->
+
+
 </dl> <!-- end Arguments for each device type -->
 
 <center><hr width=15% noshade></center>
@@ -3471,6 +3592,6 @@ If you have a question about Hercules, see the
 <p><center><hr width=15% noshade>
 <a href="hercinst.html"><img src="images/back.gif" border=0 alt="back"></a>
 </center>
-<p class="lastupd">Last updated $Date: 2009-12-25 12:57:55 -0600 (Fri, 25 Dec 2009) $ $Revision: 5566 $</p>
+<p class="lastupd">Last updated $Date$ $Revision$</p>
 </BODY>
 </HTML>

@@ -1,6 +1,6 @@
 /* HOSTINFO.C   (c) Copyright "Fish" (David B. Trout), 2002-2009     */
 
-// $Id: hostinfo.c 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 
 /*   Released under the Q Public License                             */
 /*      (http://www.hercules-390.org/herclic.html)                   */

@@ -6,7 +6,7 @@
 /* prototypes required by Hercules in the MSVC environment           */
 /*-------------------------------------------------------------------*/
 
-// $Id: hercwind.h 5373 2009-06-02 06:03:58Z fish $
+// $Id$
 //
 // $Log$
 // Revision 1.19  2008/06/22 05:54:30  fish
@@ -49,6 +49,8 @@
 #if defined( _MSC_VER ) && (_MSC_VER < 1300)
   #error MSVC compiler versions less than 13.0 not supported.
 #endif
+
+#pragma intrinsic( memset, memcmp, memcpy )
 
 ///////////////////////////////////////////////////////////////////////
 // The following is mostly for issuing "warning" messages since MS's
@@ -120,6 +122,7 @@ typedef int             pid_t;
 typedef int             mode_t;
 
 #include <io.h>
+#include <share.h>
 #include <process.h>
 #include <signal.h>
 #include <direct.h>
@@ -132,6 +135,7 @@ typedef int             mode_t;
 #define S_IRUSR         _S_IREAD
 #define S_IWUSR         _S_IWRITE
 #define S_IRGRP         _S_IREAD
+#define S_IROTH         _S_IREAD
 #define S_ISREG(m)      (((m) & _S_IFMT) == _S_IFREG)
 #define S_ISDIR(m)      (((m) & _S_IFMT) == _S_IFDIR)
 #define S_ISCHR(m)      (((m) & _S_IFMT) == _S_IFCHR)
@@ -142,6 +146,8 @@ typedef int             mode_t;
 #define W_OK            2
 #define R_OK            4
 
+#define hopen           w32_hopen
+
 #define strcasecmp      stricmp
 #define strncasecmp     strnicmp
 
@@ -149,6 +155,9 @@ typedef int             mode_t;
 #define vsnprintf       _vsnprintf
 #define strerror        w32_strerror
 #define strerror_r      w32_strerror_r
+
+#define srandom         srand
+#define random          rand
 
 #define inline          __inline
 #define __inline__      __inline

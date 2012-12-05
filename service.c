@@ -4,7 +4,7 @@
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: service.c 5623 2010-02-09 00:46:57Z fish $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module implements service processor functions                */
@@ -784,7 +784,10 @@ int servc_hresume(void *file)
             SR_READ_VALUE(file, len, &servc_attn_pending, sizeof(servc_attn_pending));
             break;
         case SR_SYS_SERVC_SCPCMD:
-            SR_READ_STRING(file, servc_scpcmdstr, sizeof(servc_scpcmdstr));
+            if ( len <= sizeof(servc_scpcmdstr) )
+                SR_READ_STRING(file, servc_scpcmdstr, sizeof(servc_scpcmdstr));
+            else
+                SR_READ_SKIP(file, len);
             break;
         case SR_SYS_SERVC_SQC:
             SR_READ_VALUE(file, len, &servc_signal_quiesce_count,

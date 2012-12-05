@@ -6,7 +6,7 @@
 /*   (http://www.hercules-390.org/herclic.html) as modifications to  */
 /*   Hercules.                                                       */
 
-// $Id: hsccmd.c 5628 2010-02-13 14:03:36Z jmaynard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module implements the various Hercules System Console        */
@@ -16,6 +16,37 @@
 /* add additional help text to the HelpTab HELPTAB. Both tables are  */
 /* near the end of this module.                                      */
 /*-------------------------------------------------------------------*/
+
+/* 
+
+   Standard conventions are:
+
+     argc             contains the number of elements in argv[]
+     argv[0]          contains the actual command
+     argv[1..argc-1]  contains the optional arguments
+     cmdline          contains the original command line
+
+     returncode:
+
+     0 = Success
+
+     < 0 Error: Command not executed
+
+     > 1 Failure:  one or more functions could not complete
+
+   int test_cmd(int argc, char *argv[],char *cmdline)
+   {
+
+   .
+   .
+   .
+   return rc
+
+   }
+   
+
+*/
+
 
 #include "hstdinc.h"
 
@@ -42,11 +73,11 @@
 #define MAX_DEVLIST_DEVICES  1024
 
 #if defined(FEATURE_ECPSVM)
-extern void ecpsvm_command(int argc,char **argv);
+extern void ecpsvm_command(int argc, char **argv);
 #endif
-int ProcessPanelCommand (char*);
-int process_script_file(char *,int);
-
+int ProcessPanelCommand(char*);
+int process_script_file(char *, int);
+static void fcb_dump(DEVBLK*, char *, unsigned int);
 
 /* $test_cmd - do something or other */
 
@@ -569,6 +600,269 @@ int version_cmd(int argc, char *argv[],char *cmdline)
     return 0;
 }
 
+/*-------------------------------------------------------------------*/
+/* fcb - display or load                                             */
+/*-------------------------------------------------------------------*/
+int fcb_cmd(int argc, char *argv[], char *cmdline)
+{
+    U16      devnum;
+    U16      lcss;
+    DEVBLK*  dev;
+    char*    devclass;
+    int      rc;
+    int      iarg,jarg;
+    int      chan;
+    int      line;
+    char     wbuf[150];
+    int      wlpi;
+    int      windex;
+    int      wlpp;
+    int      wffchan;
+    int      wfcb[FCBSIZE+1];
+    char     *ptr, *nxt;
+
+    UNREFERENCED(cmdline);
+
+    /* process specified printer device */
+
+    if (argc < 2)
+    {
+        logmsg( _("HHCPN021E Missing device address\n")) ;
+        return -1 ;
+    }
+
+    rc=parse_single_devnum(argv[1],&lcss,&devnum);
+    if (rc<0)
+    {
+        return -1;
+    }
+
+    if (!(dev = find_device_by_devnum (lcss,devnum)))
+    {
+        devnotfound_msg(lcss,devnum);
+        return -1;
+    }
+
+    (dev->hnd->query)(dev, &devclass, 0, NULL);
+
+    if (strcasecmp(devclass,"PRT"))
+    {
+        logmsg( _("HHCPNzzzE Device %d:%4.4X is not a printer device\n"),
+                  lcss, devnum );
+        return -1;
+    }
+
+    if ( argc == 2 ) 
+    {
+        fcb_dump(dev, wbuf, sizeof(wbuf));
+        logmsg("HHCPN210I %d:%4.4X %s\n",
+                lcss, devnum, wbuf);
+        return 0;
+    }
+
+    if ( !dev->stopprt )
+    {
+        logmsg( _("HHCPNzzzE Device %d:%4.4X not stopped \n"),
+                  lcss, devnum );
+        return -1;
+    }
+
+    wlpi = dev->lpi;
+    wlpp = dev->lpp;
+    wffchan = dev->ffchan;
+    for (line = 0; line <= FCBSIZE; line++)
+        wfcb[line] = dev->fcb[line];
+
+    for (iarg = 2; iarg < argc; iarg++)
+    {
+        if (strncasecmp("lpi=", argv[iarg], 4) == 0)
+        {
+            ptr = argv[iarg]+4;
+            errno = 0;
+            wlpi = (int) strtoul(ptr,&nxt,10) ;
+            if (errno != 0 || nxt == ptr || *nxt != 0 || ( wlpi != 6 && wlpi != 8 && wlpi != 10) )
+            {
+                jarg = ptr - argv[iarg] ;
+                logmsg("HHCPN103E %d:%4.4X Printer: parameter %s in argument %d at position %d is invalid\n",
+                        SSID_TO_LCSS(dev->ssid), dev->devnum, argv[iarg], iarg + 1, jarg);
+                return -1;
+            }
+            continue;
+        }
+
+        if (strncasecmp("index=", argv[iarg], 6) == 0)
+        {
+            if (0x3211 != dev->devtype )
+            {
+                logmsg("HHCPN103E %d:%4.4X Printer: parameter %s in argument %d at position %d is invalid\n",
+                        SSID_TO_LCSS(dev->ssid), dev->devnum, argv[iarg], iarg + 1, 1);
+                return -1;
+            }
+            ptr = argv[iarg]+6;
+            errno = 0;
+            windex = (int) strtoul(ptr,&nxt,10) ;
+            if (errno != 0 || nxt == ptr || *nxt != 0 || ( windex < 0 || windex > 15) )
+            {
+                jarg = ptr - argv[iarg] ;
+                logmsg("HHCPN103E %d:%4.4X Printer: parameter %s in argument %d at position %d is invalid\n",
+                        SSID_TO_LCSS(dev->ssid), dev->devnum, argv[iarg], iarg + 1, jarg);
+                return -1;
+            }
+            continue;
+        }
+        
+        if (strncasecmp("lpp=", argv[iarg], 4) == 0)
+        {
+            ptr = argv[iarg]+4;
+            errno = 0;
+            wlpp = (int) strtoul(ptr,&nxt,10) ;
+            if (errno != 0 || nxt == ptr || *nxt != 0 ||wlpp > FCBSIZE)
+            {
+                jarg = ptr - argv[iarg] ;
+                logmsg("HHCPN103E %d:%4.4X Printer: parameter %s in argument %d at position %d is invalid\n",
+                        SSID_TO_LCSS(dev->ssid), dev->devnum, argv[iarg], iarg + 1, jarg);
+                return -1;
+            }
+            continue;
+        }
+#if 0
+        if (strncasecmp("ffchan=", argv[iarg], 7) == 0)
+        {
+            ptr = argv[iarg]+7;
+            errno = 0;
+            wffchan = (int) strtoul(ptr,&nxt,10) ;
+            if (errno != 0 || nxt == ptr || *nxt != 0 ||  wffchan < 1 || wffchan > 12)
+            {
+                jarg = ptr - argv[iarg] ;
+                logmsg("HHCPN103E %d:%4.4X Printer: parameter %s in argument %d at position %d is invalid\n",
+                        SSID_TO_LCSS(dev->ssid), dev->devnum, argv[iarg], iarg + 1, jarg);
+                return -1;
+            }
+            continue ;
+        }
+#endif
+        if (strncasecmp("fcb=", argv[iarg], 4) == 0)
+        {
+            for (line = 0 ; line <= FCBSIZE; line++)  wfcb[line] = 0;
+            /* check for simple mode */
+            if ( strstr(argv[iarg],":") )
+            {
+                /* ':" found  ==> new mode */
+                ptr = argv[iarg]+4;
+                while (*ptr)
+                {
+                    errno = 0;
+                    line = (int) strtoul(ptr,&nxt,10) ;
+                    if (errno != 0 || *nxt != ':' || nxt == ptr || line > wlpp || wfcb[line] != 0 )
+                    {
+                        jarg = ptr - argv[iarg] ;
+                        logmsg("HHCPN103E %d:%4.4X Printer: parameter %s in argument %d at position %d is invalid\n",
+                                SSID_TO_LCSS(dev->ssid), dev->devnum, argv[iarg], iarg + 1, jarg);
+                        return -1;
+                    }
+
+                    ptr = nxt + 1 ;
+                    errno = 0;
+                    chan = (int) strtoul(ptr,&nxt,10) ;
+                    if (errno != 0 || (*nxt != ',' && *nxt != 0) || nxt == ptr || chan < 1 || chan > 12 )
+                    {
+                        jarg = ptr - argv[iarg] ;
+                        logmsg("HHCPN103E %d:%4.4X Printer: parameter %s in argument %d at position %d is invalid\n",
+                                SSID_TO_LCSS(dev->ssid), dev->devnum, argv[iarg], iarg + 1, jarg);
+                        return -1;
+                    }
+                    wfcb[line] = chan;
+                    if ( nxt == 0 )
+                        break ;
+                    ptr = nxt + 1;
+                }
+
+            }
+            else
+            {
+                /* ':" NOT found  ==> old mode */
+                ptr = argv[iarg]+4;
+                chan = 0;
+                while (*ptr)
+                {
+                    errno = 0;
+                    line = (int) strtoul(ptr,&nxt,10) ;
+                    if (errno != 0 || (*nxt != ',' && *nxt != 0) || nxt == ptr || line > wlpp || wfcb[line] != 0 )
+                    {
+                        jarg = ptr - argv[iarg] ;
+                        logmsg("HHCPN103E %d:%4.4X Printer: parameter %s in argument %d at position %d is invalid\n",
+                                SSID_TO_LCSS(dev->ssid), dev->devnum, argv[iarg], iarg + 1, jarg);
+                        return -1;
+                    }
+                    chan += 1;
+                    if ( chan > 12 )
+                    {
+                        jarg = ptr - argv[iarg] ;
+                        logmsg("HHCPN103E %d:%4.4X Printer: parameter %s in argument %d at position %d is invalid\n",
+                                SSID_TO_LCSS(dev->ssid), dev->devnum, argv[iarg], iarg + 1, jarg);
+                        return -1;
+                    }
+                    wfcb[line] = chan;
+                    if ( nxt == 0 )
+                        break ;
+                    ptr = nxt + 1;
+                }
+                if ( chan != 12 )
+                {
+                    jarg = 5 ;
+                    logmsg("HHCPN103E %d:%4.4X Printer: parameter %s in argument %d at position %d is invalid\n",
+                            SSID_TO_LCSS(dev->ssid), dev->devnum, argv[iarg], iarg + 1, jarg);
+                    return -1;
+                }
+            }
+                
+            continue;
+        }
+
+        logmsg("HHCPN102E %d:%4.4X Printer: parameter %s in argument %d is invalid\n",
+                SSID_TO_LCSS(dev->ssid), dev->devnum, argv[iarg], iarg + 1);
+        return -1;
+    }
+
+    /* It's all ok, copy it to the dev block */
+    dev->lpi = wlpi;
+    dev->index = windex ;
+    dev->lpp = wlpp;
+    dev->ffchan = wffchan;
+    for (line = 0; line <= FCBSIZE; line++)
+        dev->fcb[line] = wfcb[line];
+
+    fcb_dump(dev, wbuf, sizeof(wbuf));
+    logmsg("HHCPN210I %d:%4.4X %s\n",
+            lcss, devnum, wbuf );
+    return 0;
+}
+
+static void fcb_dump(DEVBLK* dev, char *buf, unsigned int buflen)
+{
+    int i;
+    char wrk[16];
+    char sep[1];
+    sep[0] = '=';
+    snprintf( buf, buflen, "lpi=%d index=%d lpp=%d fcb", dev->lpi, dev->index, dev->lpp );
+    for (i = 1; i <= dev->lpp; i++)
+    {
+        if (dev->fcb[i] != 0)
+        {
+            sprintf(wrk, "%c%d:%d", sep[0], i, dev->fcb[i]);
+            sep[0] = ',' ;
+            if (strlen(buf) + strlen(wrk) >= buflen - 4)
+            {
+                /* Too long, truncate it */
+                strcat(buf, ",...");
+                return;
+            }
+            strcat(buf, wrk);
+        }
+    }
+    return;
+
+}
 
 /*-------------------------------------------------------------------*/
 /* start command - start CPU (or printer device if argument given)   */
@@ -1518,11 +1812,7 @@ static void try_scsi_refresh( DEVBLK* dev )
     // once mounted has now been manually unmounted for example).
 
     // The reasons for why this is not possible is clearly explained
-    // in the 'update_status_scsitape' function in 'scsitape.c'. All
-    // we can ever hope to do here is either cause an already-running
-    // auto-mount thread to exit (if the user has just now disabled
-    // auto-mounts) or else cause one to automatically start (if they
-    // just enabled auto-mounts and there's no tape already mounted).
+    // in the 'update_status_scsitape' function in 'scsitape.c'.
 
     // If the user manually unloaded a mounted tape (such that there
     // is now no longer a tape mounted even though the drive status
@@ -1537,7 +1827,6 @@ static void try_scsi_refresh( DEVBLK* dev )
     gen_parms.action  = GENTMH_SCSI_ACTION_UPDATE_STATUS;
     gen_parms.dev     = dev;
 
-    broadcast_condition( &dev->stape_exit_cond );   // (force exit if needed)
     VERIFY( dev->tmh->generic( &gen_parms ) == 0 ); // (maybe update status)
     usleep(10*1000);                                // (let thread start/end)
 }
@@ -1607,9 +1896,8 @@ int scsimount_cmd(int argc, char *argv[], char *cmdline)
 
         logmsg
         (
-            _("SCSI auto-mount thread %s active for drive %u:%4.4X = %s.\n")
-
-            ,dev->stape_mountmon_tid ? "IS" : "is NOT"
+            _("thread %s active for drive %u:%4.4X = %s.\n")
+            ,dev->stape_mntdrq.link.Flink ? "IS" : "is NOT"
             ,SSID_TO_LCSS(dev->ssid)
             ,dev->devnum
             ,dev->filename
@@ -2034,7 +2322,7 @@ char c;
         }
         else if(sysblk.httpport)
         {
-            logmsg(_("HHCxxnnnS HTTP server already active\n"));
+            logmsg(_("HHCCF040S HTTP server already active\n"));
             return -1;
         }
         else
@@ -2072,14 +2360,14 @@ char c;
             if ( create_thread (&sysblk.httptid, DETACHED,
                                 http_server, NULL, "http_server") )
             {
-                logmsg(_("HHCIN005S Cannot create http_server thread: %s\n"),
+                logmsg(_("HHCCF041S Cannot create http_server thread: %s\n"),
                         strerror(errno));
                 return -1;
             }
         }
     }
     else
-        logmsg(_("HHCxxnnnI HTTPPORT %d\n"),sysblk.httpport);
+        logmsg(_("HHCCF049I HTTPPORT %d\n"),sysblk.httpport);
     return 0;
 }
 
@@ -2106,7 +2394,7 @@ char c;
         sysblk.http_server_kludge_msecs = http_server_kludge_msecs;
     }
     else
-        logmsg(_("HHCxxnnnS HTTP_SERVER_CONNECT_KLUDGE value: %s\n" )
+        logmsg(_("HHCCF042S HTTP_SERVER_CONNECT_KLUDGE value: %s\n" )
                 ,sysblk.http_server_kludge_msecs);
     return 0;
 }
@@ -2222,7 +2510,7 @@ int pantitle_cmd(int argc, char *argv[], char *cmdline)
         sysblk.pantitle = strdup(argv[1]);
     }
     else
-        logmsg( _("HHCxxnnnI pantitle = %s\n"),sysblk.pantitle);
+        logmsg( _("HHCCF100I pantitle = %s\n"),sysblk.pantitle);
 
     return 0;
 }
@@ -2239,13 +2527,13 @@ int msghld_cmd(int argc, char *argv[], char *cmdline)
   {
     if(!strcasecmp(argv[1], "info"))
     {
-      logmsg("Current message held time is %d seconds.\n", sysblk.keep_timeout_secs);
+      logmsg("HHCCF101I Current message held time is %d seconds.\n", sysblk.keep_timeout_secs);
       return(0);
     }
     else if(!strcasecmp(argv[1], "clear"))
     {
       expire_kept_msgs(1);
-      logmsg("Held messages cleared.\n");
+      logmsg("HHCCF102I Held messages cleared.\n");
       return(0);
     }
     else
@@ -2255,7 +2543,7 @@ int msghld_cmd(int argc, char *argv[], char *cmdline)
       if(sscanf(argv[1], "%d", &new_timeout) && new_timeout >= 0)
       {
         sysblk.keep_timeout_secs = new_timeout;
-        logmsg("The message held time is set to %d seconds.\n", sysblk.keep_timeout_secs);
+        logmsg("HHCCF103I The message held time is set to %d seconds.\n", sysblk.keep_timeout_secs);
         return(0);
       }
     }
@@ -2963,7 +3251,7 @@ char range[256];
             return -1;
         }
         if (c[0] == '.')
-            addr[1] += addr[0];
+            addr[1] += addr[0] - 1;
         if (trace)
         {
             sysblk.traceaddr[0] = addr[0];
@@ -2996,12 +3284,12 @@ char range[256];
         sprintf(range, "range %" I64_FMT "x%c%" I64_FMT "x",
                 sysblk.traceaddr[0], c[0],
                 c[0] != '.' ? sysblk.traceaddr[1] :
-                sysblk.traceaddr[1] - sysblk.traceaddr[0]);
+                sysblk.traceaddr[1] - sysblk.traceaddr[0] + 1);
     else if (!trace && (sysblk.stepaddr[0] != 0 || sysblk.stepaddr[1] != 0))
         sprintf(range, "range %" I64_FMT "x%c%" I64_FMT "x",
                 sysblk.stepaddr[0], c[0],
                 c[0] != '.' ? sysblk.stepaddr[1] :
-                sysblk.stepaddr[1] - sysblk.stepaddr[0]);
+                sysblk.stepaddr[1] - sysblk.stepaddr[0] + 1);
 
     /* Determine if this trace is on or off for message */
     on = (trace && sysblk.insttrace) || (!trace && sysblk.inststep);
@@ -3241,13 +3529,13 @@ int lsid_cmd(int argc, char *argv[], char *cmdline)
             sysblk.legacysenseid = 0;
         else
         {
-            logmsg(_("HHCxxnnnE Legacysenseid invalid option: %s\n"),
+            logmsg(_("HHCCF110E Legacysenseid invalid option: %s\n"),
               argv[1]);
             return -1;
         }
     }
     else
-        logmsg(_("HHCxxnnnE Legacysenseid %sabled\n"),
+        logmsg(_("HHCCF111I Legacysenseid %sabled\n"),
           sysblk.legacysenseid?"En":"Dis");
 
     return 0;
@@ -3290,7 +3578,7 @@ int stsi_model_cmd(int argc, char *argv[], char *cmdline)
         set_model(argc, argv[1], argv[2], argv[3], argv[4]);
     else
     {
-        logmsg( _("HHCxxnnnE MODEL: no model code\n"));
+        logmsg( _("HHCCF113E MODEL: no model code\n"));
         return -1;
     }
 
@@ -3311,7 +3599,7 @@ int stsi_plant_cmd(int argc, char *argv[], char *cmdline)
         set_plant(argv[1]);
     else
     {
-        logmsg( _("HHCxxnnnE PLANT: no plant code\n"));
+        logmsg( _("HHCCF114E PLANT: no plant code\n"));
         return -1;
     }
 
@@ -3332,7 +3620,7 @@ int stsi_mfct_cmd(int argc, char *argv[], char *cmdline)
         set_manufacturer(argv[1]);
     else
     {
-        logmsg( _("HHCxxnnnE MANUFACTURER: no manufacturer code\n"));
+        logmsg( _("HHCCF115E MANUFACTURER: no manufacturer code\n"));
         return -1;
     }
 
@@ -3620,24 +3908,6 @@ BYTE c;                                 /* Character work area       */
 }
 
 
-#if defined(FISH_HANG)
-/*-------------------------------------------------------------------*/
-/* FishHangReport - verify/debug proper Hercules LOCK handling...    */
-/*-------------------------------------------------------------------*/
-int FishHangReport_cmd(int argc, char *argv[], char *cmdline)
-{
-    UNREFERENCED(cmdline);
-    UNREFERENCED(argc);
-    UNREFERENCED(argv);
-    FishHangReport();
-#if defined(OPTION_FISHIO)
-    PrintAllDEVTHREADPARMSs();
-#endif
-    return 0;
-}
-#endif // defined(FISH_HANG)
-
-
 static int SortDevBlkPtrsAscendingByDevnum(const void* pDevBlkPtr1, const void* pDevBlkPtr2)
 {
     return
@@ -3879,7 +4149,7 @@ int qd_cmd(int argc, char *argv[], char *cmdline)
         for (j = 0; j < dev->numdevid; j++)
         {
             if (j == 0)
-                logmsg("%4.4x SNSID 00 ",dev->devnum);
+                logmsg("%d:%4.4x SNSID 00 ", SSID_TO_LCSS(dev->ssid), dev->devnum);
             else if (j%16 == 0)
                 logmsg("\n           %2.2x ", j);
             if (j%4 == 0)
@@ -3892,7 +4162,7 @@ int qd_cmd(int argc, char *argv[], char *cmdline)
         for (j = 0; j < dev->numdevchar; j++)
         {
             if (j == 0)
-                logmsg("%4.4x RDC   00 ",dev->devnum);
+                logmsg("%d:%4.4x RDC   00 ", SSID_TO_LCSS(dev->ssid), dev->devnum);
             else if (j%16 == 0)
                 logmsg("\n           %2.2x ", j);
             if (j%4 == 0)
@@ -4471,7 +4741,7 @@ char    c;                              /* work for sscan            */
     else
     {
         argv++; argc--;
-        if (argc < 0 || (devascii = argv[0]) == NULL)
+        if (argc <= 0 || (devascii = argv[0]) == NULL)
         {
             missing_devnum();
             return -1;
@@ -4659,7 +4929,6 @@ DEVBLK*  dev;
 U16      devnum;
 U16      lcss;
 int      i, rc;
-int      nomountedtapereinit = sysblk.nomountedtapereinit;
 int      init_argc;
 char   **init_argv;
 
@@ -4695,33 +4964,6 @@ char   **init_argv;
         logmsg( _("HHCPN096E Device %d:%4.4X busy or interrupt pending\n"),
                   lcss, devnum );
         return -1;
-    }
-
-    /* Prevent accidental re-init'ing of already loaded tape drives */
-    if (nomountedtapereinit)
-    {
-        char*  devclass;
-
-        ASSERT( dev->hnd && dev->hnd->query );
-        dev->hnd->query( dev, &devclass, 0, NULL );
-
-        if (1
-            && strcmp(devclass,"TAPE") == 0
-            && (0
-                || TAPEDEVT_SCSITAPE == dev->tapedevt
-                || (argc >= 3 && strcmp(argv[2], TAPE_UNLOADED) != 0)
-               )
-        )
-        {
-            ASSERT( dev->tmh && dev->tmh->tapeloaded );
-            if (dev->tmh->tapeloaded( dev, NULL, 0 ))
-            {
-                release_lock (&dev->lock);
-                logmsg(_("HHCPN183E Reinit rejected for drive %u:%4.4X; drive not empty\n"),
-                    SSID_TO_LCSS(dev->ssid), dev->devnum);
-                return -1;
-            }
-        }
     }
 
     /* Close the existing file, if any */
@@ -4902,7 +5144,7 @@ REGS *regs;
 
     hostpath(pathname, fname, sizeof(pathname));
 
-    if ((fd = open(pathname, O_CREAT|O_WRONLY|O_EXCL|O_BINARY, S_IREAD|S_IWRITE|S_IRGRP)) < 0)
+    if ((fd = hopen(pathname, O_CREAT|O_WRONLY|O_EXCL|O_BINARY, S_IREAD|S_IWRITE|S_IRGRP)) < 0)
     {
         int saved_errno = errno;
         release_lock(&sysblk.cpulock[sysblk.pcpu]);
@@ -6926,6 +7168,7 @@ int sizeof_cmd(int argc, char *argv[], char *cmdline)
     logmsg(_("HHCPN161I FILENAME_MAX ......%7d\n"),FILENAME_MAX);
     logmsg(_("HHCPN161I PATH_MAX ..........%7d\n"),PATH_MAX);
     logmsg(_("HHCPN161I CPU_BITMAP ........%7d\n"),sizeof(CPU_BITMAP));
+    logmsg(_("HHCPN161I FD_SETSIZE ........%7d\n"),FD_SETSIZE);
     return 0;
 }
 

@@ -4,7 +4,7 @@
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: stack.c 5126 2009-01-23 13:05:56Z bernard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module implements the linkage stack functions of ESA/390     */

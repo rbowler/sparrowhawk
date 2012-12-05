@@ -1,7 +1,7 @@
 /* FEAT370.H    (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              S/370 feature definitions                            */
 
-// $Id: feat370.h 5569 2009-12-27 14:01:09Z hsg001 $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This file defines the architectural features which are included   */
@@ -56,11 +56,14 @@
 //#define FEATURE_EXECUTE_EXTENSIONS_FACILITY
 //#define FEATURE_EXTENDED_IMMEDIATE
 //#define FEATURE_EXTENDED_TRANSLATION_FACILITY_3
+//#define FEATURE_FLOATING_POINT_EXTENSION_FACILITY
 //#define FEATURE_GENERAL_INSTRUCTIONS_EXTENSION_FACILITY
 //#define FEATURE_LONG_DISPLACEMENT
 //#define FEATURE_MESSAGE_SECURITY_ASSIST
 //#define FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_1
 //#define FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_2
+//#define FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_3
+//#define FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_4
 //#define FEATURE_PARSING_ENHANCEMENT_FACILITY
 
 #endif /*defined(OPTION_370_MODE)*/

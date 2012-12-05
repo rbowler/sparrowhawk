@@ -4,7 +4,7 @@
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: plo.c 5126 2009-01-23 13:05:56Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.24  2008/03/05 23:15:13  ptl00

@@ -4,7 +4,7 @@
 /*  This header file contains equates for the socket functions       */
 /*  and constants whose values differ between Unix and Winsock       */
 
-// $Id: hsocket.h 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.10  2007/06/23 00:04:11  ivan

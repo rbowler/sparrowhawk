@@ -1,7 +1,7 @@
 /* SR.H         (c)Copyright Greg Smith, 2004-2009                   */
 /*              Suspend/Resume a Hercules session                    */
 
-// $Id: sr.h 5126 2009-01-23 13:05:56Z bernard $
+// $Id$
 
 /*
  * The suspend/resume functions allow a hercules instance to be

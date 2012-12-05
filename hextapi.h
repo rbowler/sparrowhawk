@@ -7,7 +7,7 @@
 /*  AND THEREFORE, THE INTERFACE MAY CHANGE             */
 /********************************************************/
 
-// $Id: hextapi.h 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.5  2007/06/23 00:04:11  ivan

@@ -1,7 +1,7 @@
 /* TRACE.C      (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              Implicit tracing functions                           */
 
-// $Id: trace.c 5127 2009-01-23 13:25:01Z bernard $
+// $Id$
 
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */

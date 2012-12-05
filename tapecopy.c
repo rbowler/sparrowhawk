@@ -1,7 +1,7 @@
 /* TAPECOPY.C   (c) Copyright Roger Bowler, 1999-2010                */
 /*              Convert SCSI tape into AWSTAPE format                */
 
-// $Id: tapecopy.c 5593 2010-01-05 14:25:19Z rbowler $
+// $Id$
 
 /*              Read from AWSTAPE and write to SCSI tape mods        */
 /*              Copyright 2005-2009 James R. Maynard III             */
@@ -176,7 +176,7 @@ static void print_usage (void)
         "Where:\n\n"
 
         "   tapedrive    specifies the device filename of the SCSI tape drive.\n"
-        "                Must begin with /dev to be recognized.\n"
+        "                Must begin with /dev%s to be recognized.\n"
         "   awsfile      specifies the filename of the AWSTAPE disk file.\n\n"
 
         "The first filename is the input; the second is the output.\n\n"
@@ -203,8 +203,8 @@ static void print_usage (void)
         "   %2d           Unrecoverable I/O error obtaining status of SCSI device.\n"
         "   %2d           Unrecoverable I/O error reading block header\n"
         "                from AWSTAPE disk file.\n"
-        "   %2d           AWSTAPE block size too large.\n"
         "   %2d           Unrecoverable I/O error reading data block.\n"
+        "   %2d           AWSTAPE block size too large.\n"
         "   %2d           Unrecoverable I/O error writing tapemark.\n"
         "   %2d           Unrecoverable I/O error writing block header\n"
         "                to AWSTAPE disk file.\n"
@@ -212,6 +212,11 @@ static void print_usage (void)
         "\n"
         )
 
+#if defined(_MSVC_)
+        ," or \\\\.\\Tape"
+#else
+        ,""
+#endif
         ,RC_SUCCESS
         ,RC_ERROR_BAD_ARGUMENTS
         ,RC_ERROR_OPENING_SCSI_DEVICE
@@ -221,8 +226,8 @@ static void print_usage (void)
         ,RC_ERROR_REWINDING_SCSI
         ,RC_ERROR_OBTAINING_SCSI_STATUS
         ,RC_ERROR_READING_AWS_HEADER
-        ,RC_ERROR_AWSTAPE_BLOCK_TOO_LARGE
         ,RC_ERROR_READING_DATA
+        ,RC_ERROR_AWSTAPE_BLOCK_TOO_LARGE
         ,RC_ERROR_WRITING_TAPEMARK
 
         ,RC_ERROR_WRITING_OUTPUT_AWS_HEADER_BLOCK
@@ -643,12 +648,12 @@ int             is3590 = 0;             /* 1 == 3590, 0 == 3480/3490 */
     if (filenamein)
     {
         hostpath( pathname, filenamein, sizeof(pathname) );
-        diskfd = open (pathname, O_RDONLY | O_BINARY);
+        diskfd = hopen(pathname, O_RDONLY | O_BINARY);
     }
     else
     {
         hostpath( pathname, filenameout, sizeof(pathname) );
-        diskfd = open (pathname, O_WRONLY | O_CREAT | O_BINARY,
+        diskfd = hopen(pathname, O_WRONLY | O_CREAT | O_BINARY,
                         S_IRUSR | S_IWUSR | S_IRGRP);
     }
     if (diskfd < 0)

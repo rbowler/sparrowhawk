@@ -4,7 +4,7 @@
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: ipl.c 5405 2009-06-10 12:34:17Z rbowler $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module implements the Initial Program Load (IPL) function of */
@@ -27,6 +27,9 @@
 #if defined(OPTION_FISHIO)
 #include "w32chan.h"
 #endif // defined(OPTION_FISHIO)
+#if defined(_FEATURE_MESSAGE_SECURITY_ASSIST)
+#include "hexterns.h"
+#endif
 
 /*-------------------------------------------------------------------*/
 /* Function to perform System Reset   (either 'normal' or 'clear')   */
@@ -96,6 +99,11 @@ int ARCH_DEP(system_reset) (int cpu, int clear)
 
         /* Perform I/O subsystem reset */
         io_reset ();
+
+#if defined(FEATURE_LOAD_PROGRAM_PARAMETER_FACILITY)
+        /* Clear the program-parameter register */
+        sysblk.program_parameter = 0;
+#endif /*defined(FEATURE_LOAD_PROGRAM_PARAMETER_FACILITY)*/
 
         /* Clear storage */
         sysblk.main_clear = sysblk.xpnd_clear = 0;
@@ -426,6 +434,7 @@ int ARCH_DEP(initial_cpu_reset) (REGS *regs)
     regs->fpc    = 0;
     regs->PX     = 0;
     regs->psw.AMASK_G = AMASK24;
+
     /* 
      * ISW20060125 : Since we reset the prefix, we must also adjust 
      * the PSA ptr
@@ -469,6 +478,10 @@ int ARCH_DEP(initial_cpu_reset) (REGS *regs)
 
     if(regs->host && regs->guestregs)
       ARCH_DEP(initial_cpu_reset)(regs->guestregs);
+
+#if defined(_FEATURE_MESSAGE_SECURITY_ASSIST)
+    renew_wrapping_keys();
+#endif /*defined(_FEATURE_MESSAGE_SECURITY_ASSIST)*/
 
     return 0;
 } /* end function initial_cpu_reset */

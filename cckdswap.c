@@ -1,7 +1,7 @@
 /* CCKDSWAP.C   (c) Copyright Roger Bowler, 1999-2009                */
 /*       Swap the `endianess' of a compressed CKD file.              */
 
-// $Id: cckdswap.c 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module changes the `endianess' of a compressed CKD file.     */
@@ -75,7 +75,7 @@ DEVBLK         *dev=&devblk;            /* -> DEVBLK                 */
 
         /* open the input file */
         hostpath(dev->filename, argv[i], sizeof(dev->filename));
-        dev->fd = open (dev->filename, O_RDWR|O_BINARY);
+        dev->fd = hopen(dev->filename, O_RDWR|O_BINARY);
         if (dev->fd < 0)
         {
             cckdumsg (dev, 700, "open error: %s\n", strerror(errno));

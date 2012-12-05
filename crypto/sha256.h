@@ -1,7 +1,7 @@
 /* $OpenBSD: sha2.h,v 1.2 2004/04/28 23:11:57 millert Exp $ */
 /* modified for use with dyncrypt */
 
-// $Id: sha256.h 4102 2006-12-08 09:43:35Z jj $
+// $Id$
 
 /*
  * FILE:        sha2.h

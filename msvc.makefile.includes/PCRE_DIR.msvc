@@ -3,7 +3,7 @@
 # --------------------------------------------------------------------------
 # (c) Copyright Roger Bowler, 2005-2007
 # --------------------------------------------------------------------------
-# $Id: PCRE_DIR.msvc 5407 2009-06-14 18:34:54Z fish $
+# $Id$
 #
 #  Handles support for PCRE (Perl Compatible Regular Expressions),
 #  for MSVC, needed by HAO (Hercules Automatic Operator) facility

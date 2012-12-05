@@ -1,7 +1,7 @@
 /* DASDCOPY.C   (c) Copyright Roger Bowler, 1999-2010                */
 /*              Copy a dasd file to another dasd file                */
 
-// $Id: dasdcopy.c 5589 2010-01-04 09:26:36Z rbowler $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /*      This program copies a dasd file to another dasd file.        */
@@ -193,7 +193,7 @@ char            pgmpath[MAX_PATH];      /* prog path in host format  */
     {
         BYTE buf[8];
         hostpath(pathname, ifile, sizeof(pathname));
-        fd = open (pathname, O_RDONLY|O_BINARY);
+        fd = hopen(pathname, O_RDONLY|O_BINARY);
         if (fd < 0)
         {
             fprintf (stderr, _("HHCDC001E %s: %s open error: %s\n"),

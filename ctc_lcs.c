@@ -5,7 +5,7 @@
 // Copyright (C) 2002-2009 by James A. Pierson    (original author)
 // Copyright (C) 2002-2009 by David B. Trout      (current maintainer)
 //
-// $Id: ctc_lcs.c 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.81  2008/12/23 14:01:22  rbowler
@@ -2354,6 +2354,7 @@ static int  BuildOAT( char* pszOATName, PLCSBLK pLCSBLK )
         // Read next record from the OAT file
         if( !ReadOAT( pszOATName, fp, szBuff ) )
         {
+            fclose( fp );
             return 0;
         }
 

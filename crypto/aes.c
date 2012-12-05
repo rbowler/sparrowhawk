@@ -1,7 +1,7 @@
 /* $OpenBSD: rijndael.c,v 1.18 2005/05/25 05:47:53 markus Exp $ */
 /* modified for use by dyncrypt */
 
-// $Id: aes.c 4102 2006-12-08 09:43:35Z jj $
+// $Id$
 
 /**
  * rijndael-alg-fst.c

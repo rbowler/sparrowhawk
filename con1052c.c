@@ -1,7 +1,7 @@
 /* CON1052.C    (c)Copyright Jan Jaeger, 2004-2009                   */
 /*              Emulated 1052 on hercules console                    */
 
-// $Id: con1052c.c 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.14  2007/11/21 22:54:14  fish
@@ -213,7 +213,7 @@ BYTE    c;                              /* Print character           */
         /* Perform end of record processing if not data-chaining,
            and append carriage return and newline if required */
         if ((flags & CCW_FLAGS_CD) == 0
-//        && code == 0x09
+          && code == 0x09
           && len < BUFLEN_1052)
             iobuf[len++] = '\n';
 

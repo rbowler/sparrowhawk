@@ -15,7 +15,7 @@
 //
 //   Please read README.NETWORKING for more info.
 //
-// $Id: ctcadpt.c 5311 2009-04-05 08:14:17Z rbowler $
+// $Id$
 
 #include "hstdinc.h"
 

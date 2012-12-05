@@ -1,7 +1,7 @@
 /* CCKDDASD.C   (c) Copyright Roger Bowler, 1999-2009                */
 /*       ESA/390 Compressed CKD Direct Access Storage Device Handler */
 
-// $Id: cckddasd.c 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module contains device functions for compressed emulated     */
@@ -585,7 +585,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
         cckd_close (dev, sfx);
 
     hostpath(pathname, cckd_sf_name (dev, sfx), sizeof(pathname));
-    cckd->fd[sfx] = open (pathname, flags, mode);
+    cckd->fd[sfx] = hopen(pathname, flags, mode);
     if (sfx == 0) dev->fd = cckd->fd[sfx];
 
     if (cckd->fd[sfx] >= 0)
@@ -3934,6 +3934,7 @@ BYTE            buf[65536];             /* Buffer                    */
         release_lock (&cckd->filelock);
         logmsg (_("HHCCD171E %4.4X file[%d] cannot remove base file\n"),
                 dev->devnum,cckd->sfn);
+        cckd->merging = 0;
         return NULL;
     }
 
@@ -4595,7 +4596,11 @@ int             gctab[5]= {             /* default gcol parameters   */
             obtain_lock (&cckd->iolock);
             cckd_flush_cache (dev);
             while (cckdblk.fsync && cckd->wrpending)
+            {
+                cckd->iowaiters++;
                 wait_condition (&cckd->iocond, &cckd->iolock);
+                cckd->iowaiters--;
+            }
             release_lock (&cckd->iolock);
 
             /* Sync the file */
@@ -5401,7 +5406,12 @@ int   val, opts = 0;
         else val = -77;
 
         /* Parse the keyword */
-        if (strcasecmp (kw, "stats") == 0)
+        if (strcasecmp (kw, "help") == 0)
+        {
+            if (!cmd) return 0;
+            cckd_command_help();
+        }
+        else if (strcasecmp (kw, "stats") == 0)
         {
             if (!cmd) return 0;
             cckd_command_stats ();

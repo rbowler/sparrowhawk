@@ -1,7 +1,7 @@
 /* FEAT390.H    (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              ESA/390 feature definitions                          */
 
-// $Id: feat390.h 5454 2009-08-14 14:25:06Z rbowler $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This file defines the architectural features which are included   */
@@ -60,6 +60,8 @@
 #define FEATURE_MESSAGE_SECURITY_ASSIST
 #define FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_1
 #define FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_2
+#define FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_3
+#define FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_4
 #define FEATURE_MOVE_PAGE_FACILITY_2
 #define FEATURE_MPF_INFO
 #define FEATURE_MSSF_CALL
@@ -89,6 +91,7 @@
 #define FEATURE_TEST_BLOCK
 #define FEATURE_TRACING
 #define FEATURE_WAITSTATE_ASSIST
+#define FEATURE_STORE_FACILITY_LIST
 #define FEATURE_STORE_FACILITY_LIST_EXTENDED
 #define FEATURE_VM_BLOCKIO
 // #define FEATURE_VECTOR_FACILITY

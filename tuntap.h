@@ -6,7 +6,7 @@
 //           (C) 2002-2009 by "Fish" (David B. Trout)
 //
 
-// $Id: tuntap.h 5127 2009-01-23 13:25:01Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.12  2007/06/23 00:04:19  ivan

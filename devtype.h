@@ -1,7 +1,7 @@
 /* DEVTYPE.H    (c) Copyright Jan Jaeger, 1999-2009                  */
 /*              Hercules Device Definitions                          */
 
-// $Id: devtype.h 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.21  2007/11/21 22:48:45  fish

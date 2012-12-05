@@ -5,7 +5,7 @@
 // (http://www.hercules-390.org/herclic.html) as modifications to Hercules.
 //////////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: hconsole.c 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.16  2008/09/02 06:08:09  fish

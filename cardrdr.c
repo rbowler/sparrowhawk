@@ -1,7 +1,7 @@
 /* CARDRDR.C    (c) Copyright Roger Bowler, 1999-2009                */
 /*              ESA/390 Card Reader Device Handler                   */
 
-// $Id: cardrdr.c 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
@@ -464,7 +464,7 @@ char    pathname[MAX_PATH];             /* file path in host format  */
 
     /* Open the device file */
     hostpath(pathname, dev->filename, sizeof(pathname));
-    rc = open (pathname, O_RDONLY | O_BINARY);
+    rc = hopen(pathname, O_RDONLY | O_BINARY);
     if (rc < 0)
     {
         /* Handle open failure */

@@ -2,7 +2,7 @@
 /*              (c) Copyright Jan Jaeger, 1999-2009                  */
 /*              Miscellaneous System Command Routines                */
 
-// $Id: hscmisc.c 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.68  2008/11/04 05:56:31  fish
@@ -223,9 +223,6 @@ static void do_shutdown_now()
 #endif /*defined(OPTION_DYNAMIC_LOAD)*/
        )
     {
-#if defined(FISH_HANG)
-        FishHangAtExit();
-#endif
 #ifdef _MSVC_
         socket_deinit();
 #endif
@@ -260,14 +257,23 @@ static void do_shutdown_wait()
 void do_shutdown()
 {
 TID tid;
-    if(is_wait_sigq_pending())
-        cancel_wait_sigq();
+#if defined(_MSVC_)
+    if ( sysblk.shutimmed )
+        do_shutdown_now();
     else
-        if(can_signal_quiesce() && !signal_quiesce(0,0))
-            create_thread(&tid, DETACHED, do_shutdown_wait,
-                          NULL, "do_shutdown_wait");
+    {
+#endif // defined(_MSVC_)
+        if(is_wait_sigq_pending())
+            cancel_wait_sigq();
         else
-            do_shutdown_now();
+            if(can_signal_quiesce() && !signal_quiesce(0,0))
+                create_thread(&tid, DETACHED, do_shutdown_wait,
+                              NULL, "do_shutdown_wait");
+            else
+                do_shutdown_now();
+#if defined(_MSVC_)
+    }
+#endif // defined(_MSVC_)
 }
 /*-------------------------------------------------------------------*/
 /* The following 2 routines display an array of 32/64 registers      */
@@ -350,7 +356,7 @@ static void display_regs64(char *hdr,U16 cpuad,U64 *r,int numcpus)
 void display_inst_regs (REGS *regs, BYTE *inst, BYTE opcode)
 {
     /* Display the general purpose registers */
-    if (!(opcode == 0xB3 || (opcode >= 0x20 && opcode <= 0x3F)) 
+    if (!(opcode == 0xB3 || (opcode >= 0x20 && opcode <= 0x3F))
         || (opcode == 0xB3 && (
                 (inst[1] >= 0x80 && inst[1] <= 0xCF)
                 || (inst[1] >= 0xE1 && inst[1] <= 0xFE)
@@ -698,7 +704,7 @@ static REGS  *copy_regs (REGS *regs)
  REGS  *newregs, *hostregs;
  size_t size;
 
-    size = SIE_MODE(regs) ? 2*sizeof(REGS) : sizeof(REGS);
+    size = (SIE_MODE(regs) || SIE_ACTIVE(regs)) ? 2*sizeof(REGS) : sizeof(REGS);
     newregs = malloc(size);
     if (newregs == NULL)
     {
@@ -713,8 +719,10 @@ static REGS  *copy_regs (REGS *regs)
     newregs->ghostregs = 1;
     newregs->hostregs = newregs;
     newregs->guestregs = NULL;
+    newregs->sie_active=0;
 
     /* Copy host regs if in SIE mode */
+    /* newregs is a SIE Guest REGS */
     if(SIE_MODE(newregs))
     {
         hostregs = newregs + 1;
@@ -797,7 +805,7 @@ BYTE    c;                              /* Character work area       */
     if(ITIMER_ACCESS(raddr,16))
         ARCH_DEP(store_int_timer)(regs);
 #endif
-    
+
     if (draflag)
     {
         n = sprintf (buf, "R:"F_RADR":", raddr);
@@ -877,6 +885,7 @@ BYTE    inst[6];                        /* Storage alteration value  */
 BYTE    opcode;
 U16     xcode;
 char    type;
+char    buf[80];
 
     /* Set limit for address range */
   #if defined(FEATURE_ESAME)
@@ -954,7 +963,8 @@ char    type;
         }
         else
             logmsg("         ");
-        DISASM_INSTRUCTION(inst);
+        DISASM_INSTRUCTION(inst, buf);
+        logmsg("%s\n", buf);
         saddr += ilc;
     } /* end for(i) */
 
@@ -1189,8 +1199,8 @@ REGS   *regs;                           /* Copied regs               */
     if (ilc > 2) n += sprintf (buf+n, "%2.2X%2.2X", inst[2], inst[3]);
     if (ilc > 4) n += sprintf (buf+n, "%2.2X%2.2X", inst[4], inst[5]);
     logmsg ("%s %s", buf,(ilc<4) ? "        " : (ilc<6) ? "    " : "");
-    DISASM_INSTRUCTION(inst);
-
+    DISASM_INSTRUCTION(inst, buf);
+    logmsg("%s\n", buf);
 
 #ifdef DISPLAY_INSTRUCTION_OPERANDS
 
@@ -1278,7 +1288,7 @@ REGS   *regs;                           /* Copied regs               */
         || opcode == 0xC6)
     {
         S64 offset = 2LL*(S32)(fetch_fw(inst+2));
-        addr1 = (likely(!regs->execflag)) ? 
+        addr1 = (likely(!regs->execflag)) ?
                         PSW_IA(regs, offset) : \
                         (regs->ET + offset) & ADDRESS_MAXWRAP(regs);
         b1 = 0;
@@ -1292,7 +1302,7 @@ REGS   *regs;                           /* Copied regs               */
                                                 ACCTYPE_READ);
         else
             n = ARCH_DEP(display_virt) (regs, addr1, buf, b1,
-                                (opcode == 0x44 
+                                (opcode == 0x44
 #if defined(FEATURE_EXECUTE_EXTENSIONS_FACILITY)
                                  || (opcode == 0xc6 && !(inst[1] & 0x0f))
 #endif /*defined(FEATURE_EXECUTE_EXTENSIONS_FACILITY)*/
@@ -1484,7 +1494,7 @@ int herc_system (char* command)
 
   #define  SHELL_CMD_SHIM_PGM   "conspawn "
 
-    int rc = strlen(SHELL_CMD_SHIM_PGM) + strlen(command) + 1;
+    int rc = (int)(strlen(SHELL_CMD_SHIM_PGM) + strlen(command) + 1);
     char* pszNewCommandLine = malloc( rc );
     strlcpy( pszNewCommandLine, SHELL_CMD_SHIM_PGM, rc );
     strlcat( pszNewCommandLine, command,            rc );

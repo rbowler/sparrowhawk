@@ -6,7 +6,7 @@
 
 /* MVPG moved from cpu.c to xstore.c   05/07/00 Jan Jaeger */
 
-// $Id: xstore.c 5405 2009-06-10 12:34:17Z rbowler $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module implements the expanded storage instructions          */
@@ -80,7 +80,7 @@ size_t  xoffs;                          /* Byte offset into xpndstor */
 
     /* Obtain abs address, verify access and set ref/change bits */
     vaddr = (regs->GR(r1) & ADDRESS_MAXWRAP(regs)) & XSTORE_PAGEMASK;
-    maddr = MADDR (vaddr, USE_REAL_ADDR, regs, ACCTYPE_WRITE, 0);
+    maddr = MADDRL (vaddr, 4096, USE_REAL_ADDR, regs, ACCTYPE_WRITE, 0);
 
     /* Copy data from expanded to main */
     memcpy (maddr, sysblk.xpndstor + xoffs, XSTORE_PAGESIZE);
@@ -180,7 +180,7 @@ int     r1, r2;                         /* Values of R fields        */
     SYNCHRONIZE_CPUS(regs);
 
     /* Invalidate page table entry */
-    ARCH_DEP(invalidate_pte) (inst[1], r1, r2, regs);
+    ARCH_DEP(invalidate_pte) (inst[1], regs->GR_G(r1), regs->GR_L(r2), regs);
 
     RELEASE_INTLOCK(regs);
 
@@ -512,7 +512,7 @@ BYTE    xpkey1 = 0, xpkey2 = 0;         /* Expanded storage keys     */
     {
         /* Obtain absolute address of main storage block,
            check protection, and set reference and change bits */
-        main1 = MADDR (vaddr1, r1, regs, ACCTYPE_WRITE_SKP, akey1);
+        main1 = MADDRL (vaddr1, 4096, r1, regs, ACCTYPE_WRITE_SKP, akey1);
         sk1 = regs->dat.storkey;
     }
 

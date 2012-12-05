@@ -1,7 +1,7 @@
 /*  VERSION.H   (c) Copyright Roger Bowler, 1999-2009            */
 /*      ESA/390 Emulator Version definition                      */
 
-// $Id: version.h 5604 2010-02-05 14:07:42Z jmaynard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* Header file defining the Hercules version number.                 */

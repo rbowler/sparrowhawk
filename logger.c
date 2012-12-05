@@ -1,7 +1,7 @@
 /* LOGGER.C     (c) Copyright Jan Jaeger, 2003-2009                  */
 /*              System logger functions                              */
 
-// $Id: logger.c 5126 2009-01-23 13:05:56Z bernard $
+// $Id$
 
 /* If standard output or standard error is redirected then the log   */
 /* is written to the redirection.                                    */
@@ -598,7 +598,7 @@ int   new_hrdcpyfd;
         char pathname[MAX_PATH];
         hostpath(pathname, filename, sizeof(pathname));
 
-        new_hrdcpyfd = open(pathname,
+        new_hrdcpyfd = hopen(pathname,
                 O_WRONLY | O_CREAT | O_TRUNC /* O_SYNC */,
                             S_IRUSR  | S_IWUSR | S_IRGRP);
         if(new_hrdcpyfd < 0)

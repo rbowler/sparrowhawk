@@ -1,7 +1,7 @@
 /* CACHE.H    (c)Copyright Greg Smith, 2002-2009                     */
 /*            Buffer Cache Manager                                   */
 
-// $Id: cache.h 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 
 /*-------------------------------------------------------------------
   Description:

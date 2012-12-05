@@ -1,7 +1,7 @@
 /* EXTERNAL.C   (c) Copyright Roger Bowler, 1999-2009                */
 /*              ESA/390 External Interrupt and Timer                 */
 
-// $Id: external.c 5469 2009-10-03 19:11:05Z hsg001 $
+// $Id$
 
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */

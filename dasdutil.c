@@ -1,19 +1,11 @@
-/* DASDUTIL.C   (c) Copyright Roger Bowler, 1999-2009                */
+/* DASDUTIL.C   (c) Copyright Roger Bowler, 1999-2010                */
 /*              Hercules DASD Utilities: Common subroutines          */
 
-// $Id: dasdutil.c 5628 2010-02-13 14:03:36Z jmaynard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module contains common subroutines used by DASD utilities    */
 /*-------------------------------------------------------------------*/
-
-// $Log$
-// Revision 1.60  2007/06/23 00:04:08  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.59  2006/12/08 09:43:20  jj
-// Add CVS message log
-//
 
 #include "hstdinc.h"
 
@@ -523,7 +515,7 @@ CKDDEV         *ckd;                    /* CKD DASD table entry      */
 char           *rmtdev;                 /* Possible remote device    */
 char           *argv[2];                /* Arguments to              */
 int             argc=0;                 /*                           */
-char            sfxname[1024];          /* Suffixed file name        */
+char            sfxname[FILENAME_MAX*2];/* Suffixed file name        */
 char            typname[64];
 char            pathname[MAX_PATH];     /* file path in host format  */
 
@@ -541,6 +533,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
     /* Initialize the devblk */
     dev = &cif->devblk;
     if ((omode & O_RDWR) == 0) dev->ckdrdonly = 1;
+    dev->fd = -1;
     dev->batch = 1;
     dev->dasdcopy = dasdcopy;
 
@@ -550,7 +543,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
     /* Read the device header so we can determine the device type */
     strcpy (sfxname, fname);
     hostpath(pathname, sfxname, sizeof(pathname));
-    fd = open (pathname, omode);
+    fd = hopen(pathname, omode);
     if (fd < 0)
     {
         /* If no shadow file name was specified, then try opening the
@@ -589,7 +582,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
             }
             *suffix = '1';
             hostpath(pathname, sfxname, sizeof(pathname));
-            fd = open (pathname, omode);
+            fd = hopen(pathname, omode);
         }
         if (fd < 0 && rmtdev == NULL)
         {
@@ -1211,7 +1204,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
 
     /* Create the DASD image file */
     hostpath(pathname, fname, sizeof(pathname));
-    fd = open (pathname, O_WRONLY | O_CREAT | x | O_BINARY,
+    fd = hopen(pathname, O_WRONLY | O_CREAT | x | O_BINARY,
                 S_IRUSR | S_IWUSR | S_IRGRP);
     if (fd < 0)
     {
@@ -1355,7 +1348,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
                 r++;
 
                 /* Track 0 contains IPL records and volume label */
-                if (!rawflag && trk == 0)
+                if (!rawflag && fseqn == 1 && trk == 0)
                 {
                     /* Build the IPL1 record */
                     rechdr = (CKDDASD_RECHDR*)pos;
@@ -1437,7 +1430,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
                 } /* end if(trk == 0) */
 
                 /* Track 1 for linux contains an empty VTOC */
-                else if (trk == 1 && nullfmt == CKDDASD_NULLTRK_FMT2)
+                else if (fseqn == 1 && trk == 1 && nullfmt == CKDDASD_NULLTRK_FMT2)
                 {
                     /* build format 4 dscb */
                     rechdr = (CKDDASD_RECHDR*)pos;
@@ -1711,7 +1704,7 @@ int             i;                      /* Array subscript           */
 int             rc;                     /* Return code               */
 char            *s;                     /* String pointer            */
 int             fileseq;                /* File sequence number      */
-char            sfname[260];            /* Suffixed name of this file*/
+char            sfname[FILENAME_MAX];   /* Suffixed name of this file*/
 char            *suffix;                /* -> Suffix character       */
 U32             endcyl;                 /* Last cylinder of this file*/
 U32             cyl;                    /* Cylinder number           */
@@ -1808,7 +1801,13 @@ U32             trksize;                /* DASD image track length   */
             cyl += maxcpif, fileseq++)
     {
         /* Insert the file sequence number in the file name */
-        if (suffix) *suffix = '0' + fileseq;
+        if (suffix)
+        {
+            if (fileseq <= 9)
+                *suffix = '0' + fileseq;
+            else
+                *suffix = 'A' - 10 + fileseq;
+        }
 
         /* Calculate the ending cylinder for this file */
         if (cyl + maxcpif < volcyls)
@@ -1897,7 +1896,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
 
     /* Create the DASD image file */
     hostpath(pathname, fname, sizeof(pathname));
-    fd = open (pathname, O_WRONLY | O_CREAT | x | O_BINARY,
+    fd = hopen(pathname, O_WRONLY | O_CREAT | x | O_BINARY,
                 S_IRUSR | S_IWUSR | S_IRGRP);
     if (fd < 0)
     {
@@ -2027,7 +2026,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
 
     /* Create the DASD image file */
     hostpath(pathname, fname, sizeof(pathname));
-    fd = open (pathname, O_WRONLY | O_CREAT | x | O_BINARY,
+    fd = hopen(pathname, O_WRONLY | O_CREAT | x | O_BINARY,
                 S_IRUSR | S_IWUSR | S_IRGRP);
     if (fd < 0)
     {

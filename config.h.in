@@ -1,5 +1,8 @@
 /* config.h.in.  Generated from configure.ac by autoheader.  */
 
+/* Define if building universal (internal helper macro) */
+#undef AC_APPLE_UNIVERSAL_BUILD
+
 /* Define if hercifc program is to be built */
 #undef BUILD_HERCIFC
 
@@ -21,9 +24,6 @@
 
 /* Define to build interface to external Windows GUI */
 #undef EXTERNALGUI
-
-/* Define to debug correct fthreads LOCK handling (requires fthreads) */
-#undef FISH_HANG
 
 /* Define to 1 if you have the `alphasort' function. */
 #undef HAVE_ALPHASORT
@@ -446,16 +446,16 @@
 /* Define to 1 if you have the `strtok_r' function. */
 #undef HAVE_STRTOK_R
 
-/* Define to 1 if `s_addr' is member of `struct in_addr'. */
+/* Define to 1 if `s_addr' is a member of `struct in_addr'. */
 #undef HAVE_STRUCT_IN_ADDR_S_ADDR
 
-/* Define to 1 if `sa_sigaction' is member of `struct sigaction'. */
+/* Define to 1 if `sa_sigaction' is a member of `struct sigaction'. */
 #undef HAVE_STRUCT_SIGACTION_SA_SIGACTION
 
-/* Define to 1 if `sin_len' is member of `struct sockaddr_in'. */
+/* Define to 1 if `sin_len' is a member of `struct sockaddr_in'. */
 #undef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
 
-/* Define to 1 if `tv_nsec' is member of `struct timespec'. */
+/* Define to 1 if `tv_nsec' is a member of `struct timespec'. */
 #undef HAVE_STRUCT_TIMESPEC_TV_NSEC
 
 /* Define to 1 if you have the `sysconf' function. */
@@ -656,6 +656,9 @@
 /* Define to the one symbol short name of this package. */
 #undef PACKAGE_TARNAME
 
+/* Define to the home page for this package. */
+#undef PACKAGE_URL
+
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION
 
@@ -695,9 +698,17 @@
 /* Define when building under Win32 (MinGW or Cygwin) */
 #undef WIN32
 
-/* Define to 1 if your processor stores words with the most significant byte
-   first (like Motorola and SPARC, unlike Intel and VAX). */
-#undef WORDS_BIGENDIAN
+/* Define WORDS_BIGENDIAN to 1 if your processor stores words with the most
+   significant byte first (like Motorola and SPARC, unlike Intel). */
+#if defined AC_APPLE_UNIVERSAL_BUILD
+# if defined __BIG_ENDIAN__
+#  define WORDS_BIGENDIAN 1
+# endif
+#else
+# ifndef WORDS_BIGENDIAN
+#  undef WORDS_BIGENDIAN
+# endif
+#endif
 
 /* Define missing macro on apple darwin (osx) platform */
 #undef _BSD_SOCKLEN_T_

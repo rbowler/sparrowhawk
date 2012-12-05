@@ -4,7 +4,7 @@
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: chsc.c 5242 2009-03-05 21:33:26Z jj $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module implements channel subsystem interface functions      */

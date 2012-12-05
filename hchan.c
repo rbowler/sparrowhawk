@@ -2,7 +2,7 @@
 /* Based on work (c)Roger Bowler, Jan Jaeger & Others 1999-2009      */
 /*              Generic channel device handler                       */
 
-// $Id: hchan.c 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 
 /* This code is covered by the QPL Licence                           */
 /**CAUTION*CAUTION*CAUTION*CAUTION*CAUTION*CAUTION*CAUTION*CAUTION****/
@@ -26,6 +26,8 @@
 // Revision 1.9  2006/12/08 09:43:21  jj
 // Add CVS message log
 //
+
+#include "hstdinc.h"
 
 #include "hercules.h"
 

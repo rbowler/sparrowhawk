@@ -1,7 +1,7 @@
 /* $OpenBSD: sha1.h,v 1.4 2004/04/28 20:39:35 hshoexer Exp $ */
 /* modified for use with dyncrypt */
 
-// $Id: sha1.h 4102 2006-12-08 09:43:35Z jj $
+// $Id$
 
 /*
  * SHA-1 in C

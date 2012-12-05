@@ -1,7 +1,7 @@
-/* PTTRACE.C    (c) Copyright Greg Smith, 2003-2009                  */
+/* PTTRACE.C    (c) Copyright Greg Smith, 2003-2010                  */
 /*              pthreads trace debugger                              */
 
-// $Id: pttrace.c 5599 2010-01-07 15:09:20Z rbowler $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* Trace threading calls                                             */
@@ -56,11 +56,7 @@ DLL_EXPORT void ptt_trace_init (int n, int init)
         ptttotid = 0;
 #if defined(OPTION_FTHREADS)
         fthread_mutex_init (&ptttolock, NULL);
- #if defined(FISH_HANG)
-        fthread_cond_init (__FILE__, __LINE__, &ptttocond);
- #else
         fthread_cond_init (&ptttocond);
- #endif
 #else
         pthread_mutex_init (&ptttolock, NULL);
         pthread_cond_init (&ptttocond, NULL);
@@ -643,7 +639,7 @@ const char dot = '.';
                 "%-12.12s "                   // Trace type (string; 12 chars)
                 PTR_FMTx" "                   // Data value 1
                 PTR_FMTx" "                   // Data value 2
-                "%-14.14s "                   // File name
+                "%-18.18s "                   // File name
                 "%s%c%6.6ld "                 // Time of day (HH:MM:SS.usecs)
                 "%s\n"                        // Numeric result (or empty string)
 

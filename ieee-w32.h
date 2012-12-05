@@ -1,7 +1,7 @@
 /* IEEE-W32.H   (c) Copyright Greg Smith, 2002-2009                  */
 /*              Hercules IEEE floating point definitions for Windows */
 
-// $Id: ieee-w32.h 5293 2009-03-24 22:52:22Z rbowler $
+// $Id$
 //
 // $Log$
 // Revision 1.13  2008/12/16 16:22:54  rbowler

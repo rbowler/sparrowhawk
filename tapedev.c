@@ -5,7 +5,7 @@
 /* Prime Maintainer: Ivan Warren                                     */
 /* Secondary Maintainer: "Fish" (David B. Trout)                     */
 
-// $Id: tapedev.c 5587 2009-12-31 15:05:57Z rbowler $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
@@ -492,14 +492,47 @@ DEVINITTAB      DevInitTab[]  =         /* Initialization table      */
 /*-------------------------------------------------------------------*/
 /* Initialize the device handler                                     */
 /*-------------------------------------------------------------------*/
-int tapedev_init_handler (DEVBLK *dev, int argc, char *argv[])
+static int tapedev_init_handler (DEVBLK *dev, int argc, char *argv[])
 {
 int             rc;
 DEVINITTAB*     pDevInitTab;
+int             attn = 0;
+
+    /* Set flag so attention will be raised for re-init */
+    if(dev->devtype)
+    {
+        attn = 1;
+    }
 
     /* Close current tape */
     if(dev->fd>=0)
     {
+        /* Prevent accidental re-init'ing of already loaded tape drives */
+        if (sysblk.nomountedtapereinit)
+        {
+            char*  devclass;
+
+            tapedev_query_device(dev, &devclass, 0, NULL);
+
+            if (1
+                && strcmp(devclass,"TAPE") == 0
+                && (0
+                    || TAPEDEVT_SCSITAPE == dev->tapedevt
+                    || (argc >= 3 && strcmp(argv[2], TAPE_UNLOADED) != 0)
+                   )
+            )
+            {
+                ASSERT( dev->tmh && dev->tmh->tapeloaded );
+                if (dev->tmh->tapeloaded( dev, NULL, 0 ))
+                {
+                    release_lock (&dev->lock);
+                    logmsg(_("HHCPN183E Reinit rejected for drive %u:%4.4X; drive not empty\n"),
+                        SSID_TO_LCSS(dev->ssid), dev->devnum);
+                    return -1;
+                }
+            }
+        }
+
         dev->tmh->close(dev);
         dev->fd=-1;
     }
@@ -628,8 +661,7 @@ DEVINITTAB*     pDevInitTab;
 
     /* Initialize SCSI tape control fields */
 #if defined(OPTION_SCSI_TAPE)
-    dev->sstat               = GMT_DR_OPEN(-1);
-    dev->stape_getstat_sstat = GMT_DR_OPEN(-1);
+    dev->sstat = GMT_DR_OPEN(-1);
 #endif
 
     /* Clear the DPA */
@@ -640,9 +672,6 @@ DEVINITTAB*     pDevInitTab;
     /* Request the channel to merge data chained write CCWs into
        a single buffer before passing data to the device handler */
     dev->cdwmerge = 1;
-
-    /* Tape is a syncio type 2 device */
-    dev->syncio = 2;
 
     /* ISW */
     /* Build a 'clear' sense */
@@ -691,6 +720,19 @@ DEVINITTAB*     pDevInitTab;
     if (dev->devchar[8] & 0x08)     // SIC supported?
         dev->SIC_supported = 1;     // remember that fact
 
+    if (dev->tapedevt == TAPEDEVT_SCSITAPE)
+        dev->syncio = 0;  // (SCSI i/o too slow; causes Machine checks)
+    else
+        dev->syncio = 2;  // (aws/het/etc are fast; syncio likely safe)
+
+    /* Make attention pending if necessary */
+    if(attn)
+    {
+        release_lock (&dev->lock);
+        device_attention (dev, CSW_DE);
+        obtain_lock (&dev->lock);
+    }
+
     return rc;
 
 } /* end function tapedev_init_handler */
@@ -699,7 +741,7 @@ DEVINITTAB*     pDevInitTab;
 /*-------------------------------------------------------------------*/
 /* Close the device                                                  */
 /*-------------------------------------------------------------------*/
-int tapedev_close_device ( DEVBLK *dev )
+static int tapedev_close_device ( DEVBLK *dev )
 {
     autoload_close(dev);
     dev->tmh->close(dev);
@@ -931,7 +973,7 @@ int gettapetype_bydata (DEVBLK *dev)
 
     /* Try to determine the type based on actual file contents */
     hostpath( pathname, dev->filename, sizeof(pathname) );
-    rc = open ( pathname, O_RDONLY | O_BINARY );
+    rc = hopen( pathname, O_RDONLY | O_BINARY );
     if (rc >= 0)
     {
         BYTE hdr[6];                    /* block header i/o buffer   */
@@ -1152,8 +1194,7 @@ int  mountnewtape ( DEVBLK *dev, int argc, char **argv )
     /* Initialize device dependent fields */
     dev->fd                = -1;
 #if defined(OPTION_SCSI_TAPE)
-    dev->sstat               = GMT_DR_OPEN(-1);
-    dev->stape_getstat_sstat = GMT_DR_OPEN(-1);
+    dev->sstat             = GMT_DR_OPEN(-1);
 #endif
     dev->omadesc           = NULL;
     dev->omafiles          = 0;
@@ -1442,7 +1483,7 @@ int  mountnewtape ( DEVBLK *dev, int argc, char **argv )
 /*-------------------------------------------------------------------*/
 /* Query the device definition                                       */
 /*-------------------------------------------------------------------*/
-void tapedev_query_device ( DEVBLK *dev, char **class,
+static void tapedev_query_device ( DEVBLK *dev, char **class,
                 int buflen, char *buffer )
 {
     char devparms[ MAX_PATH+1 + 128 ];
@@ -1528,7 +1569,7 @@ void tapedev_query_device ( DEVBLK *dev, char **class,
 
         if ( TAPEDEVT_SCSITAPE != dev->tapedevt
 #if defined(OPTION_SCSI_TAPE)
-            || !STS_NOT_MOUNTED(dev)
+            || STS_MOUNTED(dev)
 #endif
         )
         {
@@ -1671,8 +1712,17 @@ void ReqAutoMount( DEVBLK *dev )
     if (dev->fd < 0)
     {
         BYTE unitstat = 0, code = 0;
+        BYTE *sensebkup;
+
+        /* Save any pending sense */
+        sensebkup=malloc(dev->numsense);
+        memcpy(sensebkup,dev->sense,dev->numsense);
 
         dev->tmh->open( dev, &unitstat, code );
+
+        /* Restore pending sense */
+        memcpy(dev->sense,sensebkup,dev->numsense);
+        free(sensebkup);
 
 #if defined(OPTION_SCSI_TAPE)
         if (TAPEDEVT_SCSITAPE == dev->tapedevt)
@@ -2008,7 +2058,7 @@ int ldpt=0;
 
 #if defined(OPTION_SCSI_TAPE)
         case TAPEDEVT_SCSITAPE:
-            int_scsi_status_update( dev, 0 );   // (internal call)
+            int_scsi_status_update( dev, 0 );
             if ( STS_BOT( dev ) )
             {
                 dev->eotwarning = 0;

@@ -1,7 +1,7 @@
 /* SOCKDEV.H    (c) Copyright Hercules development, 2003-2009        */
 /*              SocketDevice support                                 */
 
-// $Id: sockdev.h 5536 2009-12-11 20:23:16Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.9  2007/06/23 00:04:16  ivan

@@ -1,7 +1,7 @@
 /* PARSER.C     (c) Copyright Nobody, 1999-2001                      */
 /*              Simple parameter parser                              */
 
-// $Id: parser.c 4102 2006-12-08 09:43:35Z jj $
+// $Id$
 //
 // $Log$
 

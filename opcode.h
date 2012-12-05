@@ -4,7 +4,7 @@
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: opcode.h 5573 2009-12-29 13:13:29Z bernard $
+// $Id$
 
 #ifndef _OPCODE_H
 #define _OPCODE_H
@@ -157,6 +157,7 @@ OPC_DLL_IMPORT zz_func opcode_c2xx[][GEN_MAXARCH];                      /*@Z9*/
 OPC_DLL_IMPORT zz_func opcode_c4xx[][GEN_MAXARCH];                      /*208*/
 OPC_DLL_IMPORT zz_func opcode_c6xx[][GEN_MAXARCH];                      /*208*/
 OPC_DLL_IMPORT zz_func opcode_c8xx[][GEN_MAXARCH];
+OPC_DLL_IMPORT zz_func opcode_ccxx[][GEN_MAXARCH];                      /*810*/
 OPC_DLL_IMPORT zz_func opcode_e3xx[][GEN_MAXARCH];
 OPC_DLL_IMPORT zz_func opcode_e4xx[256][GEN_MAXARCH];
 extern         zz_func v_opcode_e4xx[][GEN_MAXARCH];
@@ -167,12 +168,12 @@ OPC_DLL_IMPORT zz_func opcode_ecxx[][GEN_MAXARCH];
 OPC_DLL_IMPORT zz_func opcode_edxx[][GEN_MAXARCH];
 
 
-#define DISASM_INSTRUCTION(_inst) \
-    disasm_table((_inst), 0)
+#define DISASM_INSTRUCTION(_inst, p) \
+    disasm_table((_inst), 0, p)
 
-typedef void (*func) ();
+typedef int (*func) ();
 
-extern void disasm_table (BYTE inst[], char mnemonic[]);
+extern int disasm_table (BYTE inst[], char mnemonic[], char *p);
 
 
 #if defined(OPTION_INSTRUCTION_COUNTING)
@@ -280,16 +281,16 @@ int used; \
    determination only, as it severely impacts performance.       *JJ */
 
 #if defined(OPTION_FOOTPRINT_BUFFER)
-#define FOOTPRINT(_regs) \
+#define FOOTPRINT(_ip, _regs) \
 do { \
     sysblk.footprregs[(_regs)->cpuad][sysblk.footprptr[(_regs)->cpuad]] = *(_regs); \
-    memcpy(&sysblk.footprregs[(_regs)->cpuad][sysblk.footprptr[(_regs)->cpuad]++].inst,(_inst),6); \
+    memcpy(&sysblk.footprregs[(_regs)->cpuad][sysblk.footprptr[(_regs)->cpuad]++].inst,(_ip),6); \
     sysblk.footprptr[(_regs)->cpuad] &= OPTION_FOOTPRINT_BUFFER - 1; \
 } while(0)
 #endif
 
 #if !defined(FOOTPRINT)
-#define FOOTPRINT(_regs)
+#define FOOTPRINT(_ip, _regs)
 #endif
 
 /* PSW Instruction Address manipulation */
@@ -379,7 +380,7 @@ do { \
 
 #define EXECUTE_INSTRUCTION(_ip, _regs) \
 do { \
-    FOOTPRINT ((_regs)); \
+    FOOTPRINT ((_ip), (_regs)); \
     COUNT_INST ((_ip), (_regs)); \
     (_regs)->ARCH_DEP(opcode_table)[_ip[0]]((_ip), (_regs)); \
 } while(0)
@@ -569,9 +570,20 @@ do { \
         (_regs)->program_interrupt( (_regs), PGM_SPECIFICATION_EXCEPTION)
 
     /* Program check if fpc is not valid contents for FPC register */
-#define FPC_CHECK(_fpc, _regs) \
+#if defined(FEATURE_FLOATING_POINT_EXTENSION_FACILITY)          /*810*/
+ #define FPC_BRM FPC_BRM_3BIT
+ #define FPC_CHECK(_fpc, _regs) \
+    if(((_fpc) & FPC_RESV_FPX) \
+     || ((_fpc) & FPC_BRM_3BIT) == BRM_RESV4 \
+     || ((_fpc) & FPC_BRM_3BIT) == BRM_RESV5 \
+     || ((_fpc) & FPC_BRM_3BIT) == BRM_RESV6) \
+        (_regs)->program_interrupt( (_regs), PGM_SPECIFICATION_EXCEPTION)
+#else /*!defined(FEATURE_FLOATING_POINT_EXTENSION_FACILITY)*/   /*810*/
+ #define FPC_BRM FPC_BRM_2BIT
+ #define FPC_CHECK(_fpc, _regs) \
     if((_fpc) & FPC_RESERVED) \
         (_regs)->program_interrupt( (_regs), PGM_SPECIFICATION_EXCEPTION)
+#endif /*!defined(FEATURE_FLOATING_POINT_EXTENSION_FACILITY)*/  /*810*/
 
 #define SSID_CHECK(_regs) \
     if((!((_regs)->GR_LHH(1) & 0x0001)) \
@@ -1198,13 +1210,18 @@ do { \
 
 /* RRR register to register with register */
 #undef RRR
+#undef RRR0
 
 #if !defined(DECODER_TEST)&&!defined(DECODER_TEST_RRR)
  #define RRR(_inst, _regs, _r1, _r2, _r3) \
          RRR_DECODER(_inst, _regs, _r1, _r2, _r3, 4, 4)
+ #define RRR0(_inst, _regs, _r1, _r2, _r3) \
+         RRR_DECODER(_inst, _regs, _r1, _r2, _r3, 4, 0)
 #else
  #define RRR(_inst, _regs, _r1, _r2, _r3) \
          RRR_DECODER_TEST(_inst, _regs, _r1, _r2, _r3, 4, 4)
+ #define RRR0(_inst, _regs, _r1, _r2, _r3) \
+         RRR_DECODER_TEST(_inst, _regs, _r1, _r2, _r3, 4, 0)
 #endif
 
 #define RRR_DECODER(_inst, _regs, _r1, _r2, _r3, _len, _ilc) \
@@ -2898,8 +2915,14 @@ DEF_INST(compression_call);
 /* Instructions in crypto.c */
 DEF_INST(cipher_message_r);
 DEF_INST(cipher_message_with_chaining_r);
-DEF_INST(compute_message_digest_r);
+DEF_INST(compute_intermediate_message_digest_r);
+DEF_INST(compute_last_message_digest_r);
 DEF_INST(compute_message_authentication_code_r);
+DEF_INST(perform_cryptographic_key_management_operation_r);
+DEF_INST(cipher_message_with_cipher_feedback_r);
+DEF_INST(cipher_message_with_counter_r);
+DEF_INST(cipher_message_with_output_feedback_r);
+DEF_INST(perform_cryptographic_computation_r);
 
 
 /* Instructions in control.c */
@@ -2954,7 +2977,7 @@ DEF_INST(set_secondary_asn_with_instance);
 DEF_INST(set_storage_key);
 DEF_INST(set_storage_key_extended);
 DEF_INST(set_system_mask);
-DEF_INST(signal_procesor);
+DEF_INST(signal_processor);
 DEF_INST(store_clock_comparator);
 DEF_INST(store_control);
 DEF_INST(store_cpu_address);
@@ -3334,6 +3357,82 @@ DEF_INST(store_halfword_relative_long);                         /*208*/
 DEF_INST(store_relative_long);                                  /*208*/
 DEF_INST(store_relative_long_long);                             /*208*/
 
+DEF_INST(add_high_high_high_register);                          /*810*/
+DEF_INST(add_high_high_low_register);                           /*810*/
+DEF_INST(add_high_immediate);                                   /*810*/
+DEF_INST(add_logical_high_high_high_register);                  /*810*/
+DEF_INST(add_logical_high_high_low_register);                   /*810*/
+DEF_INST(add_logical_with_signed_immediate_high);               /*810*/
+DEF_INST(add_logical_with_signed_immediate_high_n);             /*810*/
+DEF_INST(branch_relative_on_count_high);                        /*810*/
+DEF_INST(compare_high_high_register);                           /*810*/
+DEF_INST(compare_high_low_register);                            /*810*/
+DEF_INST(compare_high_fullword);                                /*810*/
+DEF_INST(compare_high_immediate);                               /*810*/
+DEF_INST(compare_logical_high_high_register);                   /*810*/
+DEF_INST(compare_logical_high_low_register);                    /*810*/
+DEF_INST(compare_logical_high_fullword);                        /*810*/
+DEF_INST(compare_logical_high_immediate);                       /*810*/
+DEF_INST(load_byte_high);                                       /*810*/
+DEF_INST(load_fullword_high);                                   /*810*/
+DEF_INST(load_halfword_high);                                   /*810*/
+DEF_INST(load_logical_character_high);                          /*810*/
+DEF_INST(load_logical_halfword_high);                           /*810*/
+DEF_INST(rotate_then_insert_selected_bits_high_long_reg);       /*810*/
+DEF_INST(rotate_then_insert_selected_bits_low_long_reg);        /*810*/
+DEF_INST(store_character_high);                                 /*810*/
+DEF_INST(store_fullword_high);                                  /*810*/
+DEF_INST(store_halfword_high);                                  /*810*/
+DEF_INST(subtract_high_high_high_register);                     /*810*/
+DEF_INST(subtract_high_high_low_register);                      /*810*/
+DEF_INST(subtract_logical_high_high_high_register);             /*810*/
+DEF_INST(subtract_logical_high_high_low_register);              /*810*/
+
+DEF_INST(load_and_add);                                         /*810*/
+DEF_INST(load_and_add_long);                                    /*810*/
+DEF_INST(load_and_add_logical);                                 /*810*/
+DEF_INST(load_and_add_logical_long);                            /*810*/
+DEF_INST(load_and_and);                                         /*810*/
+DEF_INST(load_and_and_long);                                    /*810*/
+DEF_INST(load_and_exclusive_or);                                /*810*/
+DEF_INST(load_and_exclusive_or_long);                           /*810*/
+DEF_INST(load_and_or);                                          /*810*/
+DEF_INST(load_and_or_long);                                     /*810*/
+DEF_INST(load_pair_disjoint);                                   /*810*/
+DEF_INST(load_pair_disjoint_long);                              /*810*/
+
+DEF_INST(load_on_condition_register);                           /*810*/
+DEF_INST(load_on_condition_long_register);                      /*810*/
+DEF_INST(load_on_condition);                                    /*810*/
+DEF_INST(load_on_condition_long);                               /*810*/
+DEF_INST(store_on_condition);                                   /*810*/
+DEF_INST(store_on_condition_long);                              /*810*/
+
+DEF_INST(add_distinct_register);                                /*810*/
+DEF_INST(add_distinct_long_register);                           /*810*/
+DEF_INST(add_distinct_halfword_immediate);                      /*810*/
+DEF_INST(add_distinct_long_halfword_immediate);                 /*810*/
+DEF_INST(add_logical_distinct_register);                        /*810*/
+DEF_INST(add_logical_distinct_long_register);                   /*810*/
+DEF_INST(add_logical_distinct_signed_halfword_immediate);       /*810*/
+DEF_INST(add_logical_distinct_long_signed_halfword_immediate);  /*810*/
+DEF_INST(and_distinct_register);                                /*810*/
+DEF_INST(and_distinct_long_register);                           /*810*/
+DEF_INST(exclusive_or_distinct_register);                       /*810*/
+DEF_INST(exclusive_or_distinct_long_register);                  /*810*/
+DEF_INST(or_distinct_register);                                 /*810*/
+DEF_INST(or_distinct_long_register);                            /*810*/
+DEF_INST(shift_right_single_distinct);                          /*810*/
+DEF_INST(shift_left_single_distinct);                           /*810*/
+DEF_INST(shift_right_single_logical_distinct);                  /*810*/
+DEF_INST(shift_left_single_logical_distinct);                   /*810*/
+DEF_INST(subtract_distinct_register);                           /*810*/
+DEF_INST(subtract_distinct_long_register);                      /*810*/
+DEF_INST(subtract_logical_distinct_register);                   /*810*/
+DEF_INST(subtract_logical_distinct_long_register);              /*810*/
+
+DEF_INST(population_count);                                     /*810*/
+
 
 /* Instructions in io.c */
 DEF_INST(clear_subchannel);
@@ -3408,7 +3507,8 @@ DEF_INST(store_fpc);
 DEF_INST(load_fpc);
 DEF_INST(set_fpc);
 DEF_INST(extract_fpc);
-DEF_INST(set_bfp_rounding_mode);
+DEF_INST(set_bfp_rounding_mode_2bit);
+DEF_INST(set_bfp_rounding_mode_3bit);                           /*810*/
 DEF_INST(trap2);
 DEF_INST(trap4);
 DEF_INST(resume_program);
@@ -3446,6 +3546,7 @@ DEF_INST(load_address_relative_long);
 DEF_INST(perform_frame_management_function);                    /*208*/
 DEF_INST(perform_timing_facility_function);                     /*@Z9*/
 DEF_INST(perform_topology_function);                            /*208*/
+DEF_INST(reset_reference_bits_multiple);                        /*810*/
 DEF_INST(store_facility_list);
 DEF_INST(store_facility_list_extended);                         /*@Z9*/
 DEF_INST(load_long_halfword_immediate);
@@ -3654,6 +3755,7 @@ DEF_INST(load_logical_halfword_register);                       /*@Z9*/
 DEF_INST(load_logical_long_halfword_register);                  /*@Z9*/
 DEF_INST(find_leftmost_one_long_register);                      /*@Z9*/
 DEF_INST(extract_cpu_time);
+DEF_INST(load_program_parameter);                               /*810*/
 
 
 /* Instructions in ecpsvm.c */
@@ -3705,15 +3807,27 @@ DEF_INST(compare_and_signal_bfp_short);
 DEF_INST(convert_fix32_to_bfp_ext_reg);
 DEF_INST(convert_fix32_to_bfp_long_reg);
 DEF_INST(convert_fix32_to_bfp_short_reg);
+DEF_INST(convert_u32_to_bfp_ext_reg);                           /*810*/
+DEF_INST(convert_u32_to_bfp_long_reg);                          /*810*/
+DEF_INST(convert_u32_to_bfp_short_reg);                         /*810*/
 DEF_INST(convert_fix64_to_bfp_ext_reg);
 DEF_INST(convert_fix64_to_bfp_long_reg);
 DEF_INST(convert_fix64_to_bfp_short_reg);
+DEF_INST(convert_u64_to_bfp_ext_reg);                           /*810*/
+DEF_INST(convert_u64_to_bfp_long_reg);                          /*810*/
+DEF_INST(convert_u64_to_bfp_short_reg);                         /*810*/
 DEF_INST(convert_bfp_ext_to_fix32_reg);
 DEF_INST(convert_bfp_long_to_fix32_reg);
 DEF_INST(convert_bfp_short_to_fix32_reg);
+DEF_INST(convert_bfp_ext_to_u32_reg);                           /*810*/
+DEF_INST(convert_bfp_long_to_u32_reg);                          /*810*/
+DEF_INST(convert_bfp_short_to_u32_reg);                         /*810*/
 DEF_INST(convert_bfp_ext_to_fix64_reg);
 DEF_INST(convert_bfp_long_to_fix64_reg);
 DEF_INST(convert_bfp_short_to_fix64_reg);
+DEF_INST(convert_bfp_ext_to_u64_reg);                           /*810*/
+DEF_INST(convert_bfp_long_to_u64_reg);                          /*810*/
+DEF_INST(convert_bfp_short_to_u64_reg);                         /*810*/
 DEF_INST(divide_bfp_ext_reg);
 DEF_INST(divide_bfp_long_reg);
 DEF_INST(divide_bfp_long);
@@ -3794,14 +3908,26 @@ DEF_INST(compare_and_signal_dfp_ext_reg);
 DEF_INST(compare_and_signal_dfp_long_reg);
 DEF_INST(compare_exponent_dfp_ext_reg);
 DEF_INST(compare_exponent_dfp_long_reg);
+DEF_INST(convert_fix32_to_dfp_ext_reg);                         /*810*/
+DEF_INST(convert_fix32_to_dfp_long_reg);                        /*810*/
+DEF_INST(convert_u32_to_dfp_ext_reg);                           /*810*/
+DEF_INST(convert_u32_to_dfp_long_reg);                          /*810*/
 DEF_INST(convert_fix64_to_dfp_ext_reg);
 DEF_INST(convert_fix64_to_dfp_long_reg);
+DEF_INST(convert_u64_to_dfp_ext_reg);                           /*810*/
+DEF_INST(convert_u64_to_dfp_long_reg);                          /*810*/
 DEF_INST(convert_sbcd128_to_dfp_ext_reg);
 DEF_INST(convert_sbcd64_to_dfp_long_reg);
 DEF_INST(convert_ubcd128_to_dfp_ext_reg);
 DEF_INST(convert_ubcd64_to_dfp_long_reg);
+DEF_INST(convert_dfp_ext_to_fix32_reg);                         /*810*/
+DEF_INST(convert_dfp_long_to_fix32_reg);                        /*810*/
+DEF_INST(convert_dfp_ext_to_u32_reg);                           /*810*/
+DEF_INST(convert_dfp_long_to_u32_reg);                          /*810*/
 DEF_INST(convert_dfp_ext_to_fix64_reg);
 DEF_INST(convert_dfp_long_to_fix64_reg);
+DEF_INST(convert_dfp_ext_to_u64_reg);                           /*810*/
+DEF_INST(convert_dfp_long_to_u64_reg);                          /*810*/
 DEF_INST(convert_dfp_ext_to_sbcd128_reg);
 DEF_INST(convert_dfp_long_to_sbcd64_reg);
 DEF_INST(convert_dfp_ext_to_ubcd128_reg);

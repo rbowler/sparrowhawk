@@ -6,7 +6,7 @@
 //      The <config.h> header and other required headers are
 //      presumed to have already been #included ahead of it...
 
-// $Id: hstructs.h 5622 2010-02-09 00:32:03Z fish $
+// $Id$
 
 #ifndef _HSTRUCTS_H
 #define _HSTRUCTS_H
@@ -27,15 +27,25 @@
 #elif MAX_CPU_ENGINES <= 64
     typedef U64                 CPU_BITMAP;
     #define F_CPU_BITMAP        "%16.16"I64_FMT"X"
+#elif MAX_CPU_ENGINES <= 128
+ #if defined(_MSVC_)
+   #error MAX_CPU_ENGINES > 64 not supported in Windows
+ #endif
+ #if SIZEOF_SIZE_T == 4
+   #error MAX_CPU_ENGINES > 64 only supported on 64 bit platforms
+ #endif
+    typedef __uint128_t         CPU_BITMAP;
+// ZZ FIXME: No printf format support for __int128 yet, so we will incorrectly display...
+    #define F_CPU_BITMAP        "%16.16"I64_FMT"X"
 #else
- #error MAX_CPU_ENGINES cannot exceed 64
+ #error MAX_CPU_ENGINES cannot exceed 128
 #endif
 
 /*-------------------------------------------------------------------*/
 /* Structure definition for CPU register context                     */
 /*-------------------------------------------------------------------*/
 struct REGS {                           /* Processor registers       */
-#define HDL_VERS_REGS   "3.03"          /* Internal Version Number   */
+#define HDL_VERS_REGS   "3.08"          /* Internal Version Number   */
 #define HDL_SIZE_REGS   sizeof(REGS)
 
         int     arch_mode;              /* Architectural mode        */
@@ -113,6 +123,7 @@ struct REGS {                           /* Processor registers       */
 #define GR_H(_r) gr[(_r)].F.H.F          /* Fullword bits 0-31       */
 #define GR_HHH(_r) gr[(_r)].F.H.H.H.H    /* Halfword bits 0-15       */
 #define GR_HHL(_r) gr[(_r)].F.H.H.L.H    /* Halfword low, bits 16-31 */
+#define GR_HHLCL(_r) gr[(_r)].F.H.H.L.B.L   /* Character, bits 24-31 */
 #define GR_L(_r) gr[(_r)].F.L.F          /* Fullword low, bits 32-63 */
 #define GR_LHH(_r) gr[(_r)].F.L.H.H.H    /* Halfword bits 32-47      */
 #define GR_LHL(_r) gr[(_r)].F.L.H.L.H    /* Halfword low, bits 48-63 */
@@ -343,6 +354,7 @@ struct REGS {                           /* Processor registers       */
                *z900_opcode_c4xx,                               /*208*/
                *z900_opcode_c6xx,                               /*208*/
                *z900_opcode_c8xx,
+               *z900_opcode_ccxx,                               /*810*/
                *z900_opcode_e5xx,
                *z900_opcode_ecxx,
                *z900_opcode_edxx;
@@ -403,6 +415,7 @@ struct SYSBLK {
         BYTE   *xpndstor;               /* -> Expanded storage       */
         U64     todstart;               /* Time of initialisation    */
         U64     cpuid;                  /* CPU identifier for STIDP  */
+        TID     impltid;                /* Thread-id for main progr. */
         TID     wdtid;                  /* Thread-id for watchdog    */
         U16     lparnuml;               /* #digits (0-2) in lparnum  */
         U16     lparnum;                /* LPAR identification number*/
@@ -424,6 +437,20 @@ struct SYSBLK {
         LOCK    todlock;                /* TOD clock update lock     */
         TID     todtid;                 /* Thread-id for TOD update  */
         REGS   *regs[MAX_CPU_ENGINES+1];   /* Registers for each CPU */
+
+#if defined(_FEATURE_MESSAGE_SECURITY_ASSIST)
+        LOCK    wklock;                 /* Update lock               */
+        BYTE    wkaes_reg[32];          /* Wrapping-key registers    */
+        BYTE    wkdea_reg[24];
+        BYTE    wkvpaes_reg[32];        /* Wrapping-key Verification */
+        BYTE    wkvpdea_reg[24];        /* Pattern registers         */
+#endif /*defined(_FEATURE_MESSAGE_SECURITY_ASSIST)*/
+
+     /* CPU Measurement Counter facility 
+        CPU Measurement Sampling facility
+        Load Program Parameter facility */
+        U64     program_parameter;      /* Program Parameter Register*/
+
 #if defined(_FEATURE_VECTOR_FACILITY)
         VFREGS  vf[MAX_CPU_ENGINES];    /* Vector Facility           */
 #endif /*defined(_FEATURE_VECTOR_FACILITY)*/
@@ -481,10 +508,20 @@ struct SYSBLK {
         TID     haotid;                 /* Herc Auto-Oper thread-id  */
 #endif /* defined(OPTION_HAO) */
 #if defined(OPTION_SCSI_TAPE)
+        /* Access to all SCSI fields controlled by sysblk.stape_lock */
+        LOCK    stape_lock;             /* LOCK for all SCSI fields  */
         int     auto_scsi_mount_secs;   /* Check for SCSI tape mount
                                            frequency; 0 == disabled  */
 #define DEFAULT_AUTO_SCSI_MOUNT_SECS  (5)
-#endif
+        TID     stape_getstat_tid;      /* Tape-status worker thread */
+        TID     stape_mountmon_tid;     /* Tape-mount  worker thread */
+        COND    stape_getstat_cond;     /* Tape-status thread COND   */
+        u_int   stape_getstat_busy:1;   /* 1=Status thread is busy   */
+        LIST_ENTRY  stape_status_link;  /* get status request chain  */
+        LIST_ENTRY  stape_mount_link;   /* scsimount  request chain  */
+        struct  timeval
+                stape_query_status_tod; /* TOD of last status query  */
+#endif /* defined(OPTION_SCSI_TAPE) */
         DEVBLK *firstdev;               /* -> First device block     */
         DEVBLK *sysgdev;                /* -> devblk for SYSG console*/
 #if defined(OPTION_FAST_DEVLOOKUP)
@@ -525,6 +562,9 @@ struct SYSBLK {
                 inststep:1,             /* 1 = Instruction step      */
                 shutdown:1,             /* 1 = shutdown requested    */
                 shutfini:1,             /* 1 = shutdown complete     */
+#if defined( _MSVC_ )
+                shutimmed:1,            /* 1 = shutdown req immed    */
+#endif // defined( _MSVC_ )
                 main_clear:1,           /* 1 = mainstor is cleared   */
                 xpnd_clear:1,           /* 1 = xpndstor is cleared   */
                 showregsfirst:1,        /* 1 = show regs before inst */
@@ -692,10 +732,32 @@ struct IOINT {                          /* I/O interrupt queue entry */
 };
 
 /*-------------------------------------------------------------------*/
+/* SCSI support threads request structures...   (i.e. work items)    */
+/*-------------------------------------------------------------------*/
+
+#if defined(OPTION_SCSI_TAPE)
+
+  struct STSTATRQ                       /* Status Update Request     */
+  {
+      LIST_ENTRY   link;                /* just a link in the chain  */
+      DEVBLK*      dev;                 /* ptr to device block       */
+  };
+  typedef struct STSTATRQ  STSTATRQ;
+
+  struct STMNTDRQ                       /* Automatic Mount Request   */
+  {
+      LIST_ENTRY   link;                /* just a link in the chain  */
+      DEVBLK*      dev;                 /* ptr to device block       */
+  };
+  typedef struct STMNTDRQ  STMNTDRQ;
+
+#endif /* defined(OPTION_SCSI_TAPE) */
+
+/*-------------------------------------------------------------------*/
 /* Device configuration block                                        */
 /*-------------------------------------------------------------------*/
 struct DEVBLK {                         /* Device configuration block*/
-#define HDL_VERS_DEVBLK   "3.05"        /* Internal Version Number   */
+#define HDL_VERS_DEVBLK   "3.08"        /* Internal Version Number   */
 #define HDL_SIZE_DEVBLK   sizeof(DEVBLK)
         DEVBLK *nextdev;                /* -> next device block      */
         REGS   *regs;                   /* -> REGS if syncio         */
@@ -740,6 +802,7 @@ struct DEVBLK {                         /* Device configuration block*/
         int     bufsize;                /* Device data buffer size   */
         int     buflen;                 /* Device buffer length used */
         int     bufoff;                 /* Offset into data buffer   */
+        int     bufres;                 /* buffer residual length    */
         int     bufoffhi;               /* Highest offset allowed    */
         int     bufupdlo;               /* Lowest offset updated     */
         int     bufupdhi;               /* Highest offset updated    */
@@ -816,7 +879,7 @@ struct DEVBLK {                         /* Device configuration block*/
         ESW     esw;                    /* Extended status word      */
         BYTE    ecw[32];                /* Extended control word     */
         U32     numsense;               /* Number of sense bytes     */
-        BYTE    sense[32];              /* Sense bytes               */
+        BYTE    sense[256];             /* Sense bytes 3480+ 64 bytes*/
         U32     numdevid;               /* Number of device id bytes */
         BYTE    devid[256];             /* Device identifier bytes   */
         U32     numdevchar;             /* Number of devchar bytes   */
@@ -970,6 +1033,29 @@ struct DEVBLK {                         /* Device configuration block*/
         u_int   stopprt:1;              /* 1=stopped; 0=started      */
         u_int   notrunc:1;              /* 1=do not truncate at open */
 
+        u_int   fcbsupp:1;              /* fcb support flag          */
+        u_int   cc:1;                   /* emit line controls        */
+        u_int   rawcc:1;                /* emit just cc(hex) and data*/
+        u_int   fcbcheck:1;             /* signal FCB errors         */
+        u_int   nofcbcheck:1;           /* ignore FCB errors         */
+        u_int   ccpend:1;               /* cc process pending        */
+        u_int   chskip:1;               /* cc process pending        */
+
+        int     print;                  /* optimize for print   0    */
+        int     browse;                 /* optimize for browse  1    */
+
+        int     lpi;                    /* lines per inch 6/8        */
+        int     index;                  /* 3211 indexing             */
+        int     lpp;                    /* lines per page            */
+        int     ffchan ;                /* ff when skip here         */
+#define FCBSIZE 256         
+        int     fcb[FCBSIZE+1];         /* FCB image                 */
+        int     fcbisdef;               /* FCB is default            */
+
+        int     prevline;               /* previous line number      */
+        int     currline;               /* curr line number          */
+        int     destline;               /* destination  line number  */
+
         /*  Device dependent fields for tapedev                      */
 
         void   *omadesc;                /* -> OMA descriptor array   */
@@ -1022,27 +1108,22 @@ struct DEVBLK {                         /* Device configuration block*/
 #if defined( OPTION_TAPE_AUTOMOUNT )
         u_int   noautomount:1;          /* 1=AUTOMOUNT disabled      */
 #endif
-        U32     msgid;                  /* Message Id of async. i/o  */
+        u_int   supvr_inhibit:1;        /* 1=Supvr-Inhibit mode      */
+        u_int   write_immed:1;          /* 1=Write-Immediate mode    */
 #if defined(OPTION_SCSI_TAPE)
         struct mtget mtget;             /* SCSI tape status struct   */
 #define sstat  mtget.mt_gstat           /* Generic SCSI tape device-
                                            independent status field;
                                            (struct mtget->mt_gstat)  */
-        TID     stape_mountmon_tid;     /* Tape-mount monitor thread */
         u_int   stape_close_rewinds:1;  /* 1=Rewind at close         */
         u_int   stape_blkid_32:1;       /* 1=block-ids are 32 bits   */
         u_int   stape_no_erg:1;         /* 1=ignore Erase Gap CCWs   */
-        u_int   stape_getstat_busy:1;   /* 1=Status wrkr thrd busy   */
-        u_int   stape_threads_exit:1;   /* 1=Ask helpr thrds to exit */
-        TID     stape_getstat_tid;      /* Tape status wrkr thrd tid */
-        LOCK    stape_getstat_lock;     /* LOCK for status wrkr thrd */
-        COND    stape_getstat_cond;     /* COND for status wrkr thrd */
-        COND    stape_exit_cond;        /* thread wait for exit COND */
-        struct mtget stape_getstat_mtget;/* status wrkr thrd status  */
-#define stape_getstat_sstat stape_getstat_mtget.mt_gstat /* (gstat)  */
-        struct timeval
-                stape_getstat_query_tod;/* TOD of actual drive query */
-#endif
+        /* Access to SCSI fields controlled via sysblk.stape_lock    */
+        COND      stape_sstat_cond;     /* Tape-status updated COND  */
+        STSTATRQ  stape_statrq;         /* Status request structure  */
+        STMNTDRQ  stape_mntdrq;         /* Mounted request structure */
+#endif /* defined(OPTION_SCSI_TAPE) */
+        U32     msgid;                  /* Message Id of async. i/o  */
         BYTE    tapedevt;               /* Hercules tape device type */
         TAPEMEDIA_HANDLER *tmh;         /* Tape Media Handling       */
                                         /* dispatcher                */

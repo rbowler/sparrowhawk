@@ -1,7 +1,7 @@
 /* SCEDASD.C    (c) Copyright Jan Jaeger, 1999-2009                  */
 /*              Service Control Element DASD I/O functions           */
 
-// $Id: scedasd.c 5306 2009-04-03 17:57:43Z rbowler $
+// $Id$
 
 #include "hstdinc.h"
 
@@ -241,7 +241,7 @@ int rc = 0;
 RADR pageaddr;
 U32  pagesize;
 
-    fd = open (fname, O_RDONLY|O_BINARY);
+    fd = hopen(fname, O_RDONLY|O_BINARY);
     if (fd < 0)
     {
         if(errno != ENOENT)
@@ -291,12 +291,8 @@ static S64 ARCH_DEP(write_file)(char *fname, int mode, CREG sto, S64 size)
 int fd, nwrite;
 U64 totwrite = 0;
 
-    fd = open (fname, mode |O_WRONLY|O_BINARY,
-#if defined(_MSVC_)
-            S_IREAD|S_IWRITE);
-#else
+    fd = hopen(fname, mode |O_WRONLY|O_BINARY,
             S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH);
-#endif
     if (fd < 0)
     {
         logmsg (_("HHCSC041E %s open error: %s\n"), fname, strerror(errno));
@@ -394,7 +390,7 @@ static S64 ARCH_DEP(read_file)(char *fname, CREG sto, S64 seek, S64 size)
 int fd, nread;
 U64 totread = 0;
 
-    fd = open (fname, O_RDONLY|O_BINARY);
+    fd = hopen(fname, O_RDONLY|O_BINARY);
     if (fd < 0)
     {
         if(errno != ENOENT)

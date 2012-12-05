@@ -4,7 +4,7 @@
  * Copyright 2000-2009 by Malcolm Beattie
  * Based on code copyright by Roger Bowler, 1999-2009
  *
- * $Id: dasdls.c 5125 2009-01-23 12:01:44Z bernard $
+ * $Id$
  *
  * $Log$
  * Revision 1.27  2008/11/04 04:50:46  fish

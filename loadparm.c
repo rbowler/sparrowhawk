@@ -1,7 +1,7 @@
 /* LOADPARM.C   (c) Copyright Jan Jaeger, 2004-2009                  */
 /*              SCLP / MSSF loadparm                                 */
 
-// $Id: loadparm.c 5652 2010-03-06 11:28:14Z bernard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module contains functions which set, copy, and retrieve the  */

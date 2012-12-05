@@ -5,7 +5,7 @@
 // (http://www.hercules-390.org/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: w32chan.h 5127 2009-01-23 13:25:01Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.15  2007/11/30 14:54:33  jmaynard
@@ -39,13 +39,6 @@ extern void  InitIOScheduler    // initialize i/o scheduler vars
 extern int   ScheduleIORequest(void* pDevBlk, unsigned short wDevNum, int* pnDevPrio);
 extern void  TrimDeviceThreads();
 extern void  KillAllDeviceThreads();
-
-/////////////////////////////////////////////////////////////////////////////
-// Debugging...   (called by panel.c "FishHangReport" command...)
-
-#if defined(FISH_HANG)
-extern void  PrintAllDEVTHREADPARMSs();
-#endif // defined(FISH_HANG)
 
 /////////////////////////////////////////////////////////////////////////////
 // I/O Scheduler variables...

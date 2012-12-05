@@ -3,7 +3,7 @@
 /* 2003-02-07 James M. Morrison initial implementation               */
 /* portions borrowed from cckdcdsk & other CCKD code                 */
 
-// $Id: cckddiag.c 5540 2009-12-12 07:13:45Z bernard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* Diagnostic tool to display various CCKD data                      */
@@ -491,7 +491,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
 
     /* open the file */
     hostpath(pathname, fn, sizeof(pathname));
-    fd = open(pathname, O_RDONLY | O_BINARY);
+    fd = hopen(pathname, O_RDONLY | O_BINARY);
     if (fd < 0) {
         fprintf(stdout,
                 _("cckddiag: error opening file %s: %s\n"),

@@ -1,7 +1,7 @@
 /* HTTPSERV.C   (c)Copyright Jan Jaeger, 2002-2009                   */
 /*              HTTP Server                                          */
 
-// $Id: httpserv.c 5146 2009-02-01 20:09:49Z rbowler $
+// $Id$
 
 /* This file contains all code required for the HTTP server,         */
 /* when the http_server thread is started it will listen on          */
@@ -468,7 +468,7 @@ static void http_download(WEBBLK *webblk, char *filename)
         http_error(webblk, "404 File Not Found","",
                            "The requested file is not a regular file");
 
-    fd = open(fullname,O_RDONLY|O_BINARY,0);
+    fd = hopen(fullname,O_RDONLY|O_BINARY,0);
     if (fd == -1)
         http_error(webblk, "404 File Not Found","",
                            strerror(errno));

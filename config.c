@@ -1,7 +1,7 @@
 /* CONFIG.C     (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              Device configuration functions                       */
 
-// $Id: config.c 5654 2010-03-07 03:15:17Z fish $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* The original configuration builder is now called bldcfg.c         */
@@ -317,9 +317,12 @@ DEVBLK**dvpp;
         initialize_condition (&dev->resumecond);
         initialize_condition (&dev->iocond);
 #if defined(OPTION_SCSI_TAPE)
-        initialize_lock      (&dev->stape_getstat_lock);
-        initialize_condition (&dev->stape_getstat_cond);
-        initialize_condition (&dev->stape_exit_cond   );
+        initialize_condition (&dev->stape_sstat_cond);
+        InitializeListLink (&dev->stape_statrq.link);
+        InitializeListLink (&dev->stape_mntdrq.link);
+        dev->stape_statrq.dev = dev;
+        dev->stape_mntdrq.dev = dev;
+        dev->sstat = GMT_DR_OPEN(-1);
 #endif
 
         /* Search for the last device block on the chain */
@@ -597,7 +600,7 @@ int     i;                              /* Loop index                */
 #endif /*_FEATURE_CHANNEL_SUBSYSTEM*/
 
     return 0;
-} /* end function detach_device */
+} /* end function detach_devblk */
 
 
 /*-------------------------------------------------------------------*/

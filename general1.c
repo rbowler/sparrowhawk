@@ -7,10 +7,10 @@
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: general1.c 5220 2009-03-01 09:46:32Z jj $
+// $Id$
 
 /*-------------------------------------------------------------------*/
-/* This module implements all general instructions of the            */
+/* This module implements general instructions A-M of the            */
 /* S/370 and ESA/390 architectures, as described in the manuals      */
 /* GA22-7000-03 System/370 Principles of Operation                   */
 /* SA22-7201-06 ESA/390 Principles of Operation                      */
@@ -30,132 +30,6 @@
 /*      Modifications for Interpretive Execution (SIE) by Jan Jaeger */
 /*      Clear TEA on data exception - Peter Kuschnerus           v209*/
 /*-------------------------------------------------------------------*/
-
-// $Log$
-// Revision 1.178  2009/02/07 22:54:06  ivan
-// Define MIN() macro for MVCLE use in case it isn't defined
-//
-// Revision 1.177  2009/02/07 22:49:38  ivan
-// Use concpy in MVCL to maintain Concurrent Block Update Consistency
-// Use concpy in MVCLE to maintain Concurrent Block Update Consistency
-// Enhance performances for MVCLE
-//
-// Revision 1.176  2009/02/04 18:09:39  ivan
-// Temporary fixes for 'potentially uninitialized variables' by GCC.
-// To me, it's bogus. Look for MVCL in general1.c & zmoncode in cpu.c
-// and read FIXME.
-//
-// Revision 1.175  2009/02/04 12:22:37  ivan
-// Fix issue with unaligned LM/STM when running on a host architecture that
-// enforces alignment
-//
-// Revision 1.174  2009/01/31 21:37:50  rbowler
-// Adopt general coding style - No functional changes
-//
-// Revision 1.173  2009/01/31 17:49:17  ivan
-// Ensure proper nullification of MVCL if an access exception occurs during the 1st unit of operation
-//
-// Revision 1.172  2009/01/23 11:55:54  bernard
-// copyright notice
-//
-// Revision 1.171  2009/01/11 20:28:33  ivan
-// Remove dead code
-//
-// Revision 1.170  2008/12/24 07:50:16  ivan
-// CSST Fix - Parm 2 alignement check error
-//
-// Revision 1.169  2008/12/23 13:44:57  ivan
-// CSST Facility 2 fix
-//
-// Revision 1.168  2008/12/22 00:29:10  ivan
-// Implement February 2008 z/Arch Compare And Swap And Store Facility 2
-// Update FAQ to reflect change
-// update FAQ to also indicate z/Arch DAT Enhancement is implemented
-//
-// Revision 1.167  2008/10/07 22:24:35  gsmith
-// Fix zero ilc problem after branch trace
-//
-// Revision 1.166  2008/05/06 22:15:42  rbowler
-// Fix warning: operation on `p1' may be undefined
-//
-// Revision 1.165  2008/04/11 14:28:44  bernard
-// Integrate regs->exrl into base Hercules code.
-//
-// Revision 1.164  2008/04/09 12:01:35  rbowler
-// Correct target instruction address for EXRL
-//
-// Revision 1.163  2008/04/09 07:38:09  bernard
-// Allign to Rogers terminal ;-)
-//
-// Revision 1.162  2008/04/09 07:15:14  bernard
-// Comment Roger
-//
-// Revision 1.161  2008/04/09 07:05:19  bernard
-// EXRL has format C6x0, not C6. Thanks Roger!
-//
-// Revision 1.160  2008/04/09 05:38:57  bernard
-// Instruction fetching error, now fetched with PSW_IA macro.
-//
-// Revision 1.159  2008/04/08 18:33:41  bernard
-// Error in EXRL
-//
-// Revision 1.158  2008/04/08 17:13:26  bernard
-// Added execute relative long instruction
-//
-// Revision 1.157  2008/03/05 00:34:44  ptl00
-// Fix CFC operand size fetch
-//
-// Revision 1.156  2008/03/04 00:52:32  ptl00
-// Fix BSM/BASSM mode switch trace
-//
-// Revision 1.155  2008/02/28 22:07:09  ptl00
-// Fix mode switch trace
-//
-// Revision 1.154  2008/02/15 21:20:00  ptl00
-// Fix EX to SS ops so that ILC is 4 on PER rupts
-//
-// Revision 1.153  2007/11/30 15:14:14  rbowler
-// Permit String-Instruction facility to be activated in S/370 mode
-//
-// Revision 1.152  2007/08/07 19:47:59  ivan
-// Fix a couple of gcc-4.2 warnings
-//
-// Revision 1.151  2007/06/23 00:04:10  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.150  2007/05/26 21:23:19  rbowler
-// Eliminate uninitialised variable warnings in CSST
-//
-// Revision 1.149  2007/05/26 14:23:55  rbowler
-// CSST instruction
-//
-// Revision 1.148  2007/01/13 07:21:11  bernard
-// backout ccmask
-//
-// Revision 1.147  2007/01/12 15:23:41  bernard
-// ccmaks phase 1
-//
-// Revision 1.146  2007/01/09 05:10:19  gsmith
-// Tweaks to lm/stm
-//
-// Revision 1.145  2007/01/04 23:12:04  gsmith
-// remove thunk calls for program_interrupt
-//
-// Revision 1.144  2006/12/31 21:16:32  gsmith
-// 2006 Dec 31 really back out mainlockx.pat
-//
-// Revision 1.143  2006/12/20 09:09:40  jj
-// Fix bogus log entries
-//
-// Revision 1.142  2006/12/20 04:26:19  gsmith
-// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
-//
-// Revision 1.141  2006/12/20 04:22:00  gsmith
-// 2006 Dec 19 Backout mainlockx.pat - possible SMP problems - Greg Smith
-//
-// Revision 1.140  2006/12/08 09:43:21  jj
-// Add CVS message log
-//
 
 #include "hstdinc.h"
 
@@ -414,7 +288,7 @@ int     cc = 0;                         /* Condition code            */
      */
 
     /* Translate addresses of leftmost operand bytes */
-    dest1 = MADDR (addr1, b1, regs, ACCTYPE_WRITE_SKP, regs->psw.pkey);
+    dest1 = MADDRL (addr1, len+1, b1, regs, ACCTYPE_WRITE_SKP, regs->psw.pkey);
     sk1 = regs->dat.storkey;
     source1 = MADDR (addr2, b2, regs, ACCTYPE_READ, regs->psw.pkey);
 
@@ -744,7 +618,7 @@ VADR    newia;                          /* New instruction address   */
     if((regs->CR(12) & CR12_MTRACE) && (r2 != 0) && (regs->psw.amode64 != (newia & 1)))
     {
         INST_UPDATE_PSW(regs, 2, 0);
-        regs->psw.ilc = 2; 
+        regs->psw.ilc = 2;
         regs->CR(12) = ARCH_DEP(trace_ms) (0, 0, regs);
     }
      #endif /*defined(FEATURE_ESAME)*/
@@ -797,12 +671,20 @@ DEF_INST(branch_on_condition_register)
     {
         INST_UPDATE_PSW(regs, 2, 0);
         /* Perform serialization and checkpoint synchronization if
-           the mask is all ones and the register is all zeroes */
+           the mask is all ones and R2 is register 0 */
         if ( inst[1] == 0xF0 )
         {
             PERFORM_SERIALIZATION (regs);
             PERFORM_CHKPT_SYNC (regs);
         }
+#if defined(FEATURE_FAST_BCR_SERIALIZATION_FACILITY)            /*810*/
+        /* Perform serialization without checkpoint synchronization 
+           the mask is B'1110' and R2 is register 0 */
+        else if (inst[1] == 0xE0)
+        {
+            PERFORM_SERIALIZATION (regs);
+        }
+#endif /*defined(FEATURE_FAST_BCR_SERIALIZATION_FACILITY)*/     
     }
 
 } /* end DEF_INST(branch_on_condition_register) */
@@ -980,7 +862,7 @@ U16     i2;                             /* 16-bit operand values     */
         regs->GR_L(r1) = PSW_IA24(regs, 4);
 
     SUCCESSFUL_RELATIVE_BRANCH(regs, 2*(S16)i2, 4);
- 
+
 } /* end DEF_INST(branch_relative_and_save) */
 #endif /*defined(FEATURE_IMMEDIATE_AND_RELATIVE)*/
 
@@ -1369,7 +1251,7 @@ U32     old;                            /* old value                 */
     PERFORM_SERIALIZATION (regs);
 
     /* Get mainstor address */
-    main2 = MADDR (addr2, b2, regs, ACCTYPE_WRITE, regs->psw.pkey);
+    main2 = MADDRL (addr2, 4, b2, regs, ACCTYPE_WRITE, regs->psw.pkey);
 
     old = CSWAP32(regs->GR_L(r1));
 
@@ -1431,7 +1313,7 @@ U64     old, new;                       /* old, new values           */
     PERFORM_SERIALIZATION (regs);
 
     /* Get operand absolute address */
-    main2 = MADDR (addr2, b2, regs, ACCTYPE_WRITE, regs->psw.pkey);
+    main2 = MADDRL (addr2, 8, b2, regs, ACCTYPE_WRITE, regs->psw.pkey);
 
     /* Get old, new values */
     old = CSWAP64(((U64)(regs->GR_L(r1)) << 32) | regs->GR_L(r1+1));
@@ -1496,7 +1378,7 @@ VADR    addr1, addr2;                   /* Effective addresses       */
 VADR    addrp;                          /* Parameter list address    */
 BYTE   *main1;                          /* Mainstor address of op1   */
 int     ln2;                            /* Second operand length - 1 */
-U64     old16l=0, old16h=0, 
+U64     old16l=0, old16h=0,
         new16l=0, new16h=0;             /* swap values for cmpxchg16 */
 U64     old8=0, new8=0;                 /* Swap values for cmpxchg8  */
 U32     old4=0, new4=0;                 /* Swap values for cmpxchg4  */
@@ -1515,7 +1397,7 @@ BYTE    sc;                             /* Store characteristic      */
 
     /* Extract store characteristic from register 0 bits 48-55 */
     sc = regs->GR_LHLCH(0);
-     
+
     /* Program check if function code is not 0 or 1 */
     if (fc > MAX_CSST_FC)
         regs->program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
@@ -1523,10 +1405,10 @@ BYTE    sc;                             /* Store characteristic      */
     /* Program check if store characteristic is not 0, 1, 2, or 3 */
     if (sc > MAX_CSST_SC)
         regs->program_interrupt (regs, PGM_SPECIFICATION_EXCEPTION);
-         
+
     /* Calculate length minus 1 of second operand */
     ln2 = (1 << sc) - 1;
-     
+
     /* Program check if first operand is not on correct boundary */
     switch(fc)
     {
@@ -1542,7 +1424,7 @@ BYTE    sc;                             /* Store characteristic      */
             break;
 #endif
     }
-         
+
 #if defined(FEATURE_COMPARE_AND_SWAP_AND_STORE_FACILITY_2)
     if(r3 & 1)
     {
@@ -1568,7 +1450,7 @@ BYTE    sc;                             /* Store characteristic      */
             break;
 #endif
     }
-         
+
     /* Perform serialization before starting operation */
     PERFORM_SERIALIZATION (regs);
 
@@ -1576,7 +1458,7 @@ BYTE    sc;                             /* Store characteristic      */
     addrp = regs->GR(rp) & 0xFFFFFFFFFFFFFFF0ULL & ADDRESS_MAXWRAP(regs);
 
     /* Obtain main storage address of first operand */
-    main1 = MADDR (addr1, b1, regs, ACCTYPE_WRITE, regs->psw.pkey);
+    main1 = MADDRL (addr1, 4, b1, regs, ACCTYPE_WRITE, regs->psw.pkey);
 
     /* Ensure second operand storage is writable */
     ARCH_DEP(validate_operand) (addr2, b2, ln2, ACCTYPE_WRITE_SKP, regs);
@@ -3134,7 +3016,7 @@ int     cc = 0;                         /* Condition code            */
      */
 
     /* Translate addresses of leftmost operand bytes */
-    dest1 = MADDR (addr1, b1, regs, ACCTYPE_WRITE_SKP, regs->psw.pkey);
+    dest1 = MADDRL (addr1, len, b1, regs, ACCTYPE_WRITE_SKP, regs->psw.pkey);
     sk1 = regs->dat.storkey;
     source1 = MADDR (addr2, b2, regs, ACCTYPE_READ, regs->psw.pkey);
 
@@ -3329,13 +3211,13 @@ BYTE   *ip;                             /* -> executed instruction   */
         if (ilc > 2) n += sprintf (buf+n, "%2.2X%2.2X", ip[2], ip[3]);
         if (ilc > 4) n += sprintf (buf+n, "%2.2X%2.2X", ip[4], ip[5]);
         logmsg ("%s %s", buf,(ilc<4) ? "        " : (ilc<6) ? "    " : "");
-        DISASM_INSTRUCTION(ip);
-        logmsg ("\n");
+        DISASM_INSTRUCTION(ip,buf);
+        logmsg ("%s\n", buf);
     }
 #endif
 
     /* Program check if recursive execute */
-    if ( regs->exinst[0] == 0x44 || 
+    if ( regs->exinst[0] == 0x44 ||
          (regs->exinst[0] == 0xc6 && !(regs->exinst[1] & 0x0f)) )
         regs->program_interrupt (regs, PGM_EXECUTE_EXCEPTION);
 
@@ -3834,6 +3716,104 @@ CREG    n;                              /* Work                      */
     if ((n & 0x00008000) == 0)
         return;
 
+#if defined(FEATURE_ENHANCED_MONITOR_FACILITY)
+    /* Perform Monitor Event Counting Operation if enabled */
+    if (((regs->CR_H(8) & CR8_MCMASK) << i2) & 0x00008000)
+    {
+        PSA *psa;                       /* -> Prefixed storage area  */
+        RADR cao;           /* Enhanced Monitor Counter Array Origin */
+        U32  cal;           /* Enhanced Monitor Counter Array Length */
+        U32  ec;         /* Enhanced Montior Counter Exception Count */
+        RADR ceh;                        /* HW Counter Entry address */
+        RADR cew;                        /* FW Counter Entry address */
+        RADR px;
+        int  unavailable;
+        U16  hwc;
+        U32  fwc;
+
+        px = regs->PX;
+        SIE_TRANSLATE(&px, ACCTYPE_WRITE, regs);
+        
+        /* Point to PSA in main storage */
+        psa = (void*)(regs->mainstor + px);
+ 
+        /* Set the main storage reference bit */
+        STORAGE_KEY(px, regs) |= STORKEY_REF;
+
+        /* Fetch Counter Array Origin and Size from PSA */
+        FETCH_DW(cao, psa->cao);
+        FETCH_W(cal, psa->cal);
+
+        /* DW boundary, ignore last 3 bits */
+        cao &= ~7ULL;
+
+        if(!(unavailable = (effective_addr1 >= cal)))
+        {
+            /* Point to the virtual address of the HW entry */
+            ceh = cao + (effective_addr1 << 1);
+            if(!(unavailable = ARCH_DEP(translate_addr) (ceh, USE_HOME_SPACE, regs, ACCTYPE_EMC)))
+            {
+                /* Convert real address to absolute address */
+                ceh = APPLY_PREFIXING (regs->dat.raddr, regs->PX);
+
+                /* Ensure absolute address is available */
+                if (!(unavailable = (ceh >= regs->mainlim )))
+                {
+                    SIE_TRANSLATE(&ceh, ACCTYPE_WRITE, regs);
+
+                    /* Update counter */
+                    FETCH_HW(hwc, ceh + regs->mainstor);
+                    STORAGE_KEY(ceh, regs) |= STORKEY_REF;
+                    if(++hwc)
+                    {
+                         STORE_HW(ceh + regs->mainstor, hwc);
+                         STORAGE_KEY(ceh, regs) |= (STORKEY_REF | STORKEY_CHANGE);
+                    }
+                    else
+                    {
+                        /* Point to the virtual address of the FW entry */
+                        cew = cao + (cal << 1) + (effective_addr1 << 2);
+                        if(!(unavailable = ARCH_DEP(translate_addr) (cew, USE_HOME_SPACE, regs, ACCTYPE_EMC)))
+                        {
+                            /* Convert real address to absolute address */
+                            cew = APPLY_PREFIXING (regs->dat.raddr, regs->PX);
+    
+                            /* Ensure absolute address is available */
+                            if (!(unavailable = (cew >= regs->mainlim )))
+                            {
+                                SIE_TRANSLATE(&cew, ACCTYPE_WRITE, regs);
+    
+                                /* Update both counters */
+                                FETCH_W(fwc, cew + regs->mainstor);
+                                fwc++;
+
+                                STORE_W(cew + regs->mainstor, fwc);
+                                STORAGE_KEY(cew, regs) |= (STORKEY_REF | STORKEY_CHANGE);
+
+                                STORE_HW(ceh + regs->mainstor, hwc);
+                                STORAGE_KEY(ceh, regs) |= (STORKEY_REF | STORKEY_CHANGE);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    
+        /* Update the Enhance Monitor Exception Counter if the array could not be updated */
+        if(unavailable)
+        {
+            FETCH_W(ec,psa->ec);
+            ec++;
+            /* Set the main storage reference and change bits */
+            STORAGE_KEY(px, regs) |= (STORKEY_REF | STORKEY_CHANGE);
+            STORE_W(psa->ec,ec);
+        }
+              
+        return;
+
+    }
+#endif /*defined(FEATURE_ENHANCED_MONITOR_FACILITY)*/
+
     regs->monclass = i2;
     regs->MONCODE = effective_addr1;
 
@@ -4000,7 +3980,7 @@ int     orglen1;                        /* Original dest length      */
         {
             source=NULL;
         }
-        dest = MADDR (addr1, r1, regs, ACCTYPE_WRITE, regs->psw.pkey);
+        dest = MADDRL (addr1, len1, r1, regs, ACCTYPE_WRITE, regs->psw.pkey);
     }
     else
     {
@@ -4036,6 +4016,8 @@ int     orglen1;                        /* Original dest length      */
             concpy (regs, dest, source, len);
         }
 
+/* No longer required because it is handled during MADDRL */
+#if 0
         /* Check for storage alteration PER event */
 #if defined(FEATURE_PER)
         if ( EN_IC_PER_SA(regs)
@@ -4047,6 +4029,7 @@ int     orglen1;                        /* Original dest length      */
          && PER_RANGE_CHECK2(addr1, addr1+len, regs->CR(10), regs->CR(11)) )
             ON_IC_PER_SA(regs);
 #endif /*defined(FEATURE_PER)*/
+#endif
 
         /* Adjust lengths and virtual addresses */
         len1 -= len;
@@ -4084,7 +4067,7 @@ int     orglen1;                        /* Original dest length      */
             if (addr1 & 0x7FF)
                 dest += len;
             else
-                dest = MADDR (addr1, r1, regs, ACCTYPE_WRITE, regs->psw.pkey);
+                dest = MADDRL (addr1, len1, r1, regs, ACCTYPE_WRITE, regs->psw.pkey);
         }
 
     } /* while (len1) */
@@ -4152,7 +4135,7 @@ size_t  dstlen,srclen;                  /* Page wide src/dst lengths */
         return;
     }
 
-    dest = MADDR (addr1, r1, regs, ACCTYPE_WRITE, regs->psw.pkey);
+    dest = MADDRL (addr1, len1, r1, regs, ACCTYPE_WRITE, regs->psw.pkey);
     if(copylen!=0)
     {
         /* here if we need to copy data */
@@ -4186,7 +4169,7 @@ size_t  dstlen,srclen;                  /* Page wide src/dst lengths */
     SET_GR_A(r1+1, regs,len1);
     SET_GR_A(r3, regs,addr2);
     SET_GR_A(r3+1, regs,len2);
-    /* if len1 != 0 then set CC to 3 to indicate 
+    /* if len1 != 0 then set CC to 3 to indicate
        we have reached end of CPU dependent length */
     if(len1>0) cc=3;
 
@@ -4221,7 +4204,7 @@ int     i;                              /* Loop counter              */
     ITIMER_SYNC(addr2,len,regs);
 
     /* Translate addresses of leftmost operand bytes */
-    dest1 = MADDR (addr1, arn1, regs, ACCTYPE_WRITE_SKP, regs->psw.pkey);
+    dest1 = MADDRL (addr1, len+1, arn1, regs, ACCTYPE_WRITE_SKP, regs->psw.pkey);
     sk1 = regs->dat.storkey;
     source1 = MADDR (addr2, arn2, regs, ACCTYPE_READ, regs->psw.pkey);
 
@@ -4481,7 +4464,7 @@ int     i;                              /* Loop counter              */
     ITIMER_SYNC(addr2,len,regs);
 
     /* Translate addresses of leftmost operand bytes */
-    dest1 = MADDR (addr1, arn1, regs, ACCTYPE_WRITE_SKP, regs->psw.pkey);
+    dest1 = MADDRL (addr1, len+1, arn1, regs, ACCTYPE_WRITE_SKP, regs->psw.pkey);
     sk1 = regs->dat.storkey;
     source1 = MADDR (addr2, arn2, regs, ACCTYPE_READ, regs->psw.pkey);
 

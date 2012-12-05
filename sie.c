@@ -10,7 +10,7 @@
 
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2007      */
 
-// $Id: sie.c 5249 2009-03-06 15:33:02Z jj $
+// $Id$
 //
 // $Log$
 // Revision 1.109  2008/08/21 18:34:48  fish
@@ -1214,6 +1214,7 @@ int     zone;                           /* Zone number               */
 
     if(zone >= FEATURE_SIE_MAXZONES)
     {
+        PTT(PTT_CL_ERR,"*STZP", regs->GR_L(1), regs->GR_L(2),regs->psw.IA_L);
         regs->psw.cc = 3;
         return;
     }

@@ -4,7 +4,7 @@
 /* laneous global utility functions.                                 */
 /*********************************************************************/
 
-// $Id: hscutl.h 4573 2008-02-19 11:49:19Z ivan $
+// $Id$
 //
 // $Log$
 // Revision 1.21  2007/01/10 15:12:11  rbowler
@@ -205,6 +205,11 @@ HUT_DLL_IMPORT int hprintf(int s,char *fmt,...);
 HUT_DLL_IMPORT int hwrite(int s,const char *,size_t);
 HUT_DLL_IMPORT int hgetc(int s);
 HUT_DLL_IMPORT char *hgets(char *b,size_t c,int s);
+
+#if !defined(_MSVC_)
+/* Hercules file open */
+HUT_DLL_IMPORT int hopen(const char* path, int oflag, ...);
+#endif // !defined(_MSVC_)
 
 /* Posix 1003.e capabilities */
 #if defined(OPTION_CAPABILITIES)

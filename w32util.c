@@ -12,7 +12,7 @@
 //
 //////////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: w32util.c 5586 2009-12-31 10:29:11Z rbowler $
+// $Id$
 //
 // $Log$
 // Revision 1.33  2008/11/23 22:27:43  rbowler
@@ -740,7 +740,7 @@ DLL_EXPORT int gettimeofday ( struct timeval* pTV, void* pTZ )
            )
     ))
     {
-        pTV->tv_usec = tvPrevRetVal.tv_sec;
+        pTV->tv_sec  = tvPrevRetVal.tv_sec;
         pTV->tv_usec = tvPrevRetVal.tv_usec + 1;
 
         if (unlikely(pTV->tv_usec >= 1000000))
@@ -2690,9 +2690,15 @@ DLL_EXPORT pid_t w32_poor_mans_fork ( char* pszCommandLine, int* pnWriteToChildS
         WaitForSingleObject( piProcInfo.hProcess, INFINITE );
         CloseHandle( piProcInfo.hProcess );
 
-        // Now print ALL captured messages AT ONCE...
+        // Now print ALL captured messages AT ONCE (if any)...
 
-        logmsg( "%s", pPipedProcessCtl->pszBuffer );
+        while (pPipedProcessCtl->nStrLen && isspace( pPipedProcessCtl->pszBuffer[ pPipedProcessCtl->nStrLen - 1 ] ))
+            pPipedProcessCtl->nStrLen--;
+        if (pPipedProcessCtl->nStrLen)
+        {
+            pPipedProcessCtl->pszBuffer[ pPipedProcessCtl->nStrLen ] = 0;  // (null terminate)
+            logmsg( "%s", pPipedProcessCtl->pszBuffer );
+        }
 
         // Free resources...
 
@@ -2947,6 +2953,25 @@ DLL_EXPORT void w32_set_thread_name( TID tid, char* name )
     {
         /* (do nothing) */
     }
+}
+
+//////////////////////////////////////////////////////////////////////////////////////////
+// Hercules file open
+// w32_hopen is called instead of hopen in MSVC environment (see hercwind.h)
+// Its purpose is to prevent a file from being opened for output by two
+// Hercules instances at the same time.
+// _SH_SECURE opens the file in _SH_DENYRW mode if oflag specifies write
+// access, or _SH_DENYWR mode if oflag specifies read-only.
+DLL_EXPORT int w32_hopen( const char* path, int oflag, ... )
+{
+    int pmode = 0;
+    if (oflag & _O_CREAT)
+    {
+        va_list vargs;
+        va_start( vargs, oflag );
+        pmode = va_arg( vargs, int );
+    }
+    return _sopen( path, oflag, _SH_SECURE, pmode );
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////

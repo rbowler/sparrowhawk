@@ -5,7 +5,7 @@
 // (http://www.hercules-390.org/herclic.html) as modifications to Hercules.
 ////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: w32ctca.h 5368 2009-06-02 03:58:49Z fish $
+// $Id$
 //
 // $Log$
 // Revision 1.16  2007/11/30 14:54:33  jmaynard

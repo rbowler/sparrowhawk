@@ -1,7 +1,7 @@
 /* IMPL.C       (c) Copyright Roger Bowler, 1999-2009                */
 /*              Hercules Initialization Module                       */
 
-// $Id: impl.c 5408 2009-06-14 18:53:34Z fish $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module initializes the Hercules S/370 or ESA/390 emulator.   */
@@ -82,7 +82,7 @@ DLL_EXPORT void registerLogCallback(LOGCALLBACK lcb)
 /*-------------------------------------------------------------------*/
 static void sigint_handler (int signo)
 {
-//  logmsg ("config: sigint handler entered for thread %lu\n",/*debug*/
+//  logmsg ("impl.c: sigint handler entered for thread %lu\n",/*debug*/
 //          thread_id());                                     /*debug*/
 
     UNREFERENCED(signo);
@@ -109,6 +109,103 @@ static void sigint_handler (int signo)
     return;
 } /* end function sigint_handler */
 
+/*-------------------------------------------------------------------*/
+/* Signal handler for SIGTERM signal                                 */
+/*-------------------------------------------------------------------*/
+static void sigterm_handler (int signo)
+{
+//  logmsg ("impl.c: sigterm handler entered for thread %lu\n",/*debug*/
+//          thread_id());                                      /*debug*/
+
+    UNREFERENCED(signo);
+
+    signal(SIGTERM, sigterm_handler);
+    /* Ignore signal unless presented on main program (impl) thread */
+    if ( !equal_threads( thread_id(), sysblk.impltid ) )
+        return;
+
+    /* Initiate system shutdown */
+    do_shutdown();
+
+    return;
+} /* end function sigterm_handler */
+
+#if defined( _MSVC_ )
+
+/*-------------------------------------------------------------------*/
+/* Signal handler for Windows signals                                */
+/*-------------------------------------------------------------------*/
+BOOL WINAPI console_ctrl_handler (DWORD signo)
+{
+    int i;
+
+    SetConsoleCtrlHandler(console_ctrl_handler, FALSE);   // turn handler off while processing
+
+    switch ( signo )
+    {
+        case CTRL_BREAK_EVENT:
+            logmsg(_("HHCIN050ICtrl-Break intercepted. Interrupt Key depressed simulated.\n"));
+
+            OBTAIN_INTLOCK(NULL);
+
+            ON_IC_INTKEY;
+
+            /* Signal waiting CPUs that an interrupt is pending */
+            WAKEUP_CPUS_MASK (sysblk.waiting_mask);
+
+            RELEASE_INTLOCK(NULL);
+
+            SetConsoleCtrlHandler(console_ctrl_handler, TRUE);  // reset handler
+            return TRUE;
+            break;
+        case CTRL_C_EVENT:
+            logmsg(_("HHCIN022I Ctrl-C intercepted\n"));
+            SetConsoleCtrlHandler(console_ctrl_handler, TRUE);  // reset handler
+            return TRUE;
+            break;
+        case CTRL_CLOSE_EVENT:
+        case CTRL_SHUTDOWN_EVENT:
+        case CTRL_LOGOFF_EVENT:
+            if ( !sysblk.shutdown )  // (system shutdown not initiated)
+            {
+                logmsg(_("HHCIN021ICLOSE Event received, SHUTDOWN Immediate starting...\n"));
+                sysblk.shutimmed = TRUE;
+                do_shutdown();
+
+//                logmsg("%s(%d): return from shutdown\n", __FILE__, __LINE__ ); /* debug */
+
+                for ( i = 0; i < 120; i++ )
+                {
+                    if ( sysblk.shutdown && sysblk.shutfini )
+                    {
+//                        logmsg("%s(%d): %d shutdown completed\n",  /* debug */
+//                                __FILE__, __LINE__, i );           /* debug */
+                        sleep(1);
+                        break;
+                    }
+                    else 
+                    {
+//                        logmsg("%s(%d): %d waiting for shutdown to complete\n",   /* debug */
+//                                __FILE__, __LINE__, i );                          /* debug */
+                        sleep(1);
+                    }
+                }
+
+                socket_deinit();
+            }
+            else
+            {
+                logmsg(_("HHCIN023W CLOSE Event received, SHUTDOWN previously requested...\n"));
+            }
+            usleep(10000);
+            return FALSE;           
+            break;
+        default:
+            return FALSE;
+    }
+
+} /* end function console_ctrl_handler */
+#endif
 
 #if !defined(NO_SIGABEND_HANDLER)
 static void *watchdog_thread(void *arg)
@@ -235,7 +332,9 @@ int     i;                              /* (work)                    */
 #if defined(OPTION_HAO)
     /* Initialize the Hercules Automatic Operator */
 
-    hao_initialize();
+    if ( !hao_initialize() )
+        logmsg(_("HHCIN004S Cannot create HAO thread: %s\n"),
+                strerror(errno));
 #endif /* defined(OPTION_HAO) */
 
     /* Run the script processor for this file */
@@ -267,12 +366,6 @@ TID     logcbtid;                       /* RC file thread identifier */
 
     SET_THREAD_NAME("impl");
 
-#if defined(FISH_HANG)
-    /* "FishHang" debugs lock/cond/threading logic. Thus it must
-     * be initialized BEFORE any lock/cond/threads are created. */
-    FishHangInit(__FILE__,__LINE__);
-#endif
-
     /* Initialize 'hostinfo' BEFORE display_version is called */
     init_hostinfo( &hostinfo );
 
@@ -289,6 +382,9 @@ TID     logcbtid;                       /* RC file thread identifier */
 
     /* Clear the system configuration block */
     memset (&sysblk, 0, sizeof(SYSBLK));
+
+    /* Save thread ID of main program */
+    sysblk.impltid = thread_id();
 
     /* Save TOD of when we were first IMPL'ed */
     time( &sysblk.impltime );
@@ -370,6 +466,13 @@ TID     logcbtid;                       /* RC file thread identifier */
     strerror_r_init();
 #endif
 
+#if defined(OPTION_SCSI_TAPE)
+    initialize_lock (&sysblk.stape_lock);
+    initialize_condition (&sysblk.stape_getstat_cond);
+    InitializeListHead (&sysblk.stape_mount_link);
+    InitializeListHead (&sysblk.stape_status_link);
+#endif /* defined(OPTION_SCSI_TAPE) */
+
     /* Get name of configuration file or default to hercules.cnf */
     if(!(cfgfile = getenv("HERCULES_CNF")))
         cfgfile = "hercules.cnf";
@@ -431,6 +534,24 @@ TID     logcbtid;                       /* RC file thread identifier */
                 strerror(errno));
         delayed_exit(1);
     }
+
+    /* Register the SIGTERM handler */
+    if ( signal (SIGTERM, sigterm_handler) == SIG_ERR )
+    {
+        logmsg(_("HHCIN009S Cannot register SIGTERM handler: %s\n"),
+                strerror(errno));
+        delayed_exit(1);
+    }
+
+#if defined( _MSVC_ )
+    /* Register the Window console ctrl handlers */
+    if (SetConsoleCtrlHandler(console_ctrl_handler, TRUE) == FALSE)
+    {
+        logmsg(_("HHCIN010S Cannot register ConsoleCtrl handler: %s\n"),
+                strerror(errno));
+        delayed_exit(1);
+    }
+#endif
 
 #if defined(HAVE_DECL_SIGPIPE) && HAVE_DECL_SIGPIPE
     /* Ignore the SIGPIPE signal, otherwise Hercules may terminate with
@@ -580,10 +701,8 @@ TID     logcbtid;                       /* RC file thread identifier */
 
     ASSERT( sysblk.shutdown );  // (why else would we be here?!)
 
-#if defined(FISH_HANG)
-    FishHangAtExit();
-#endif
 #ifdef _MSVC_
+    SetConsoleCtrlHandler(console_ctrl_handler, FALSE);
     socket_deinit();
 #endif
 #ifdef DEBUG

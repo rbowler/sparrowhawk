@@ -1,7 +1,7 @@
 /* SHARED.C     (c)Copyright Greg Smith, 2002-2009                   */
 /*              Shared Device Server                                 */
 
-// $Id: shared.c 5172 2009-02-08 16:26:06Z rbowler $
+// $Id$
 //
 // $Log$
 // Revision 1.41  2009/01/23 13:01:34  bernard

@@ -1,7 +1,7 @@
 /* HTTPMISC.C   (c)Copyright Jan Jaeger, 2002-2009                   */
 /*              HTTP Server                                          */
 
-// $Id: httpmisc.h 5126 2009-01-23 13:05:56Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.26  2007/06/23 00:04:12  ivan

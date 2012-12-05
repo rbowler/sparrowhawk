@@ -4,7 +4,7 @@
 # Created: 1993-05-16
 # Public domain
 
-# $Id: mkinstalldirs 1815 2003-08-24 23:15:35Z fish $
+# $Id$
 
 errstatus=0
 dirmode=""

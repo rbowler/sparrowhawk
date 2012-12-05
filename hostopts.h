@@ -1,7 +1,7 @@
 /* HOSTOPTS.H   (c) Copyright "Fish" (David B. Trout), 2005-2009     */
 /*              Host-specific features and options for Hercules      */
 
-// $Id: hostopts.h 5586 2009-12-31 10:29:11Z rbowler $
+// $Id$
 
 //    This header file #included by 'featall.h' and 'hercules.h'
 

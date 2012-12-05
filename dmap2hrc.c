@@ -1,7 +1,7 @@
 /* DMAP2HRC.C   (c) Copyright Jay Maynard, 2001-2009                 */
 /*              Convert P/390 DEVMAP to Hercules config file         */
 
-// $Id: dmap2hrc.c 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This program reads a P/390 DEVMAP file and extracts the device    */
@@ -96,7 +96,7 @@ char            pathname[MAX_PATH];     /* file path in host format  */
 
     /* Open the devmap file */
     hostpath(pathname, filename, sizeof(pathname));
-    infd = open (pathname, O_RDONLY | O_BINARY);
+    infd = hopen(pathname, O_RDONLY | O_BINARY);
     if (infd < 0)
     {
         fprintf (stderr,"dmap2hrc: Error opening %s: %s\n",

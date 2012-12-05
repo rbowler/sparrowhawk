@@ -7,7 +7,7 @@
 //      The <config.h> header and other required headers are
 //      presumed to have already been #included ahead of it...
 
-// $Id: hconsts.h 5522 2009-12-11 15:25:15Z bernard $
+// $Id$
 
 #ifndef _HCONSTS_H
 #define _HCONSTS_H
@@ -252,6 +252,7 @@
 #define ACC_PTE            0x0200          /* Return page table entry*/
 #define ACC_LPTEA          0x0400          /* Esame page table entry */
 #define ACC_SPECIAL_ART    0x0800          /* Used by BSG            */
+#define ACC_ENH_MC         0x1000          /* Used by Enhanced MC    */
 
 #define ACCTYPE_HW         0               /* Hardware access        */
 #define ACCTYPE_INSTFETCH  ACC_READ        /* Instruction fetch      */
@@ -267,6 +268,7 @@
 #define ACCTYPE_SIE        0               /* SIE host access        */
 #define ACCTYPE_STRAG      0               /* STRAG instruction      */
 #define ACCTYPE_LPTEA     (ACC_LPTEA|ACC_NOTLB) /* LPTEA instruction */
+#define ACCTYPE_EMC       (ACC_ENH_MC|ACCTYPE_WRITE) /* MC instr.    */
 
 /* Special value for arn parameter for translate functions in dat.c  */
 /* _USE_... values for killing the "array subscript" warnings        */

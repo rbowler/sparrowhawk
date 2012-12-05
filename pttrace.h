@@ -1,7 +1,7 @@
 /* PTTRACE.H    (c) Copyright Greg Smith, 2003-2009                  */
 /*              Header file for pthreads trace debugger              */
 
-// $Id: pttrace.h 5598 2010-01-07 15:05:15Z rbowler $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* Pthread tracing structures and prototypes                         */

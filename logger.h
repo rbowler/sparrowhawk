@@ -1,7 +1,7 @@
 /* LOGGER.H     (c) Copyright Jan Jaeger, 2003-2009                  */
 /*              System logger functions                              */
 
-// $Id: logger.h 5126 2009-01-23 13:05:56Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.22  2007/06/23 00:04:14  ivan

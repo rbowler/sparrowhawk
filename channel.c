@@ -1,7 +1,7 @@
 /* CHANNEL.C    (c) Copyright Roger Bowler, 1999-2009                */
 /*              ESA/390 Channel Emulator                             */
 
-// $Id: channel.c 5654 2010-03-07 03:15:17Z fish $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module contains the channel subsystem functions for the      */
@@ -563,6 +563,10 @@ int     cc;                             /* Condition code            */
                 /* Reset the scsw */
                 dev->scsw.flag2 &= ~(SCSW2_AC_RESUM | SCSW2_FC_START | SCSW2_AC_START);
                 dev->scsw.flag3 &= ~(SCSW3_AC_SUSP);
+
+                /* Reset the device busy indicator */
+                dev->busy = dev->startpending = 0;
+
             }
         }
         release_lock(&sysblk.ioqlock);
@@ -997,7 +1001,7 @@ int pending = 0;
         {
             if(sysblk.ioq == dev)
                 sysblk.ioq = dev->nextioq;
-            else
+            else if ( sysblk.ioq != NULL )      /* add check for empty IOQ */
             {
              DEVBLK *tmp;
                 for(tmp = sysblk.ioq; tmp->nextioq != NULL && tmp->nextioq != dev; tmp = tmp->nextioq);
@@ -2410,6 +2414,7 @@ void *ARCH_DEP(execute_ccw_chain) (DEVBLK *dev)
 {
 int     sysid = DEV_SYS_LOCAL;          /* System Identifier         */
 U32     ccwaddr;                        /* Address of CCW        @IWZ*/
+U32     ticaddr = 0;                    /* Previous CCW was a TIC    */
 U16     idapmask;                       /* IDA page size - 1     @IWZ*/
 BYTE    idawfmt;                        /* IDAW format (1 or 2)  @IWZ*/
 BYTE    ccwfmt;                         /* CCW format (0 or 1)   @IWZ*/
@@ -2428,12 +2433,12 @@ BYTE    unitstat;                       /* Unit status               */
 BYTE    chanstat;                       /* Channel status            */
 U16     residual;                       /* Residual byte count       */
 BYTE    more;                           /* 1=Count exhausted         */
-BYTE    tic = 0;                        /* Previous CCW was a TIC    */
 BYTE    chain = 1;                      /* 1=Chain to next CCW       */
 BYTE    tracethis = 0;                  /* 1=Trace this CCW only     */
 BYTE    area[64];                       /* Message area              */
 int     bufpos = 0;                     /* Position in I/O buffer    */
 BYTE    iobuf[65536];                   /* Channel I/O buffer        */
+int     cmdretry = 255;                 /* Limit command retry       */
 
     /* Wait for the device to become available */
     obtain_lock (&dev->lock);
@@ -2769,6 +2774,10 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         ARCH_DEP(fetch_ccw) (dev, ccwkey, ccwfmt, ccwaddr, &opcode, &addr,
                     &flags, &count, &chanstat);
 
+        /* For an invalid CCW address in a TIC we must backup to TIC+8 */
+        if(ticaddr && (chanstat & CSW_PROGC))
+            ccwaddr = ticaddr-8;
+
         /* Point to the CCW in main storage */
         ccw = dev->mainstor + ccwaddr;
 
@@ -2793,7 +2802,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         if (IS_CCW_TIC(opcode))
         {
             /* Channel program check if TIC-to-TIC */
-            if (tic)
+            if (ticaddr)
             {
                 chanstat = CSW_PROGC;
                 break;
@@ -2809,7 +2818,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
 
             /* Set new CCW address (leaving the values of chained and
                code untouched to allow data-chaining through TIC) */
-            tic = 1;
+            ticaddr = ccwaddr;
             ccwaddr = addr;
             chain = 1;
             continue;
@@ -2819,7 +2828,7 @@ BYTE    iobuf[65536];                   /* Channel I/O buffer        */
         /* Commands other than TRANSFER IN CHANNEL      */
         /*----------------------------------------------*/
         /* Reset the TIC-to-TIC flag */
-        tic = 0;
+        ticaddr = 0;
 
         /* Update current CCW opcode, unless data chaining */
         if ((dev->chained & CCW_FLAGS_CD) == 0)
@@ -3012,7 +3021,7 @@ resume_suspend:
 
             /* Reset fields as if starting a new channel program */
             dev->code = 0;
-            tic = 0;
+            ticaddr = 0;
             chain = 1;
             dev->chained = 0;
             dev->prev_chained = 0;
@@ -3034,6 +3043,10 @@ resume_suspend:
             ARCH_DEP(raise_pci) (dev, ccwkey, ccwfmt, ccwaddr); /*@MW*/
         } 
 
+        /* Allow the device handler to determine whether this is
+           an immediate CCW (i.e. CONTROL with no data transfer) */
+        dev->is_immed = IS_CCW_IMMEDIATE(dev);
+
         /* Channel program check if invalid count */
         if (count == 0 && (ccwfmt == 0 ||
             (flags & CCW_FLAGS_CD) || (dev->chained & CCW_FLAGS_CD)))
@@ -3042,9 +3055,12 @@ resume_suspend:
             break;
         }
 
-        /* Allow the device handler to determine whether this is
-           an immediate CCW (i.e. CONTROL with no data transfer) */
-        dev->is_immed = IS_CCW_IMMEDIATE(dev);
+        /* If immediate, chain data is ignored */
+        if (dev->is_immed && (flags & CCW_FLAGS_CD))
+        {
+            flags &= ~CCW_FLAGS_CD;
+            dev->chained &= ~CCW_FLAGS_CD;
+        }
 
         /* If synchronous I/O and a syncio 2 device and not an
            immediate CCW then retry asynchronously */
@@ -3139,7 +3155,7 @@ resume_suspend:
         dev->syncio_retry = 0;
 
         /* Check for Command Retry (suggested by Jim Pierson) */
-        if ( unitstat == ( CSW_CE | CSW_DE | CSW_UC | CSW_SM ) )
+        if ( --cmdretry && unitstat == ( CSW_CE | CSW_DE | CSW_UC | CSW_SM ) )
         {
             chain    = 1;
             ccwaddr -= 8;   /* (retry same ccw again) */

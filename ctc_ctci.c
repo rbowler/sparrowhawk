@@ -8,7 +8,7 @@
 //
 // linux 2.4 modifications (c) Copyright Fritz Elfert, 2001-2009
 //
-// $Id: ctc_ctci.c 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.77  2008/11/04 05:56:31  fish
@@ -938,10 +938,16 @@ void  CTCI_Write( DEVBLK* pDEVBLK,   U16   sCount,
 
         if( rc < 0 )
         {
-            logmsg( _("HHCCT047E %4.4X: Error writing to %s: %s\n"),
+            logmsg( _("HHCCT047E %4.4X: Error writing to %s: rc=%d errno=%d %s\n"),
                     pDEVBLK->devnum, pCTCBLK->szTUNDevName,
-                    strerror( errno ) );
+                    rc, errno, strerror(errno));
+        }
 
+        /* Kludge for Ubuntu 10.04 by Martin Truebner */
+        if (rc == -1 && errno == 22) rc = 0;
+
+        if (rc < 0)
+        {
             pDEVBLK->sense[0] = SENSE_EC;
             *pUnitStat        = CSW_CE | CSW_DE | CSW_UC;
             return;

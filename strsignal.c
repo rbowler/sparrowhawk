@@ -3,7 +3,7 @@
    This file is in the public domain.
 */
 
-// $Id: strsignal.c 4102 2006-12-08 09:43:35Z jj $
+// $Id$
 //
 // $Log$
 

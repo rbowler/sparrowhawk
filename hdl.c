@@ -1,7 +1,7 @@
 /* HDL.C        (c) Copyright Jan Jaeger, 2003-2009                  */
 /*              Hercules Dynamic Loader                              */
 
-// $Id: hdl.c 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.55  2009/01/14 15:23:20  jj
@@ -22,7 +22,14 @@
 #define _HDL_C_
 #define _HUTIL_DLL_
 
+#if !defined(WIN32) && !defined(__FreeBSD__) && !defined(__APPLE__)
+#define ZZ_NO_BACKLINK
+#endif
+
 #include "hercules.h"
+#ifdef ZZ_NO_BACKLINK
+#include "opcode.h" /* for the opcode tables */
+#endif
 
 /*
 extern HDLPRE hdl_preload[];
@@ -46,6 +53,7 @@ extern void *HDL_DEPC;
 extern void *HDL_INIT;
 extern void *HDL_RESO;
 extern void *HDL_DDEV;
+extern void *HDL_DINS;
 extern void *HDL_FINI;
 #endif
 
@@ -62,6 +70,11 @@ static char *hdl_modpath = NULL;
 
 static LOCK   hdl_sdlock;                /* shutdown lock            */
 static HDLSHD *hdl_shdlist;              /* Shutdown call list       */
+
+static void hdl_didf (int, int, char *, void *);
+#ifdef ZZ_NO_BACKLINK
+static void hdl_modify_opcode(int, HDLINS *);
+#endif
 
 /* Global hdl_device_type_equates */
 
@@ -102,7 +115,7 @@ HDLSHD **tmpcall;
     }
     return -1;
 }
-    
+
 
 /* hdl_shut - call all shutdown call entries in LIFO order
  */
@@ -110,33 +123,69 @@ DLL_EXPORT void hdl_shut (void)
 {
 HDLSHD *shdent;
 
+#if defined( _MSVC_ )
+HDLSHD *loggercall;
+int logger_flag = 0;
+#endif // defined( _MSVC_ )
+
     logmsg("HHCHD900I Begin shutdown sequence\n");
 
     obtain_lock (&hdl_sdlock);
 
     for(shdent = hdl_shdlist; shdent; shdent = hdl_shdlist)
     {
-        logmsg("HHCHD901I Calling %s\n",shdent->shdname);
+#if defined( _MSVC_ )
+        if ( strcmp( shdent->shdname, "logger_term" ) == 0 )
         {
-            (shdent->shdcall) (shdent->shdarg);
+            loggercall = malloc(sizeof(HDLSHD));
+            loggercall->shdname = shdent->shdname;
+            loggercall->shdcall = shdent->shdcall;
+            loggercall->shdarg = shdent->shdarg;
+            logger_flag = 1;
         }
-        logmsg("HHCHD902I %s complete\n",shdent->shdname);
-
+        else
+#endif // defined( _MSVC_ )
+        {
+            logmsg("HHCHD901I Calling %s\n",shdent->shdname);
+            {
+                (shdent->shdcall) (shdent->shdarg);
+            }
+            logmsg("HHCHD902I %s complete\n",shdent->shdname);
+        }
         /* Remove shutdown call entry to ensure it is called once */
         hdl_shdlist = shdent->next;
         free(shdent);
     }
 
     release_lock (&hdl_sdlock);
+#if defined( _MSVC_ )
+    if ( logger_flag == 1 )
+    {
+        if ( sysblk.shutimmed )
+            /* shutdown of logger is skipped in a Windows Environment
+             * because we still have messages to write to the log file
+             */
+            logmsg("HHCHD903I (%s) skipped during Windows SHUTDOWN immediate\n",
+                    loggercall->shdname);
+        else
+        {
+            logmsg("HHCHD901I Calling %s\n",loggercall->shdname);
+            {
+                (loggercall->shdcall) (loggercall->shdarg);
+            }
+            logmsg("HHCHD902I %s complete\n",loggercall->shdname);
+            free(loggercall);
+        }
+    }
+#endif // defined( _MSVC_ )
 
     logmsg("HHCHD909I Shutdown sequence complete\n");
 }
 
-
 #if defined(OPTION_DYNAMIC_LOAD)
 
 
-/* hdl_setpath - set path for module load 
+/* hdl_setpath - set path for module load
  */
 DLL_EXPORT void hdl_setpath(char *path)
 {
@@ -230,7 +279,7 @@ size_t fulllen = 0;
 
     return dlopen(filename,flag);
 }
-    
+
 
 /* hdl_dvad - register device type
  */
@@ -346,7 +395,7 @@ MODENT *modent;
         logmsg("\n");
 
         for(modent = dllent->modent; modent; modent = modent->modnext)
-            if((flags & HDL_LIST_ALL) 
+            if((flags & HDL_LIST_ALL)
               || !((dllent->flags & HDL_LOAD_MAIN) && !modent->fep))
             {
                 logmsg(" symbol = %s",modent->name);
@@ -365,6 +414,22 @@ MODENT *modent;
             for(hndent = dllent->hndent; hndent; hndent = hndent->next)
                 logmsg(" %s",hndent->name);
             logmsg("\n");
+        }
+
+        if(dllent->insent)
+        {
+        HDLINS *insent;
+            for(insent = dllent->insent; insent; insent = insent->next)
+            {
+                logmsg(" instruction = %s, opcode = %4.4X",insent->instname,insent->opcode);
+                if(insent->archflags & HDL_INSTARCH_370)
+                    logmsg(", archmode = " _ARCH_370_NAME);
+                if(insent->archflags & HDL_INSTARCH_390)
+                    logmsg(", archmode = " _ARCH_390_NAME);
+                if(insent->archflags & HDL_INSTARCH_900)
+                    logmsg(", archmode = " _ARCH_900_NAME);
+                logmsg("\n");
+            }
         }
     }
 }
@@ -617,11 +682,14 @@ MODENT *modent;
 
     dllent->hdlddev = dlsym(dllent->dll,HDL_DDEV_Q);
 
+    dllent->hdldins = dlsym(dllent->dll,HDL_DINS_Q);
+
     dllent->hdlfini = dlsym(dllent->dll,HDL_FINI_Q);
 
     /* No modules or device types registered yet */
     dllent->modent = NULL;
     dllent->hndent = NULL;
+    dllent->insent = NULL;
 
     obtain_lock(&hdl_lock);
 
@@ -659,6 +727,10 @@ MODENT *modent;
     /* register any device types */
     if(hdl_cdll->hdlddev)
         (hdl_cdll->hdlddev)(&hdl_dvad);
+
+    /* register any new instructions */
+    if(hdl_cdll->hdldins)
+        (hdl_cdll->hdldins)(&hdl_didf);
 
     hdl_cdll = NULL;
 
@@ -719,6 +791,8 @@ HDLPRE *preload;
 
     hdl_cdll->hdlddev = dlsym(hdl_cdll->dll,HDL_DDEV_Q);
 
+    hdl_cdll->hdldins = dlsym(hdl_cdll->dll,HDL_DINS_Q);
+
     hdl_cdll->hdlfini = dlsym(hdl_cdll->dll,HDL_FINI_Q);
 #else
 
@@ -732,12 +806,15 @@ HDLPRE *preload;
 
     hdl_cdll->hdlddev = &HDL_DDEV;
 
+    hdl_cdll->hdldins = &HDL_DINS;
+
     hdl_cdll->hdlfini = &HDL_FINI;
 #endif
 
     /* No modules or device types registered yet */
     hdl_cdll->modent = NULL;
     hdl_cdll->hndent = NULL;
+    hdl_cdll->insent = NULL;
 
     /* No dll's loaded yet */
     hdl_cdll->dllnext = NULL;
@@ -755,6 +832,9 @@ HDLPRE *preload;
 
     if(hdl_cdll->hdlddev)
         (hdl_cdll->hdlddev)(&hdl_dvad);
+
+    if(hdl_cdll->hdldins)
+        (hdl_cdll->hdldins)(&hdl_didf);
 
     release_lock(&hdl_lock);
 
@@ -837,11 +917,14 @@ char *modname;
 
     dllent->hdlddev = dlsym(dllent->dll,HDL_DDEV_Q);
 
+    dllent->hdldins = dlsym(dllent->dll,HDL_DINS_Q);
+
     dllent->hdlfini = dlsym(dllent->dll,HDL_FINI_Q);
 
     /* No modules or device types registered yet */
     dllent->modent = NULL;
     dllent->hndent = NULL;
+    dllent->insent = NULL;
 
     obtain_lock(&hdl_lock);
 
@@ -888,6 +971,10 @@ char *modname;
     if(hdl_cdll->hdlddev)
         (hdl_cdll->hdlddev)(&hdl_dvad);
 
+    /* register any new instructions */
+    if(hdl_cdll->hdldins)
+        (hdl_cdll->hdldins)(&hdl_didf);
+
     hdl_cdll = NULL;
 
     release_lock(&hdl_lock);
@@ -904,6 +991,7 @@ DLLENT **dllent, *tmpdll;
 MODENT *modent, *tmpmod;
 DEVBLK *dev;
 HDLDEV *hnd;
+HDLINS *ins;
 char *modname;
 
     modname = (modname = strrchr(name,'/')) ? modname+1 : name;
@@ -935,7 +1023,7 @@ char *modname;
             if((*dllent)->hdlfini)
             {
             int rc;
-                
+
                 if((rc = ((*dllent)->hdlfini)()))
                 {
                     logmsg(_("HHCHD017E Unload of %s rejected by final section\n"),(*dllent)->name);
@@ -948,7 +1036,7 @@ char *modname;
             while(modent)
             {
                 tmpmod = modent;
-                
+
                 /* remove current entry from chain */
                 modent = modent->modnext;
 
@@ -969,6 +1057,18 @@ char *modname;
                 nexthnd = hnd->next;
                 free(hnd);
                 hnd = nexthnd;
+            }
+
+            for(ins = tmpdll->insent; ins;)
+            {
+            HDLINS *nextins;
+#ifdef ZZ_NO_BACKLINK
+                hdl_modify_opcode(FALSE, ins);
+#endif
+                free(ins->instname);
+                nextins = ins->next;
+                free(ins);
+                ins = nextins;
             }
 
 //          dlclose(tmpdll->dll);
@@ -993,7 +1093,7 @@ char *modname;
 
             return 0;
         }
-        
+
     }
 
     release_lock(&hdl_lock);
@@ -1001,6 +1101,163 @@ char *modname;
     logmsg(_("HHCHD009E %s not found\n"),modname);
 
     return -1;
+}
+
+
+#ifdef ZZ_NO_BACKLINK
+static void hdl_modify_optab(int insert,zz_func *tabent, HDLINS *instr)
+{
+    if(insert)
+    {
+#if defined(_370)
+        if(instr->archflags & HDL_INSTARCH_370)
+        {
+            instr->original = tabent[ARCH_370];
+            tabent[ARCH_370] = instr->instruction;
+        }
+#endif
+#if defined(_390)
+        if(instr->archflags & HDL_INSTARCH_390)
+        {
+            instr->original = tabent[ARCH_390];
+            tabent[ARCH_390] = instr->instruction;
+        }
+#endif
+#if defined(_900)
+        if(instr->archflags & HDL_INSTARCH_900)
+        {
+            instr->original = tabent[ARCH_900];
+            tabent[ARCH_900] = instr->instruction;
+        }
+#endif
+    }
+    else
+    {
+#if defined(_370)
+        if(instr->archflags & HDL_INSTARCH_370)
+            tabent[ARCH_370] = instr->original; 
+#endif
+#if defined(_900)
+        if(instr->archflags & HDL_INSTARCH_390)
+            tabent[ARCH_390] = instr->original; 
+#endif
+#if defined(_900)
+        if(instr->archflags & HDL_INSTARCH_900)
+            tabent[ARCH_900] = instr->original; 
+#endif
+    }
+}
+
+
+static void hdl_modify_opcode(int insert, HDLINS *instr)
+{
+    switch(instr->opcode & 0xff00)
+    {
+        case 0x0100:
+            hdl_modify_optab(insert,opcode_01xx[instr->opcode & 0xff],instr);
+            break;
+
+#if defined (FEATURE_VECTOR_FACILITY)
+        case 0xA400:
+            hdl_modify_optab(insert,v_opcode_a4xx[instr->opcode & 0xff],instr);
+            table = v_opcode_a4xx;
+            break;
+#endif
+
+        case 0xA500:
+            hdl_modify_optab(insert,opcode_a5xx[instr->opcode & 0x0f],instr);
+            break;
+
+        case 0xA700:
+            hdl_modify_optab(insert,opcode_a7xx[instr->opcode & 0x0f],instr);
+            break;
+
+        case 0xB200:
+            hdl_modify_optab(insert,opcode_b2xx[instr->opcode & 0xff],instr);
+            break;
+
+        case 0xB300:
+            hdl_modify_optab(insert,opcode_b3xx[instr->opcode & 0xff],instr);
+            break;
+
+        case 0xB900:
+            hdl_modify_optab(insert,opcode_b9xx[instr->opcode & 0xff],instr);
+            break;
+
+        case 0xC000:
+            hdl_modify_optab(insert,opcode_c0xx[instr->opcode & 0x0f],instr);
+            break;
+
+        case 0xC200:
+            hdl_modify_optab(insert,opcode_c2xx[instr->opcode & 0x0f],instr);
+            break;
+
+        case 0xC400:
+            hdl_modify_optab(insert,opcode_c4xx[instr->opcode & 0x0f],instr);
+            break;
+
+        case 0xC600:
+            hdl_modify_optab(insert,opcode_c6xx[instr->opcode & 0x0f],instr);
+            break;
+
+        case 0xC800:
+            hdl_modify_optab(insert,opcode_c8xx[instr->opcode & 0x0f],instr);
+            break;
+
+        case 0xCC00:                                                              /*810*/
+            hdl_modify_optab(insert,opcode_ccxx[instr->opcode & 0x0f],instr);     /*810*/
+            break;                                                                /*810*/
+
+        case 0xE300:
+            hdl_modify_optab(insert,opcode_e3xx[instr->opcode & 0xff],instr);
+            break;
+
+        case 0xE500:
+            hdl_modify_optab(insert,opcode_e5xx[instr->opcode & 0xff],instr);
+            break;
+
+        case 0xE600:
+            hdl_modify_optab(insert,opcode_e6xx[instr->opcode & 0xff],instr);
+            break;
+
+        case 0xEB00:
+            hdl_modify_optab(insert,opcode_ebxx[instr->opcode & 0xff],instr);
+            break;
+
+        case 0xEC00:
+            hdl_modify_optab(insert,opcode_ecxx[instr->opcode & 0xff],instr);
+            break;
+
+        case 0xED00:
+            hdl_modify_optab(insert,opcode_edxx[instr->opcode & 0xff],instr);
+            break;
+
+        default:
+            hdl_modify_optab(insert,opcode_table[instr->opcode >> 8],instr);
+    }
+
+    /* Copy opcodes to shadow tables */
+    copy_opcode_tables();
+
+}
+#endif
+
+
+/* hdl_didf - Define instruction call */
+static void hdl_didf (int archflags, int opcode, char *name, void *routine)
+{
+HDLINS *newins;
+
+    newins = malloc(sizeof(HDLINS));
+    newins->opcode = opcode > 0xff ? opcode : (opcode << 8) ;
+    newins->archflags = archflags;
+    newins->instname = strdup(name);
+    newins->instruction = routine;
+    newins->next = hdl_cdll->insent;
+    hdl_cdll->insent = newins;
+#ifdef ZZ_NO_BACKLINK
+    hdl_modify_opcode(TRUE, newins);
+#endif
 }
 
 #endif /*defined(OPTION_DYNAMIC_LOAD)*/

@@ -6,7 +6,7 @@
 # This file was added by the Hercules project.
 # It is not part of the original decNumber distribution.
 #
-# $Id: Makefile.am 4175 2006-12-30 18:31:08Z rbowler $
+# $Id$
 #
 # $Log$
 # Revision 1.3  2006/12/13 11:49:02  rbowler

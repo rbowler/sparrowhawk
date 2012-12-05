@@ -1,7 +1,7 @@
-/* DASDLOAD.C   (c) Copyright Roger Bowler, 1999-2009                */
+/* DASDLOAD.C   (c) Copyright Roger Bowler, 1999-2010                */
 /*              Hercules DASD Utilities: DASD image loader           */
 
-// $Id: dasdload.c 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This program creates a virtual DASD volume from a list of         */
@@ -13,20 +13,6 @@
 /*      Corrections to CVOL initialization logic by Jay Maynard      */
 /*      IEBCOPY native dataset support by Ronen Tzur                 */
 /*-------------------------------------------------------------------*/
-
-// $Log$
-// Revision 1.54  2008/11/04 04:50:46  fish
-// Ensure consistent utility startup
-//
-// Revision 1.53  2007/06/23 00:04:08  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.52  2007/05/24 21:13:27  rbowler
-// Circumvent MSVC optimizer bug in cvol_initialize function
-//
-// Revision 1.51  2006/12/08 09:43:19  jj
-// Add CVS message log
-//
 
 #include "hstdinc.h"
 
@@ -126,7 +112,7 @@ BYTE iplccw2[8] =   {0x08, 0x00, 0x3A, 0x98, 0x00, 0x00, 0x00, 0x00};
 BYTE ipl2data[] =   {0x07, 0x00, 0x3A, 0xB8, 0x40, 0x00, 0x00, 0x06,
                      0x31, 0x00, 0x3A, 0xBE, 0x40, 0x00, 0x00, 0x05,
                      0x08, 0x00, 0x3A, 0xA0, 0x00, 0x00, 0x00, 0x00,
-                     0x06, 0x00, 0x00, 0x00, 0x20, 0x00, 0x19, 0x60,
+                     0x06, 0x00, 0x00, 0x00, 0x20, 0x00, 0x7f, 0xff,
                      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, /*BBCCHH*/
                      0x00, 0x00, 0x00, 0x00, 0x04}; /*CCHHR*/
 BYTE noiplpsw[8] =  {0x00, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0F};
@@ -389,7 +375,7 @@ char            pathname[MAX_PATH];     /* iplfnm in host path format*/
 
     /* Open the object file */
     hostpath(pathname, iplfnm, sizeof(pathname));
-    tfd = open (pathname, O_RDONLY|O_BINARY);
+    tfd = hopen(pathname, O_RDONLY|O_BINARY);
     if (tfd < 0)
     {
         XMERRF ("HHCDL034E Cannot open %s: %s\n",
@@ -716,7 +702,7 @@ int             keylen;                 /* Key length                */
 int             datalen;                /* Data length               */
 int             maxtrks = 1;            /* Maximum track count       */
 DATABLK        *datablk;                /* -> data block             */
-BYTE            buf[4096];              /* Buffer for data block     */
+BYTE            buf[32768];             /* Buffer for data block     */
 
     /* For 2311 the IPL text will not fit on track 0 record 4,
        so adjust the IPL2 so that it loads from track 1 record 1 */
@@ -2697,7 +2683,7 @@ char            pathname[MAX_PATH];     /* xfname in host path format*/
 
     /* Open the input file */
     hostpath(pathname, xfname, sizeof(pathname));
-    xfd = open (pathname, O_RDONLY|O_BINARY);
+    xfd = hopen(pathname, O_RDONLY|O_BINARY);
     if (xfd < 0)
     {
         XMERRF ("HHCDL106E Cannot open %s: %s\n",
@@ -3511,7 +3497,7 @@ char            pathname[MAX_PATH];     /* sfname in host path format*/
 
     /* Open the input file */
     hostpath(pathname, sfname, sizeof(pathname));
-    sfd = open (pathname, O_RDONLY|O_BINARY);
+    sfd = hopen(pathname, O_RDONLY|O_BINARY);
     if (sfd < 0)
     {
         XMERRF ("HHCDL125E Cannot open %s: %s\n",

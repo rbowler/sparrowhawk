@@ -1,7 +1,7 @@
 /* FEATALL.H    (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              Architecture-dependent macro definitions             */
 
-// $Id: featall.h 5454 2009-08-14 14:25:06Z rbowler $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* Default features                                                  */
@@ -14,7 +14,7 @@
 #define OPTION_SMP                      /* Enable SMP support        */
 #define VECTOR_SECTION_SIZE         128 /* Vector section size       */
 #define VECTOR_PARTIAL_SUM_NUMBER     1 /* Vector partial sum number */
-#define CKD_MAXFILES                  4 /* Max files per CKD volume  */
+#define CKD_MAXFILES                 27 /* Max files per CKD volume  */
 #define OPTION_MIPS_COUNTING            /* Display MIPS on ctl panel */
 #define PANEL_REFRESH_RATE              /* Enable panrate feature    */
 #define PANEL_REFRESH_RATE_FAST      50 /* Fast refresh rate         */
@@ -46,9 +46,7 @@
                                            of inter-thread signaling */
 #define OPTION_TIMESTAMP_LOGFILE        /* Hardcopy logfile HH:MM:SS */
 #define OPTION_IPLPARM                  /* IPL PARM a la VM          */
-#ifndef FISH_HANG
 #define OPTION_PTTRACE                  /* Pthreads tracing          */
-#endif
 //#define OPTION_DEBUG_MESSAGES         /* Prefix msgs with filename
 //                                         and line# if DEBUG build  */
 #define OPTION_SET_STSI_INFO            /* Set STSI info in cfg file */
@@ -62,6 +60,9 @@
   #error OPTION_MSGHLD requires OPTION_MSGCLR
 #endif // defined(OPTION_MSGHLD) && !defined(OPTION_MSGCLR)
 
+#if (CKD_MAXFILES > 35)
+  #error CKD_MAXFILES can not exceed design limit of 35
+#endif
 /*********************************************************************\
  *********************************************************************
  **                                                                 **
@@ -89,6 +90,7 @@
 
 #undef FEATURE_4K_STORAGE_KEYS
 #undef FEATURE_2K_STORAGE_KEYS
+#undef FEATURE_ACCESS_EXCEPTION_FETCH_STORE_INDICATION          /*810*/
 #undef FEATURE_ACCESS_REGISTERS
 #undef FEATURE_ADDRESS_LIMIT_CHECKING
 #undef FEATURE_ASN_AND_LX_REUSE
@@ -117,10 +119,13 @@
 #undef FEATURE_DAT_ENHANCEMENT
 #undef FEATURE_DAT_ENHANCEMENT_FACILITY_2                       /*@Z9*/
 #undef FEATURE_DECIMAL_FLOATING_POINT                           /*DFP*/
+#undef FEATURE_DISTINCT_OPERANDS_FACILITY                       /*810*/
 #undef FEATURE_DUAL_ADDRESS_SPACE
 #undef FEATURE_ECPSVM
 #undef FEATURE_EMULATE_VM
 #undef FEATURE_ENHANCED_DAT_FACILITY                            /*208*/
+#undef FEATURE_ENHANCED_MONITOR_FACILITY                        /*810*/
+#undef FEATURE_ENHANCED_SUPPRESSION_ON_PROTECTION               /*208*/
 #undef FEATURE_ESAME
 #undef FEATURE_ESAME_N3_ESA390
 #undef FEATURE_ETF2_ENHANCEMENT                                 /*@Z9*/
@@ -137,8 +142,10 @@
 #undef FEATURE_EXTENDED_TRANSLATION_FACILITY_3
 #undef FEATURE_EXTERNAL_INTERRUPT_ASSIST
 #undef FEATURE_EXTRACT_CPU_TIME                                 /*407*/
+#undef FEATURE_FAST_BCR_SERIALIZATION_FACILITY                  /*810*/
 #undef FEATURE_FAST_SYNC_DATA_MOVER
 #undef FEATURE_FETCH_PROTECTION_OVERRIDE
+#undef FEATURE_FLOATING_POINT_EXTENSION_FACILITY                /*810*/
 #undef FEATURE_FPS_ENHANCEMENT                                  /*DFP*/
 #undef FEATURE_FPS_EXTENSIONS
 #undef FEATURE_GENERAL_INSTRUCTIONS_EXTENSION_FACILITY
@@ -147,22 +154,29 @@
 #undef FEATURE_HFP_EXTENSIONS
 #undef FEATURE_HFP_MULTIPLY_ADD_SUBTRACT
 #undef FEATURE_HFP_UNNORMALIZED_EXTENSION                       /*@Z9*/
+#undef FEATURE_HIGH_WORD_FACILITY                               /*810*/
 #undef FEATURE_HYPERVISOR
 #undef FEATURE_IEEE_EXCEPTION_SIMULATION                        /*407*/
 #undef FEATURE_IMMEDIATE_AND_RELATIVE
 #undef FEATURE_INCORRECT_LENGTH_INDICATION_SUPPRESSION
 #undef FEATURE_INTEGRATED_3270_CONSOLE
 #undef FEATURE_INTEGRATED_ASCII_CONSOLE
+#undef FEATURE_INTERLOCKED_ACCESS_FACILITY                      /*810*/
 #undef FEATURE_INTERPRETIVE_EXECUTION
 #undef FEATURE_INTERVAL_TIMER
+#undef FEATURE_IPTE_RANGE_FACILITY                              /*810*/
 #undef FEATURE_IO_ASSIST
 #undef FEATURE_LINKAGE_STACK
 #undef FEATURE_LOAD_REVERSED
+#undef FEATURE_LOAD_PROGRAM_PARAMETER_FACILITY
+#undef FEATURE_LOAD_STORE_ON_CONDITION_FACILITY                 /*810*/
 #undef FEATURE_LOCK_PAGE
 #undef FEATURE_LONG_DISPLACEMENT
 #undef FEATURE_MESSAGE_SECURITY_ASSIST
 #undef FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_1              /*@Z9*/
 #undef FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_2
+#undef FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_3              /*810*/
+#undef FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_4              /*810*/
 #undef FEATURE_MIDAW                                            /*@Z9*/
 #undef FEATURE_MOVE_PAGE_FACILITY_2
 #undef FEATURE_MOVE_WITH_OPTIONAL_SPECIFICATIONS                /*208*/
@@ -170,6 +184,7 @@
 #undef FEATURE_MSSF_CALL
 #undef FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE
 #undef FEATURE_MVS_ASSIST
+#undef FEATURE_NONQUIESCING_KEY_SETTING_FACILITY                /*810*/
 #undef FEATURE_PAGE_PROTECTION
 #undef FEATURE_PARSING_ENHANCEMENT_FACILITY                     /*208*/
 #undef FEATURE_PERFORM_LOCKED_OPERATION
@@ -177,11 +192,13 @@
 #undef FEATURE_PER2
 #undef FEATURE_PER3                                             /*@Z9*/
 #undef FEATURE_PFPO                                             /*407*/
+#undef FEATURE_POPULATION_COUNT_FACILITY                        /*810*/
 #undef FEATURE_PRIVATE_SPACE
 #undef FEATURE_PROGRAM_DIRECTED_REIPL                           /*@Z9*/
 #undef FEATURE_PROTECTION_INTERCEPTION_CONTROL
 #undef FEATURE_QUEUED_DIRECT_IO
 #undef FEATURE_REGION_RELOCATE
+#undef FEATURE_RESET_REFERENCE_BITS_MULTIPLE_FACILITY           /*810*/
 #undef FEATURE_RESTORE_SUBCHANNEL_FACILITY                      /*208*/
 #undef FEATURE_RESUME_PROGRAM
 #undef FEATURE_SCEDIO
@@ -192,11 +209,11 @@
 #undef FEATURE_SENSE_RUNNING_STATUS                             /*@Z9*/
 #undef FEATURE_SERVICE_PROCESSOR
 #undef FEATURE_SET_ADDRESS_SPACE_CONTROL_FAST
-#undef FEATURE_SET_PROGRAM_PARAMETER_FACILITY
 #undef FEATURE_SQUARE_ROOT
 #undef FEATURE_STORAGE_KEY_ASSIST
 #undef FEATURE_STORAGE_PROTECTION_OVERRIDE
 #undef FEATURE_STORE_CLOCK_FAST                                 /*@Z9*/
+#undef FEATURE_STORE_FACILITY_LIST
 #undef FEATURE_STORE_FACILITY_LIST_EXTENDED                     /*@Z9*/
 #undef FEATURE_STORE_SYSTEM_INFORMATION
 #undef FEATURE_STRING_INSTRUCTION

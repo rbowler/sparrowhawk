@@ -2,7 +2,7 @@
 /*       Perform chkdsk for a Compressed CKD Direct Access Storage   */
 /*       Device file.                                                */
 
-// $Id: cckdcomp.c 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* Remove all free space on a compressed ckd file                    */
@@ -77,7 +77,7 @@ DEVBLK         *dev=&devblk;            /* -> DEVBLK                 */
 
         /* open the file */
         hostpath(dev->filename, argv[i], sizeof(dev->filename));
-        dev->fd = open (dev->filename, O_RDWR|O_BINARY);
+        dev->fd = hopen(dev->filename, O_RDWR|O_BINARY);
         if (dev->fd < 0)
         {
             cckdumsg (dev, 700, "open error: %s\n", strerror(errno));

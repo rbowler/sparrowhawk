@@ -1,18 +1,19 @@
 /* FEAT900.H    (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              ESAME feature definitions                            */
 
-// $Id: feat900.h 5569 2009-12-27 14:01:09Z hsg001 $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This file defines the architectural features which are included   */
 /* at compilation time for ESAME (z/Architecture) mode               */
 /*-------------------------------------------------------------------*/
- 
+
 #if defined(OPTION_900_MODE)
 #define _ARCH_900_NAME "z/Arch" /* also: "ESAME" */
 
 /* This file MUST NOT contain #undef statements */
 #define FEATURE_4K_STORAGE_KEYS
+#define FEATURE_ACCESS_EXCEPTION_FETCH_STORE_INDICATION         /*810*/
 #define FEATURE_ACCESS_REGISTERS
 #define FEATURE_ADDRESS_LIMIT_CHECKING
 #define FEATURE_ASN_AND_LX_REUSE
@@ -38,9 +39,12 @@
 #define FEATURE_DAT_ENHANCEMENT
 #define FEATURE_DAT_ENHANCEMENT_FACILITY_2                      /*@Z9*/
 #define FEATURE_DECIMAL_FLOATING_POINT                          /*DFP*/
+#define FEATURE_DISTINCT_OPERANDS_FACILITY                      /*810*/
 #define FEATURE_DUAL_ADDRESS_SPACE
 #define FEATURE_EMULATE_VM
-//#define FEATURE_ENHANCED_DAT_FACILITY                           /*208*/
+#define FEATURE_ENHANCED_DAT_FACILITY                           /*208*/
+#define FEATURE_ENHANCED_MONITOR_FACILITY                       /*810*/
+#define FEATURE_ENHANCED_SUPPRESSION_ON_PROTECTION              /*208*/
 #define FEATURE_ESAME
 #define FEATURE_ETF2_ENHANCEMENT                                /*@Z9*/
 #define FEATURE_ETF3_ENHANCEMENT                                /*@Z9*/
@@ -57,6 +61,8 @@
 #define FEATURE_EXTERNAL_INTERRUPT_ASSIST
 #define FEATURE_EXTRACT_CPU_TIME                                /*407*/
 #define FEATURE_FETCH_PROTECTION_OVERRIDE
+#define FEATURE_FAST_BCR_SERIALIZATION_FACILITY                 /*810*/
+//#define FEATURE_FLOATING_POINT_EXTENSION_FACILITY               /*810*/
 #define FEATURE_FPS_ENHANCEMENT                                 /*DFP*/
 #define FEATURE_FPS_EXTENSIONS
 #define FEATURE_GENERAL_INSTRUCTIONS_EXTENSION_FACILITY         /*208*/
@@ -65,26 +71,34 @@
 #define FEATURE_HFP_EXTENSIONS
 #define FEATURE_HFP_MULTIPLY_ADD_SUBTRACT
 #define FEATURE_HFP_UNNORMALIZED_EXTENSION                      /*@Z9*/
+#define FEATURE_HIGH_WORD_FACILITY                              /*810*/
 #define FEATURE_HYPERVISOR
 #define FEATURE_IEEE_EXCEPTION_SIMULATION                       /*407*/
 #define FEATURE_IMMEDIATE_AND_RELATIVE
 #define FEATURE_INCORRECT_LENGTH_INDICATION_SUPPRESSION
 #define FEATURE_INTEGRATED_3270_CONSOLE
 //#define FEATURE_INTEGRATED_ASCII_CONSOLE
+#define FEATURE_INTERLOCKED_ACCESS_FACILITY                     /*810*/
 #define FEATURE_INTERPRETIVE_EXECUTION
 #define FEATURE_IO_ASSIST
+#define FEATURE_IPTE_RANGE_FACILITY                             /*810*/
 #define FEATURE_LINKAGE_STACK
+#define FEATURE_LOAD_PROGRAM_PARAMETER_FACILITY                 /*810*/
 #define FEATURE_LOAD_REVERSED
+#define FEATURE_LOAD_STORE_ON_CONDITION_FACILITY                /*810*/
 #define FEATURE_LOCK_PAGE
 #define FEATURE_LONG_DISPLACEMENT
 #define FEATURE_MESSAGE_SECURITY_ASSIST
 #define FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_1             /*@Z9*/
 #define FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_2
+#define FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_3             /*810*/
+#define FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_4             /*810*/
 #define FEATURE_MIDAW                                           /*@Z9*/
 #define FEATURE_MOVE_PAGE_FACILITY_2
 #define FEATURE_MOVE_WITH_OPTIONAL_SPECIFICATIONS               /*208*/
 #define FEATURE_MPF_INFO
 #define FEATURE_MVS_ASSIST
+//#define FEATURE_NONQUIESCING_KEY_SETTING_FACILITY               /*810*/
 #define FEATURE_PAGE_PROTECTION
 #define FEATURE_PARSING_ENHANCEMENT_FACILITY                    /*208*/
 #define FEATURE_PERFORM_LOCKED_OPERATION
@@ -92,10 +106,12 @@
 #define FEATURE_PER2
 #define FEATURE_PER3                                            /*@Z9*/
 //#define FEATURE_PFPO                                            /*407*/
+#define FEATURE_POPULATION_COUNT_FACILITY                       /*810*/
 #define FEATURE_PRIVATE_SPACE
 //#define FEATURE_PROGRAM_DIRECTED_REIPL /*DIAG308 incomplete*/  /*@Z9*/
 #define FEATURE_PROTECTION_INTERCEPTION_CONTROL
 #define FEATURE_QUEUED_DIRECT_IO
+#define FEATURE_RESET_REFERENCE_BITS_MULTIPLE_FACILITY          /*810*/
 //#define FEATURE_RESTORE_SUBCHANNEL_FACILITY                     /*208*/
 #define FEATURE_RESUME_PROGRAM
 #define FEATURE_REGION_RELOCATE
@@ -103,11 +119,11 @@
 #define FEATURE_SENSE_RUNNING_STATUS                            /*@Z9*/
 #define FEATURE_SERVICE_PROCESSOR
 #define FEATURE_SET_ADDRESS_SPACE_CONTROL_FAST
-//#define FEATURE_SET_PROGRAM_PARAMETER_FACILITY
 #define FEATURE_SQUARE_ROOT
 #define FEATURE_STORAGE_KEY_ASSIST
 #define FEATURE_STORAGE_PROTECTION_OVERRIDE
 #define FEATURE_STORE_CLOCK_FAST
+#define FEATURE_STORE_FACILITY_LIST
 #define FEATURE_STORE_FACILITY_LIST_EXTENDED                    /*@Z9*/
 #define FEATURE_STORE_SYSTEM_INFORMATION
 #define FEATURE_STRING_INSTRUCTION

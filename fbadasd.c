@@ -1,7 +1,7 @@
 /* FBADASD.C    (c) Copyright Roger Bowler, 1999-2009                */
 /*              ESA/390 FBA Direct Access Storage Device Handler     */
 
-// $Id: fbadasd.c 5460 2009-09-15 07:47:32Z hsg001 $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
@@ -82,6 +82,8 @@ struct  stat statbuf;                   /* File information          */
 int     startblk;                       /* Device origin block number*/
 int     numblks;                        /* Device block count        */
 BYTE    c;                              /* Character work area       */
+char   *cu = NULL;                      /* Specified control unit    */
+char   *kw;                             /* Argument keyword          */
 int     cfba = 0;                       /* 1 = Compressed fba        */
 int     i;                              /* Loop index                */
 CKDDASD_DEVHDR  devhdr;                 /* Device header             */
@@ -121,10 +123,10 @@ char    pathname[MAX_PATH];             /* file path in host format  */
 
     /* Open the device file */
     hostpath(pathname, dev->filename, sizeof(pathname));
-    dev->fd = open (pathname, O_RDWR|O_BINARY);
+    dev->fd = hopen(pathname, O_RDWR|O_BINARY);
     if (dev->fd < 0)
     {
-        dev->fd = open (pathname, O_RDONLY|O_BINARY);
+        dev->fd = hopen(pathname, O_RDONLY|O_BINARY);
         if (dev->fd < 0)
         {
             logmsg (_("HHCDA058E File %s open error: %s\n"),
@@ -188,19 +190,27 @@ char    pathname[MAX_PATH];             /* file path in host format  */
             if (strlen (argv[i]) > 3
              && memcmp ("sf=", argv[i], 3) == 0)
             {
-                if (strlen(argv[i]+3) < 256)
-                    dev->dasdsfn=strdup (argv[i]+3);
-                    if (dev->dasdsfn)
-                    {
+                if ('\"' == argv[i][3]) argv[i]++;
+                hostpath(pathname, argv[i]+3, sizeof(pathname));
+                dev->dasdsfn = strdup(pathname);
+                if (dev->dasdsfn)
+                {
                     /* Set the pointer to the suffix character */
-                        dev->dasdsfx = strrchr (dev->dasdsfn, '/');
-                        if (dev->dasdsfx == NULL)
-                            dev->dasdsfx = dev->dasdsfn + 1;
-                        dev->dasdsfx = strchr (dev->dasdsfx, '.');
-                        if (dev->dasdsfx == NULL)
-                            dev->dasdsfx = dev->dasdsfn + strlen(dev->dasdsfn);
-                        dev->dasdsfx--;
-                    }
+                    dev->dasdsfx = strrchr (dev->dasdsfn, '/');
+                    if (dev->dasdsfx == NULL)
+                        dev->dasdsfx = dev->dasdsfn + 1;
+                    dev->dasdsfx = strchr (dev->dasdsfx, '.');
+                    if (dev->dasdsfx == NULL)
+                        dev->dasdsfx = dev->dasdsfn + strlen(dev->dasdsfn);
+                    dev->dasdsfx--;
+                }
+                continue;
+            }        
+            if (strlen (argv[i]) > 3
+             && memcmp("cu=", argv[i], 3) == 0)   /* support for cu= added but  */
+            {                                     /* is ignored for the present */   
+                kw = strtok (argv[i], "=");
+                cu = strtok (NULL, " \t");
                 continue;
             }
             if (strcasecmp ("nosyncio", argv[i]) == 0
@@ -731,7 +741,7 @@ void fbadasd_end (DEVBLK *dev)
 BYTE            unitstat;
 
     /* Forces updated buffer to be written */
-    fbadasd_read_blkgrp (dev, -1, &unitstat);
+    (dev->hnd->read) (dev, -1, &unitstat);
 }
 
 /*-------------------------------------------------------------------*/
@@ -758,7 +768,7 @@ int fbadasd_close_device ( DEVBLK *dev )
 BYTE            unitstat;
 
     /* Forces updated buffer to be written */
-    fbadasd_read_blkgrp (dev, -1, &unitstat);
+    (dev->hnd->read) (dev, -1, &unitstat);
 
     /* Free the cache */
     cache_lock(CACHE_DEVBUF);

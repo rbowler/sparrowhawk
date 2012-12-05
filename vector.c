@@ -1,6 +1,6 @@
 /* vector.c     S/370 and ESA/390 Vector Operations                  */
 
-// $Id: vector.c 5127 2009-01-23 13:25:01Z bernard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module implements the Vector Facility instruction execution  */

@@ -4,7 +4,7 @@
 /*      (http://www.hercules-390.org/herclic.html)                   */
 /*   as modifications to Hercules.                                   */
 
-// $Id: hostinfo.h 5125 2009-01-23 12:01:44Z bernard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* Header file contains host system information                      */

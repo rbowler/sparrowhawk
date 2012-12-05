@@ -3,7 +3,7 @@
  * modified for use with dyncrypt
  */
 
-// $Id: des.c 4102 2006-12-08 09:43:35Z jj $
+// $Id$
 
 /*
  * PuTTY is copyright 1997-2005 Simon Tatham.

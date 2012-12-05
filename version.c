@@ -1,7 +1,7 @@
 /* VERSION.C    (c) Copyright Roger Bowler, 1999-2009                */
 /*              Hercules Version Display Module                      */
 
-// $Id: version.c 5480 2009-10-09 13:10:39Z fish $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module displays the Hercules program name, version, build    */

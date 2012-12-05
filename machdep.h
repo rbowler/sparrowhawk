@@ -1,7 +1,7 @@
 /* MACHDEP.H    (c) Copyright Greg Smith, 2001-2010                  */
 /*              Hercules machine specific code                       */
 
-// $Id: machdep.h 5634 2010-02-15 15:33:56Z rbowler $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /*                                                                   */

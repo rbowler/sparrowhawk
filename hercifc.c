@@ -19,11 +19,12 @@
 // The exit status is zero if successful, non-zero if error.
 //
 
-// $Id: hercifc.c 5585 2009-12-30 22:40:19Z rbowler $
+// $Id$
 
-#include "hercules.h"
+#include "hstdinc.h"
 
 #if defined(BUILD_HERCIFC)
+#include "hercules.h"
 #include "hercifc.h"
 
 // --------------------------------------------------------------------

@@ -8,7 +8,7 @@
 /* Hercules extends the use to System/370 with 4K pages and 2K pages */
 /* with recommended constraints                                      */
 
-// $Id: vmd250.c 5470 2009-10-04 10:40:58Z hsg001 $
+// $Id$
 
 /* Unconditional log messages generated */
 /* HHCVM006E - Could not allocate storage for Block I/O environment   */

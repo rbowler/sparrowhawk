@@ -3,7 +3,7 @@
 /*              Noordwijkerhout, The Netherlands                     */ 
 /*              Perform Floating Point Operation instruction         */
 
-// $Id: pfpo.c 5453 2009-08-14 07:18:18Z bernard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module implements the Perform Floating Point Operation       */

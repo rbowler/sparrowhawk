@@ -1,6 +1,6 @@
 /*      $NetBSD: getopt_long.c,v 1.15 2002/01/31 22:43:40 tv Exp $      */
 
-// $Id: getopt.c 5013 2009-01-02 19:21:52Z jj $
+// $Id$
 
 /*-
  * Copyright (c) 2000 The NetBSD Foundation, Inc.

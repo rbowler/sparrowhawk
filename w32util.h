@@ -5,7 +5,7 @@
 // (http://www.hercules-390.org/herclic.html) as modifications to Hercules.
 //////////////////////////////////////////////////////////////////////////////////////////
 
-// $Id: w32util.h 5127 2009-01-23 13:25:01Z bernard $
+// $Id$
 //
 // $Log$
 // Revision 1.13  2008/11/23 22:27:43  rbowler
@@ -231,6 +231,7 @@ W32_DLL_IMPORT int    w32_fclose ( FILE* stream );
 W32_DLL_IMPORT int    w32_get_stdin_char ( char* pCharBuff, int wait_millisecs );
 W32_DLL_IMPORT pid_t  w32_poor_mans_fork ( char*  pszCommandLine, int* pnWriteToChildStdinFD );
 W32_DLL_IMPORT void   w32_set_thread_name( TID tid, char* name );
+W32_DLL_IMPORT int    w32_hopen ( const char* path, int oflag, ... );
 
 //////////////////////////////////////////////////////////////////////////////////////////
 

@@ -3,7 +3,7 @@
 
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id: machchk.c 5126 2009-01-23 13:05:56Z bernard $
+// $Id$
 
 /*-------------------------------------------------------------------*/
 /* The machine check function supports dynamic I/O configuration.    */
