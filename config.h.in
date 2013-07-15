@@ -18,10 +18,6 @@
 /* Define to enable extra debugging code (TRACE/VERIFY/ASSERT macros) */
 #undef DEBUG
 
-/* Define to 1 if translation of program messages to the user's native
-   language is requested. */
-#undef ENABLE_NLS
-
 /* Define to build interface to external Windows GUI */
 #undef EXTERNALGUI
 
@@ -64,23 +60,11 @@
 /* Define to 1 if you have the <bzlib.h> header file. */
 #undef HAVE_BZLIB_H
 
-/* Define to 1 if you have the MacOS X function CFLocaleCopyCurrent in the
-   CoreFoundation framework. */
-#undef HAVE_CFLOCALECOPYCURRENT
-
-/* Define to 1 if you have the MacOS X function CFPreferencesCopyAppValue in
-   the CoreFoundation framework. */
-#undef HAVE_CFPREFERENCESCOPYAPPVALUE
-
 /* Define to 1 if you have the `closedir' function. */
 #undef HAVE_CLOSEDIR
 
 /* Define to 1 if you have the <ctype.h> header file. */
 #undef HAVE_CTYPE_H
-
-/* Define if the GNU dcgettext() function is already present or preinstalled.
-   */
-#undef HAVE_DCGETTEXT
 
 /* Define to 1 if you have the declaration of `IFNAMSIZ', and to 0 if you
    don't. */
@@ -220,9 +204,6 @@
 /* Define to 1 if you have the `getresuid' function. */
 #undef HAVE_GETRESUID
 
-/* Define if the GNU gettext() function is already present or preinstalled. */
-#undef HAVE_GETTEXT
-
 /* Define to 1 if you have the `gettimeofday' function. */
 #undef HAVE_GETTIMEOFDAY
 
@@ -269,9 +250,6 @@
 /* Define to 1 if you have the `iconv' library (-liconv). */
 #undef HAVE_LIBICONV
 
-/* Define to 1 if you have the <libintl.h> header file. */
-#undef HAVE_LIBINTL_H
-
 /* Define to 1 if you have the `m' library (-lm). */
 #undef HAVE_LIBM
 
@@ -298,9 +276,6 @@
 
 /* Define to 1 if you have the <linux/if_tun.h> header file. */
 #undef HAVE_LINUX_IF_TUN_H
-
-/* Define to 1 if you have the <locale.h> header file. */
-#undef HAVE_LOCALE_H
 
 /* Define to 1 if you have the <ltdl.h> header file. */
 #undef HAVE_LTDL_H
@@ -446,16 +421,16 @@
 /* Define to 1 if you have the `strtok_r' function. */
 #undef HAVE_STRTOK_R
 
-/* Define to 1 if `s_addr' is a member of `struct in_addr'. */
+/* Define to 1 if `s_addr' is member of `struct in_addr'. */
 #undef HAVE_STRUCT_IN_ADDR_S_ADDR
 
-/* Define to 1 if `sa_sigaction' is a member of `struct sigaction'. */
+/* Define to 1 if `sa_sigaction' is member of `struct sigaction'. */
 #undef HAVE_STRUCT_SIGACTION_SA_SIGACTION
 
-/* Define to 1 if `sin_len' is a member of `struct sockaddr_in'. */
+/* Define to 1 if `sin_len' is member of `struct sockaddr_in'. */
 #undef HAVE_STRUCT_SOCKADDR_IN_SIN_LEN
 
-/* Define to 1 if `tv_nsec' is a member of `struct timespec'. */
+/* Define to 1 if `tv_nsec' is member of `struct timespec'. */
 #undef HAVE_STRUCT_TIMESPEC_TV_NSEC
 
 /* Define to 1 if you have the `sysconf' function. */
@@ -562,14 +537,8 @@
 /* Define to cause dynamic loader to use libtool instead of dlopen */
 #undef HDL_USE_LIBTOOL
 
-/* Directory where to find NLS data */
-#undef HERC_LOCALEDIR
-
 /* Define to enable bzip2 compression in emulated tapes */
 #undef HET_BZIP2
-
-/* Define as const if the declaration of iconv() needs const. */
-#undef ICONV_CONST
 
 /* Define if the OS needs help to load dependent libraries for dlopen(). */
 #undef LTDL_DLOPEN_DEPLIBS
@@ -590,9 +559,6 @@
 
 /* Defines the maximum number of emulated CPU engines */
 #undef MAX_CPU_ENGINES
-
-/* Directory where HERCULES modules are installed */
-#undef MODULESDIR
 
 /* Define to indicate optreset exists */
 #undef NEED_GETOPT_OPTRESET
@@ -656,14 +622,8 @@
 /* Define to the one symbol short name of this package. */
 #undef PACKAGE_TARNAME
 
-/* Define to the home page for this package. */
-#undef PACKAGE_URL
-
 /* Define to the version of this package. */
 #undef PACKAGE_VERSION
-
-/* Directory where the HTTP server will find documents */
-#undef PKGDATADIR
 
 /* The size of `int', as computed by sizeof. */
 #undef SIZEOF_INT
@@ -715,9 +675,6 @@
 
 /* Number of bits in a file offset, on hosts where this is settable. */
 #undef _FILE_OFFSET_BITS
-
-/* Define to 1 if non-Intel architecture (gettext) */
-#undef _INTL_REDIRECT_MACROS
 
 /* Define to 1 to make fseeko visible on some hosts (e.g. glibc 2.2). */
 #undef _LARGEFILE_SOURCE

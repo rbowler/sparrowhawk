@@ -1,9 +1,6 @@
 /* HOSTOPTS.H   (c) Copyright "Fish" (David B. Trout), 2005-2009     */
 /*              Host-specific features and options for Hercules      */
 
-// $Id$
-
-//    This header file #included by 'featall.h' and 'hercules.h'
 
 /*
    All HOST-operating-specific (Win32, Apple. Linux, etc) FEATures
@@ -167,13 +164,6 @@
 #endif
 
 #define HTTP_SERVER_CONNECT_KLUDGE
-
-/*  Note:  OPTION_FISHIO  only possible with  OPTION_FTHREADS        */
-#if defined(OPTION_FTHREADS)
-  #define OPTION_FISHIO                 /* Use Fish's I/O scheduler  */
-#else
-  #undef  OPTION_FISHIO                 /* Use Herc's I/O scheduler  */
-#endif
 
 #define OPTION_W32_CTCI                 /* Fish's TunTap for CTCA's  */
 #undef  TUNTAP_IFF_RUNNING_NEEDED       /* TunTap32 doesn't allow it */

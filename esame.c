@@ -1,7 +1,5 @@
-/* ESAME.C      (c) Copyright Jan Jaeger, 2000-2010                  */
+/* ESAME.C      (c) Copyright Jan Jaeger, 2000-2013                  */
 /*              ESAME (z/Architecture) instructions                  */
-
-// $Id$
 
 /*-------------------------------------------------------------------*/
 /* This module implements the instructions which exist in ESAME      */
@@ -19,104 +17,6 @@
 /*      Extended immediate facility - Roger Bowler            Aug2005*/
 /*-------------------------------------------------------------------*/
 
-// $Log$
-// Revision 1.204  2009/01/23 11:53:18  bernard
-// copyright notice
-//
-// Revision 1.203  2009/01/15 17:27:02  rbowler
-// STFLE bit settings for CPU Measurement Facility
-//
-// Revision 1.202  2008/05/06 22:15:42  rbowler
-// Fix warning: operation on `p1' may be undefined
-//
-// Revision 1.201  2008/04/11 14:28:29  bernard
-// Integrate regs->exrl into base Hercules code.
-//
-// Revision 1.200  2008/04/09 07:36:51  bernard
-// Allign to Rogers terminal ;-)
-//
-// Revision 1.199  2008/04/08 23:57:15  rbowler
-// Fix '#' : invalid character : possibly the result of a macro expansion
-//
-// Revision 1.198  2008/04/08 17:12:47  bernard
-// Added execute relative long instruction
-//
-// Revision 1.197  2008/03/16 00:04:37  rbowler
-// Replace ACC_ARMODE by USE_ARMODE for LPTEA
-//
-// Revision 1.196  2008/03/06 16:10:35  rbowler
-// Remove extraneous trailing blanks (cosmetic change only)
-//
-// Revision 1.195  2008/03/01 12:19:04  rbowler
-// Rename new features to include the word facility
-//
-// Revision 1.194  2008/02/28 22:05:10  ptl00
-// Fix RP for z/arch and mode switch trace
-//
-// Revision 1.193  2008/02/28 10:11:50  rbowler
-// STFL bit settings for new features in zPOP-06
-//
-// Revision 1.192  2008/02/15 21:17:55  ptl00
-// Add pic13 check to RP
-//
-// Revision 1.191  2007/11/17 21:57:52  rbowler
-// Correct comments on two #endif statements
-//
-// Revision 1.190  2007/11/15 21:34:01  rbowler
-// EPSW correction in accord with ESA/390 POP ninth edition
-//
-// Revision 1.189  2007/06/23 00:04:09  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.188  2007/04/27 10:50:40  rbowler
-// STFL bit 27 for MVCOS
-//
-// Revision 1.187  2007/04/25 15:23:49  rbowler
-// Standardize comment format in ECTG
-//
-// Revision 1.186  2007/04/25 14:46:35  rbowler
-// Rename RSS instruction format as SSF
-//
-// Revision 1.185  2007/04/24 16:34:41  rbowler
-// Define feature macros and STFL bit settings for new features in zPOP-05
-//
-// Revision 1.184  2007/03/21 21:35:11  gsmith
-// Fix LPTEA to use variable acctype for translate_addr() call
-//
-// Revision 1.183  2007/03/20 22:23:33  gsmith
-// Redefine ACC_ and ACCTYPE_ macros
-//
-// Revision 1.182  2007/03/10 06:27:43  gsmith
-// machdep.h updates
-//
-// Revision 1.181  2007/01/13 07:18:59  bernard
-// backout ccmask
-//
-// Revision 1.180  2007/01/12 15:23:13  bernard
-// ccmask phase 1
-//
-// Revision 1.179  2007/01/09 05:10:19  gsmith
-// Tweaks to lm/stm
-//
-// Revision 1.178  2007/01/04 23:12:04  gsmith
-// remove thunk calls for program_interrupt
-//
-// Revision 1.177  2006/12/31 21:16:32  gsmith
-// 2006 Dec 31 really back out mainlockx.pat
-//
-// Revision 1.176  2006/12/20 09:09:40  jj
-// Fix bogus log entries
-//
-// Revision 1.175  2006/12/20 04:26:19  gsmith
-// 19 Dec 2006 ip_all.pat - performance patch - Greg Smith
-//
-// Revision 1.174  2006/12/20 04:22:00  gsmith
-// 2006 Dec 19 Backout mainlockx.pat - possible SMP problems - Greg Smith
-//
-// Revision 1.173  2006/12/08 09:43:20  jj
-// Add CVS message log
-//
-
 #include "hstdinc.h"
 
 #if !defined(_HENGINE_DLL_)
@@ -131,16 +31,13 @@ BYTE * get_stfl_data(int, int *);
 #endif
 
 #include "hercules.h"
-
 #include "opcode.h"
-
 #include "inline.h"
 
 #define CRYPTO_EXTERN extern
 #include "crypto.h"
 
 #include "clock.h"
-
 
 
 #if defined(FEATURE_BINARY_FLOATING_POINT)
@@ -5108,7 +5005,7 @@ U64     bitmap;                         /* Bitmap to be ret in r1    */
         if(SIE_MODE(regs))
         {
             SIE_TRANSLATE(&n, ACCTYPE_SIE, regs);
- 
+
             if(regs->sie_pref)
             {
 #if defined(_FEATURE_STORAGE_KEY_ASSIST)
@@ -5151,10 +5048,10 @@ U64     bitmap;                         /* Bitmap to be ret in r1    */
                         if (SIE_TRANSLATE_ADDR (regs->sie_mso + n, USE_PRIMARY_SPACE,
                                                 regs->hostregs, ACCTYPE_PTE))
                             longjmp(regs->progjmp, SIE_INTERCEPT_INST);
-    
+
                         /* Convert real address to absolute address */
                         rcpa = APPLY_PREFIXING (regs->hostregs->dat.raddr, regs->hostregs->PX);
-    
+
                         /* For ESA/390 the RCP byte entry is at offset 1 in a
                            four byte entry directly beyond the page table,
                            for ESAME mode, this entry is eight bytes long */
@@ -5277,7 +5174,7 @@ U64     bitmap;                         /* Bitmap to be ret in r1    */
 /*-------------------------------------------------------------------*/
 /* SUBROUTINE TO PERFORM CONDITIONAL KEY PROCESSING                  */
 /* Input:                                                            */
-/*      rck     Reference/change setting mask                        */
+/*      mask    PFMF mask bits from R1 register                      */
 /*      skey    Contents of storage key before modification          */
 /*      r1key   Storage key to be set                                */
 /* Output (when conditional SSKE is not indicated):                  */
@@ -5285,10 +5182,10 @@ U64     bitmap;                         /* Bitmap to be ret in r1    */
 /* Output (when conditional SSKE is indicated):                      */
 /*      The function return value is 1.                              */
 /*-------------------------------------------------------------------*/
-static inline int ARCH_DEP(conditional_key_procedure) (int rck, BYTE skey, BYTE r1key)
+static inline int ARCH_DEP(conditional_key_procedure) (U32 mask, BYTE skey, BYTE r1key)
 {
     /* Perform normal SSKE if MR and MC bits are both zero */
-    if ((rck & (SSKE_MASK_MR | SSKE_MASK_MC)) == 0)
+    if ((mask & (PFMF_MR | PFMF_MC)) == 0)
         return 0;
 
     /* Ignore Bad Frame indicator */
@@ -5303,14 +5200,13 @@ static inline int ARCH_DEP(conditional_key_procedure) (int rck, BYTE skey, BYTE 
 
     /* If both MR and MC mask bits are one then set
        condition code 0 and leave storage key unchanged */
-    if ((rck & (SSKE_MASK_MR | SSKE_MASK_MC))
-        == (SSKE_MASK_MR | SSKE_MASK_MC))
+    if ((mask & (PFMF_MR | PFMF_MC)) == (PFMF_MR | PFMF_MC))
         return 1;
 
     /* If MR bit is zero and reference bit is equal to
        bit 61 of R1 register then set condition code 0
        and leave storage key unchanged */
-    if ((rck & SSKE_MASK_MR) == 0
+    if ((mask & PFMF_MR) == 0
         && ((skey & STORKEY_REF)
            == (r1key & STORKEY_REF)))
         return 1;
@@ -5318,7 +5214,7 @@ static inline int ARCH_DEP(conditional_key_procedure) (int rck, BYTE skey, BYTE 
     /* If MC bit is zero and the change bit is equal to
        bit 62 of R1 register then set condition code 0
        and leave storage key unchanged */
-    if ((rck & SSKE_MASK_MC) == 0
+    if ((mask & PFMF_MC) == 0
         && ((skey & STORKEY_CHANGE)
            == (r1key & STORKEY_CHANGE)))
         return 1;
@@ -5335,6 +5231,7 @@ static inline int ARCH_DEP(conditional_key_procedure) (int rck, BYTE skey, BYTE 
 DEF_INST(perform_frame_management_function)
 {
 int     r1, r2;                         /* Register values           */
+U32     mask;                           /* Mask bits from R1         */
 int     fc;                             /* Frame count               */
 RADR    addr, aaddr;                    /* Address of storage frame  */
 int     page_offset;                    /* Low order bits of R2      */
@@ -5343,8 +5240,12 @@ int     page_offset;                    /* Low order bits of R2      */
 
     PRIV_CHECK(regs);
 
-    if((regs->GR_L(r1) & (PFMF_RESERVED|PFMF_FMFI_FSC_RESV))
-      || (regs->GR_L(r1) & PFMF_FMFI_NQ))
+    /* Load mask bits from R1 register */
+    mask = regs->GR_L(r1);
+
+    /* Program check if reserved bits are non-zero */
+    if ((regs->GR_L(r1) & (PFMF_RESERVED|PFMF_FSC_RESV))
+      || (regs->GR_L(r1) & PFMF_NQ))
         regs->program_interrupt (regs, PGM_SPECIAL_OPERATION_EXCEPTION);
 
     /* Wrap address according to addressing mode */
@@ -5353,15 +5254,15 @@ int     page_offset;                    /* Low order bits of R2      */
 
     /* Convert real address to absolute address */
 
-    switch (PFMF_FMFI_FSC & regs->GR_L(r1)) {
-    case PFMF_FMFI_FSC_1M:
+    switch (PFMF_FSC & regs->GR_L(r1)) {
+    case PFMF_FSC_1M:
         /* Prefixing is not applied in multipage mode */
         fc = 0x100 - ((regs->GR_L(r2) & 0xFF000) >> 12);
         break;
     /* Code for 2G pages goes here */
     default:
         break;
-    case PFMF_FMFI_FSC_4K:
+    case PFMF_FSC_4K:
         /* Prefixing is applied in single frame operation */
         aaddr = addr = APPLY_PREFIXING (addr, regs->PX);
         fc = 1;
@@ -5384,16 +5285,16 @@ int     page_offset;                    /* Low order bits of R2      */
         /* Set Key Control */
         if(regs->GR_L(r1) & PFMF_FMFI_SK)
         {
-        BYTE sk = regs->GR_L(r1) & PFMF_FMFI_KEY;
+        BYTE sk = regs->GR_L(r1) & PFMF_KEY;
         RADR n = addr;
         BYTE rck = 0;
 
             /* Ref Bit must be updated */
-            if(!(regs->GR_L(r1) & PFMF_FMFI_MR))
+            if (!(regs->GR_L(r1) & PFMF_MR))
                 rck |= STORKEY_REF;
 
             /* Change Bit must be updated */
-            if((regs->GR_L(r1) & PFMF_FMFI_MC))
+            if ((regs->GR_L(r1) & PFMF_MC))
                 rck |= STORKEY_CHANGE;
 
             /* Mask out R/C bits to be bypassed */
@@ -5510,7 +5411,7 @@ int     page_offset;                    /* Low order bits of R2      */
                         }
 
                         /* Perform conditional SSKE procedure */
-                        if (ARCH_DEP(conditional_key_procedure)(rck, protkey, sk))
+                        if (ARCH_DEP(conditional_key_procedure)(mask, protkey, sk))
                             return;
                         /* or with host set */
                         rcpkey |= realkey << 4;
@@ -5549,7 +5450,7 @@ int     page_offset;                    /* Low order bits of R2      */
                 else
                 {
                     /* Perform conditional SSKE procedure */
-                    if (ARCH_DEP(conditional_key_procedure)(rck,
+                    if (ARCH_DEP(conditional_key_procedure)(mask,
 #if defined(FEATURE_4K_STORAGE_KEYS) && !defined(_FEATURE_2K_STORAGE_KEYS)
                             STORAGE_KEY(aaddr, regs),
 #else
@@ -5573,7 +5474,7 @@ int     page_offset;                    /* Low order bits of R2      */
 #endif /*defined(_FEATURE_SIE)*/
             {
                 /* Perform conditional SSKE procedure */
-                if (ARCH_DEP(conditional_key_procedure)(rck,
+                if (ARCH_DEP(conditional_key_procedure)(mask,
 #if defined(FEATURE_4K_STORAGE_KEYS) && !defined(_FEATURE_2K_STORAGE_KEYS)
                         STORAGE_KEY(aaddr, regs),
 #else
@@ -5595,7 +5496,7 @@ int     page_offset;                    /* Low order bits of R2      */
             }
 
             /* Quiesce */
-            if(!(regs->GR_L(r1) & PFMF_FMFI_NQ))
+            if (!(regs->GR_L(r1) & PFMF_NQ))
             {
                 /* Perform serialization and checkpoint-synchronization */
                 PERFORM_SERIALIZATION (regs);
@@ -5613,22 +5514,22 @@ int     page_offset;                    /* Low order bits of R2      */
             memset(regs->mainstor + aaddr, 0, PAGEFRAME_PAGESIZE);
 
         /* Update r2 - point to the next frame */
-        switch (PFMF_FMFI_FSC & regs->GR_L(r1)) {
-        case PFMF_FMFI_FSC_1M:
+        switch (PFMF_FSC & regs->GR_L(r1)) {
+        case PFMF_FSC_1M:
             aaddr = addr += 0x1000;
             SET_GR_A(r2, regs, (addr & ADDRESS_MAXWRAP(regs)) + page_offset);
             break;
         /* Code for 2G pages goes here */
         default:
             break;
-        case PFMF_FMFI_FSC_4K:
+        case PFMF_FSC_4K:
             /* Leave R2 unchanged */
             break;
         }
 
 #if 0
         /* Usage Indication */
-        if(regs->GR_L(r1) & PFMF_FMFI_UI)
+        if (regs->GR_L(r1) & PFMF_UI)
             { }
 #endif
 
@@ -5763,6 +5664,24 @@ BYTE ARCH_DEP(stfl_data)[] = {
 #endif /*defined(FEATURE_FAST_BCR_SERIALIZATION_FACILITY)*/     /*810*/
                  ,
                  0
+#if defined(FEATURE_DFP_ZONED_CONVERSION_FACILITY)              /*912*/
+                 | STFL_6_DFP_ZONED_CONV                        /*912*/
+#endif /*defined(FEATURE_DFP_ZONED_CONVERSION_FACILITY)*/       /*912*/
+#if defined(FEATURE_EXECUTION_HINT_FACILITY)                    /*912*/ \
+    && defined(FEATURE_LOAD_AND_TRAP_FACILITY)                  /*912*/ \
+    && defined(FEATURE_MISC_INSTRUCTION_EXTENSIONS_FACILITY)    /*912*/ \
+    && defined(FEATURE_PROCESSOR_ASSIST_FACILITY)               /*912*/
+                 | STFL_6_MISC_INST_EXT                         /*912*/
+#endif                                                          /*912*/
+#if defined(FEATURE_TRANSACTIONAL_EXECUTION_FACILITY)           /*912*/
+                 | STFL_6_CONSTRAINED_TEF                       /*912*/
+#endif /*defined(FEATURE_TRANSACTIONAL_EXECUTION_FACILITY)*/    /*912*/
+#if defined(FEATURE_LOCAL_TLB_CLEARING_FACILITY)                /*912*/
+                 | STFL_6_LOCAL_TLB_CLEAR                       /*912*/
+#endif /*defined(FEATURE_LOCAL_TLB_CLEARING_FACILITY)*/         /*912*/
+#if defined(FEATURE_INTERLOCKED_ACCESS_FACILITY_2)              /*912*/
+                 | STFL_6_INTERLOCK_ACC_2                       /*912*/
+#endif /*defined(FEATURE_INTERLOCKED_ACCESS_FACILITY_2)*/       /*912*/
                  ,
                  0
                  ,
@@ -5778,6 +5697,9 @@ BYTE ARCH_DEP(stfl_data)[] = {
 #endif /*defined(FEATURE_CPU_MEASUREMENT_SAMPLING_FACILITY)*/
                  ,
                  0
+#if defined(FEATURE_TRANSACTIONAL_EXECUTION_FACILITY)           /*912*/
+                 | STFL_9_TRANSACT_EXEC                         /*912*/
+#endif /*defined(FEATURE_TRANSACTIONAL_EXECUTION_FACILITY)*/    /*912*/
 #if defined(FEATURE_ACCESS_EXCEPTION_FETCH_STORE_INDICATION)    /*810*/
                  | STFL_9_ACC_EX_FS_INDIC                       /*810*/
 #endif /*defined(FEATURE_ACCESS_EXCEPTION_FETCH_STORE_INDICATION)*/
@@ -5787,6 +5709,9 @@ BYTE ARCH_DEP(stfl_data)[] = {
 #if defined(FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_4)        /*810*/
                  | STFL_9_MSA_EXTENSION_4                       /*810*/
 #endif /*defined(FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_4)*/ /*810*/
+#if defined(FEATURE_ENHANCED_DAT_FACILITY_2)                    /*912*/
+                 | STFL_9_ENHANCED_DAT_2                        /*912*/
+#endif /*defined(FEATURE_ENHANCED_DAT_FACILITY_2)*/             /*912*/
                  ,
                  0
                  ,
@@ -5822,7 +5747,7 @@ BYTE *stfl_data;    /* -> STFL data being modified. Depends upon     */
                     /* ESA/390 features.                             */
 
     if (sysblk.arch_z900)
-    {   
+    {
         /* 'ARCHMODE z/Arch' in configuration (or console configured) */
 
         /* Locate the STFL data for a z/Architecture system */
@@ -5830,7 +5755,7 @@ BYTE *stfl_data;    /* -> STFL data being modified. Depends upon     */
 
         /* A little overkill, but deals with the possible corner case */
         if (!stfl_data)
-        {   
+        {
             stfl_len=sizeof(ARCH_DEP(stfl_data));
             stfl_data=&ARCH_DEP(stfl_data)[0];
         }
@@ -5846,41 +5771,40 @@ BYTE *stfl_data;    /* -> STFL data being modified. Depends upon     */
     else
     {
         /* 'ARCHMODE ESA/390' in configuration (or console configured) */
-        
+
         /* Locate the STFL data for an ESA/390 system */
         stfl_data=get_stfl_data(ARCH_390, &stfl_len);
-        
+
         /* Same overkill, but just in case */
         if (!stfl_data)
-        {   
+        {
             stfl_len=sizeof(ARCH_DEP(stfl_data));
             stfl_data=&ARCH_DEP(stfl_data)[0];
         }
-        
+
         stfl_data[0] &= ~STFL_0_ESAME_INSTALLED;
         stfl_data[0] &= ~STFL_0_ESAME_ACTIVE;
     }
 
 #if defined(FEATURE_MESSAGE_SECURITY_ASSIST)
     /* MSA is enabled only if the dyncrypt DLL module is loaded */
-    if(ARCH_DEP(cipher_message))
-        stfl_data[2] |= (STFL_2_MSG_SECURITY
+    if (ARCH_DEP(cipher_message)) {
+        stfl_data[2] |= STFL_2_MSG_SECURITY;
 #ifdef FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_3
-                        | STFL_9_MSA_EXTENSION_3
+        stfl_data[9] |= STFL_9_MSA_EXTENSION_3;
+#endif
 #ifdef FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_4
-                        | STFL_9_MSA_EXTENSION_4
+        stfl_data[9] |= STFL_9_MSA_EXTENSION_4;
 #endif
-#endif
-                                                );
-    else
-        stfl_data[2] &= ~(STFL_2_MSG_SECURITY
+    } else {
+        stfl_data[2] &= ~(STFL_2_MSG_SECURITY);
 #ifdef FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_3
-                        | STFL_9_MSA_EXTENSION_3
+        stfl_data[9] &= ~(STFL_9_MSA_EXTENSION_3);
+#endif
 #ifdef FEATURE_MESSAGE_SECURITY_ASSIST_EXTENSION_4
-                        | STFL_9_MSA_EXTENSION_4
+        stfl_data[9] &= ~(STFL_9_MSA_EXTENSION_4);
 #endif
-#endif
-                                                );
+    }
 #endif /*defined(FEATURE_MESSAGE_SECURITY_ASSIST)*/
 
 #if defined(_FEATURE_ASN_AND_LX_REUSE)
@@ -8834,7 +8758,7 @@ U64     effective_addr2;                /* Effective address         */
     sysblk.program_parameter = ARCH_DEP(vfetch8) (effective_addr2, b2, regs);
 
 } /* end DEF_INST(load_program_parameter) */
-#endif /*defined(FEATURE_LOAD_PROGRAM_PARAMETER_FACILITY)*/     /*810*/ 
+#endif /*defined(FEATURE_LOAD_PROGRAM_PARAMETER_FACILITY)*/     /*810*/
 
 #if !defined(_GEN_ARCH)
 
@@ -8859,7 +8783,7 @@ U64     effective_addr2;                /* Effective address         */
 
 BYTE* get_stfl_data(int mode, int *data_len)
 {
-    switch(mode) 
+    switch(mode)
     {
 #if defined(_390)
         case ARCH_390:

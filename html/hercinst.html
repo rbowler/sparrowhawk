@@ -12,12 +12,11 @@ Hercules Version 3: Installation and Operation</TITLE>
 <p><hr>
 
 <h2>Contents</h2>
-<blockquote>
     <p>
         <a href="#install">Installation Procedure</a>
         <ul>
-            <li><a href="#instsource">- Building from source</a>
-            <li><a href="#instbinary">- Pre-built binaries</a>
+            <li><a href="#instsource">Building from source</a>
+            <li><a href="#instbinary">Pre-built binaries</a>
         </ul>
     </p>
     <p>
@@ -40,7 +39,6 @@ Hercules Version 3: Installation and Operation</TITLE>
     <p>
         <a href="#support">Technical Support</a>
     </p>
-</blockquote>
 
 <p><hr><a name="install"></a>
 <h2>Installation Procedure</h2>
@@ -48,7 +46,7 @@ Hercules Version 3: Installation and Operation</TITLE>
 <h3>Building from source - Windows</h3>
 <ol>
 <li>Download the distribution file
-<a href="http://downloads.hercules-390.eu/hercules-3.08.zip">hercules-3.08.zip</a>
+<a href="http://downloads.hercules-390.eu/hercules-3.09.zip">hercules-3.09.zip</a>
 <li>
 Hercules for Windows is built using the Microsoft Visual C (MSVC) compiler.
 Refer to file README.WIN32 or README.WIN64 for details.
@@ -58,13 +56,13 @@ Refer to file README.WIN32 or README.WIN64 for details.
 <h3>Building from source - Linux and Mac OS X</h3>
 <ol>
 <li>Download the distribution file
-<a href="http://downloads.hercules-390.eu/hercules-3.08.tar.gz">hercules-3.08.tar.gz</a>
+<a href="http://downloads.hercules-390.eu/hercules-3.09.tar.gz">hercules-3.09.tar.gz</a>
 <br><em>Note:</em> By downloading this file you agree to the terms
     of the <a href="herclic.html">Q Public Licence</a>.
 <p>
 <li>Use these commands to unzip the distribution file:
-<pre>tar xvzf ../hercules-3.08.tar.gz
-cd hercules-3.08</pre>
+<pre>tar xvzf ../hercules-3.09.tar.gz
+cd hercules-3.09</pre>
 
 <li>Verify you have all of the correct versions of all of the
 required packages installed:
@@ -99,12 +97,12 @@ compiler and other software levels.
 
 <a name="instbinary"></a>
 <!--
-<h3>Installing prebuilt RPMs:</h3>
+<h3>Installing pre-built RPMs:</h3>
 <ol>
 <li>Download the RPM file you want:
 <ul>
-<li><a href="http://downloads.hercules-390.eu/hercules-3.08.i686.rpm">hercules-3.08.i686.rpm</a>: 32-bit Intel
-<li><a href="http://downloads.hercules-390.eu/hercules-3.08.x86_64.rpm">hercules-3.08.x86_64.rpm</a>: 64-bit Intel
+<li><a href="http://downloads.hercules-390.eu/hercules-3.09.i686.rpm">hercules-3.09.i686.rpm</a>: 32-bit Intel
+<li><a href="http://downloads.hercules-390.eu/hercules-3.09.x86_64.rpm">hercules-3.09.x86_64.rpm</a>: 64-bit Intel
 </ul>
 <li>Install the RPM:
 <br><code>rpm -Uvh</code> <i>RPMfile</i>
@@ -118,7 +116,7 @@ and the IPLable card deck for the ZZSA standalone utility will be placed in
 -->
 
 <!--
-<h3>Installing Debian packages:</h3>
+<h3>Installing pre-built Debian packages:</h3>
 <p>
 Debian packages are available for "woody" and later releases.
 
@@ -145,13 +143,13 @@ in subtle ways if the wrong optimization settings are used.</p>
 -->
 
 <!--
-<h3>Installing on Mac OS X:</h3>
+<h3>Installing pre-built binaries for Mac OS X:</h3>
 
 <ol>
 <li>Download the compressed disk image: <a
-href="http://downloads.hercules-390.eu/hercules-3.08-tiger.dmg">hercules-3.08-tiger.dmg</a>,
-<a href="http://downloads.hercules-390.eu/hercules-3.08-leopard.dmg">hercules-3.08-leopard.dmg</a>,
-or <a href="http://downloads.hercules-390.eu/hercules-3.08-snowleopard.dmg">hercules-3.08-snowleopard.dmg</a>.
+href="http://downloads.hercules-390.eu/hercules-3.09-tiger.dmg">hercules-3.09-tiger.dmg</a>,
+<a href="http://downloads.hercules-390.eu/hercules-3.09-leopard.dmg">hercules-3.09-leopard.dmg</a>,
+or <a href="http://downloads.hercules-390.eu/hercules-3.09-snowleopard.dmg">hercules-3.09-snowleopard.dmg</a>.
 This package is a universal binary and requires the OS X version in the
 name, either 10.4 (Tiger), 10.5 (Leopard), 10.6 (Snow Leopard) or later. The
 Leopard and Snow Leopard versions include native 64-bit host support, while
@@ -167,13 +165,23 @@ to install the supplied Tunnel driver.
 </ol>
 -->
 
-<h3>Installing on Windows:</h3>
+<h3>Installing pre-built binaries for Windows:</h3>
 <ol>
-<li>Download the <a
-href="http://downloads.hercules-390.eu/hercules-3.08-w32.msi">Windows 32-bit
-Installer package</a> or the <a
-href="http://downloads.hercules-390.eu/hercules-3.08-w64.msi">Windows 64-bit
-Installer package</a>.
+<li>Download one of the following packages
+  <ul>
+  <li><a href="http://downloads.hercules-390.eu/hercules-3.09-w32.msi">
+  http://downloads.hercules-390.eu/hercules-3.09-w32.msi</a>
+  Windows 32-bit Installer package
+  <li><a href="http://downloads.hercules-390.eu/hercules-3.09-w64.msi">
+  http://downloads.hercules-390.eu/hercules-3.09-w64.msi</a>
+  Windows 64-bit Installer package
+  <li><a href="http://downloads.hercules-390.eu/hercules-3.09-w32.zip">
+  http://downloads.hercules-390.eu/hercules-3.09-w32.zip</a>
+  Windows 32-bit binaries
+  <li><a href="http://downloads.hercules-390.eu/hercules-3.09-w64.zip">
+  http://downloads.hercules-390.eu/hercules-3.09-w64.zip</a>
+  Windows 64-bit binaries
+  </ul>
 <li>You may also want to install Fish's Hercules GUI for Windows.
 You can get it from <a
 href="http://www.softdevlabs.com/Hercules/hercgui-index.html">
@@ -208,16 +216,14 @@ violate the software vendor's licensing terms.</em>
 <h4>Starting Hercules</h4>
 <p>
 To start Hercules enter this command at the Unix or Windows command prompt:
-<blockquote><code><pre>
+<code><pre>
     hercules  [ -f <em>filename</em> ]
               [ -d ]
               [ -p <em>dyndir</em> ]  [[-l <em>dynmod</em> ] ... ]
               [ &gt; <em>logfile</em> ]
 </pre></code>
-</blockquote>
 <p>
 where:
-<blockquote>
 <dl>
         <dt><code><em>filename</em></code><p><dd>
 
@@ -250,7 +256,6 @@ where:
             all messages displayed on the control panel
         <p>
 </dl>
-</blockquote>
 
 <p>
 Next connect a tn3270 client to the console port (normally port 3270).
@@ -620,165 +625,165 @@ panel commands.
 <p>
 <pre>
 
-  Command      Description... 
-  -------      ----------------------------------------------- 
-  ?            list all commands 
+  Command      Description...
+  -------      -----------------------------------------------
+  ?            list all commands
   help         command specific help
- 
+
   *            (log comment to syslog)
- 
-  message      display message on console a la VM 
-  msg          same as message 
+
+  message      display message on console a la VM
+  msg          same as message
   msgnoh       same as message - no header
- 
-  hst          history of commands 
-  hao          Hercules Automatic Operator 
-  log          direct log output 
-  logopt       change log options 
+
+  hst          history of commands
+  hao          Hercules Automatic Operator
+  log          direct log output
+  logopt       change log options
   version      display version information
- 
-  quit         terminate the emulator 
+
+  quit         terminate the emulator
   exit         (synonym for 'quit')
- 
+
   cpu          define target cpu for panel display and commands
- 
-  start        start CPU (or printer device if argument given) 
+
+  start        start CPU (or printer device if argument given)
   stop         stop CPU (or printer device if argument given)
- 
-  startall     start all CPU's 
+
+  startall     start all CPU's
   stopall      stop all CPU's
- 
-  cf           configure current CPU online or offline 
+
+  cf           configure current CPU online or offline
   cfall        configure all CPU's online or offline
- 
-  .reply       scp command 
-  !message     scp priority messsage 
+
+  .reply       scp command
+  !message     scp priority messsage
   ssd          Signal Shutdown
- 
+
   ptt          display pthread trace
- 
-  i            generate I/O attention interrupt for device 
-  ext          generate external interrupt 
-  restart      generate restart interrupt 
-  archmode     set architecture mode 
+
+  i            generate I/O attention interrupt for device
+  ext          generate external interrupt
+  restart      generate restart interrupt
+  archmode     set architecture mode
   loadparm     set IPL parameter
- 
-  ipl          IPL Normal from device xxxx 
-  iplc         IPL Clear from device xxxx 
-  sysreset     Issue SYSTEM Reset manual operation 
-  sysclear     Issue SYSTEM Clear Reset manual operation 
+
+  ipl          IPL Normal from device xxxx
+  iplc         IPL Clear from device xxxx
+  sysreset     Issue SYSTEM Reset manual operation
+  sysclear     Issue SYSTEM Clear Reset manual operation
   store        store CPU status at absolute zero
- 
-  psw          display or alter program status word 
-  gpr          display or alter general purpose registers 
-  fpr          display floating point registers 
-  fpc          display floating point control register 
-  cr           display or alter control registers 
-  ar           display access registers 
-  pr           display prefix register 
-  timerint     display or set timers update interval 
-  clocks       display tod clkc and cpu timer 
-  ipending     display pending interrupts 
-  ds           display subchannel 
-  r            display or alter real storage 
-  v            display or alter virtual storage 
-  u            disassemble storage 
-  devtmax      display or set max device threads 
+
+  psw          display or alter program status word
+  gpr          display or alter general purpose registers
+  fpr          display floating point registers
+  fpc          display floating point control register
+  cr           display or alter control registers
+  ar           display access registers
+  pr           display prefix register
+  timerint     display or set timers update interval
+  clocks       display tod clkc and cpu timer
+  ipending     display pending interrupts
+  ds           display subchannel
+  r            display or alter real storage
+  v            display or alter virtual storage
+  u            disassemble storage
+  devtmax      display or set max device threads
   k            display cckd internal trace
- 
-  attach       configure device 
-  detach       remove device 
-  define       rename device 
-  devinit      reinitialize device 
+
+  attach       configure device
+  detach       remove device
+  define       rename device
+  devinit      reinitialize device
   devlist      list device or all devices
- 
+
   qd           query dasd
- 
+
   automount    show/update allowable tape automount directories
- 
+
   scsimount    automatic SCSI tape mounts
- 
-  cd           change directory 
-  pwd          print working directory 
+
+  cd           change directory
+  pwd          print working directory
   sh           shell command
- 
-  cache        cache command 
-  cckd         cckd command 
-  shrd         shrd command 
-  conkpalv     display/alter console TCP keep-alive settings 
+
+  cache        cache command
+  cckd         cckd command
+  shrd         shrd command
+  conkpalv     display/alter console TCP keep-alive settings
   quiet        toggle automatic refresh of panel display data
- 
-  t            instruction trace 
-  t+           instruction trace on 
-  t-           instruction trace off 
-  t?           instruction trace query 
-  s            instruction stepping 
-  s+           instruction stepping on 
-  s-           instruction stepping off 
-  s?           instruction stepping query 
-  b            set breakpoint 
-  b+           set breakpoint 
-  b-           delete breakpoint 
+
+  t            instruction trace
+  t+           instruction trace on
+  t-           instruction trace off
+  t?           instruction trace query
+  s            instruction stepping
+  s+           instruction stepping on
+  s-           instruction stepping off
+  s?           instruction stepping query
+  b            set breakpoint
+  b+           set breakpoint
+  b-           delete breakpoint
   g            turn off instruction stepping and start CPU
- 
-  ostailor     trace program interrupts 
-  pgmtrace     trace program interrupts 
-  savecore     save a core image to file 
-  loadcore     load a core image file 
+
+  ostailor     trace program interrupts
+  pgmtrace     trace program interrupts
+  savecore     save a core image to file
+  loadcore     load a core image file
   loadtext     load a text deck file
- 
-  ldmod        load a module 
-  rmmod        delete a module 
-  lsmod        list dynamic modules 
+
+  ldmod        load a module
+  rmmod        delete a module
+  lsmod        list dynamic modules
   lsdep        list module dependencies
- 
-  iodelay      display or set I/O delay value 
-  ctc          enable/disable CTC debugging 
-  toddrag      display or set TOD clock drag factor 
-  panrate      display or set rate at which console refreshes 
-  msghld       display or set the timeout of held messages 
-  syncio       display syncio devices statistics 
+
+  iodelay      display or set I/O delay value
+  ctc          enable/disable CTC debugging
+  toddrag      display or set TOD clock drag factor
+  panrate      display or set rate at which console refreshes
+  msghld       display or set the timeout of held messages
+  syncio       display syncio devices statistics
   maxrates     display maximum observed MIPS/SIOS rate for the
                defined interval or define a new reporting interval
- 
-  defsym       Define symbol 
-  script       Run a sequence of panel commands contained in a file 
-  cscript      Cancels a running script thread
- 
-  evm          ECPS:VM Commands (Deprecated) 
-  ecpsvm       ECPS:VM Commands
- 
-  aea          Display AEA tables 
-  aia          Display AIA fields 
-  tlb          Display TLB tables
- 
-  sizeof       Display size of structures
- 
-  suspend      Suspend hercules 
-  resume       Resume hercules
- 
-  herclogo     Read a new hercules logo file
- 
-  traceopt     Instruction trace display options
- 
-  cmdtgt       Specify the command target
- 
-  herc         Hercules command
- 
-  scp          Send scp command
- 
-  pscp         Send prio message scp command
- 
-  sf+dev       add shadow file 
-  sf-dev       delete shadow file 
-  sfc          compress shadow files 
-  sfk          check shadow files 
-  sfd          display shadow file stats 
 
-  t{+/-}dev    turn CCW tracing on/off 
-  s{+/-}dev    turn CCW stepping on/off 
-  t{+/-}CKD    turn CKD_KEY tracing on/off 
-  f{+/-}adr    mark frames unusable/usable 
+  defsym       Define symbol
+  script       Run a sequence of panel commands contained in a file
+  cscript      Cancels a running script thread
+
+  evm          ECPS:VM Commands (Deprecated)
+  ecpsvm       ECPS:VM Commands
+
+  aea          Display AEA tables
+  aia          Display AIA fields
+  tlb          Display TLB tables
+
+  sizeof       Display size of structures
+
+  suspend      Suspend hercules
+  resume       Resume hercules
+
+  herclogo     Read a new hercules logo file
+
+  traceopt     Instruction trace display options
+
+  cmdtgt       Specify the command target
+
+  herc         Hercules command
+
+  scp          Send scp command
+
+  pscp         Send prio message scp command
+
+  sf+dev       add shadow file
+  sf-dev       delete shadow file
+  sfc          compress shadow files
+  sfk          check shadow files
+  sfd          display shadow file stats
+
+  t{+/-}dev    turn CCW tracing on/off
+  s{+/-}dev    turn CCW stepping on/off
+  t{+/-}CKD    turn CKD_KEY tracing on/off
+  f{+/-}adr    mark frames unusable/usable
 
 </pre>
 <p>
@@ -855,90 +860,108 @@ run-commands file can completely automate Hercules startup.
 <h4>The "Hercules Automatic Operator" (HAO) Facility</h4>
 </a>
 <p>
-The Hercules Automatic Operator (HAO) feature is a facility that allows one
-to automatically issue panel commands in response to certain messages being
-issued.
+The Hercules Automatic Operator (HAO) feature is a facility which can
+automatically issue panel commands in response to specific messages 
+appearing on the Hercules console.
 <p>
-To use the Hercules Automatic Operator facility, one first defines a "rule"
-consisting of a "target" and an associated "command". The "target" is just
+To use the Hercules Automatic Operator facility, you first define a "rule"
+consisting of a "target" and an associated "command". The "target" is 
 a regular expression pattern used to match against the text of the various
 messages that Hercules issues as it runs. Whenever a match is found, the
 rule "fires" and its associated command is automatically issued.
 <p>
-The Hercules Automatic Operator facility is <i>only</i> for those messages
-issued <i>by Hercules</i> to its HMC (hardware console). It <i>cannot</i>
-be used for whatever messages the guest operating system may issue to any
-of its terminals. It is only a <i>Hercules</i> automatic operator and
-<i>not</i> a "VSE", "MVS", "VM", etc, automatic operator.
+The Hercules Automatic Operator facility only operates on messages issued
+to the Hercules console. These messages may originate from Hercules itself,
+or from the guest operating system via the SCP SYSCONS interface or via the
+integrated console printer-keyboard (3215-C or 1052-C). HAO cannot intercept
+messages issued by the guest operating system to its own terminals.
 
 <h5>Defining a Rule</h5>
 <p>
 To define a HAO rule, enter the command:
 <pre>
-   hao <i>target</i>
+   hao tgt <i>target</i>
 </pre>
 <p>
-to define the rule's "target" match pattern (a simple regular expression),
+to define the rule's "target" match pattern 
 followed by the command:
 <pre>
-   hao <i>command</i>
+   hao cmd <i>command</i>
 </pre>
 <p>
 to define the rule's associated panel-command.
 <p>
-The target pattern is a simple regular expression value as defined by
-whatever regular expression facility your host build platform happens
-to support. For Windows it must be a Perl Compatible Regular Expression (PCRE).
-For other supported build platforms it might be some other supported regular
-expression syntax. Check your host platform's programming documentation for
-further details.
+The <i>target</i> is a regular expression as defined by your host platform.
+When running on Linux, Hercules uses POSIX Extended Regular Expression syntax.
+On a Windows platform, regular expression support is provided by
+Perl Compatible Regular Expression (PCRE).
+The HAO facility can only be used if regular expression support was included
+in Hercules at build time.
 <p>
 The associated <i>command</i> is whatever valid Hercules panel command you
 wish to issue in response to a message being issued that matches the given
-pattern <i>target</i>.
+<i>target</i> pattern.
+
+<h5>Substituting substrings in the command</h5>
+<p>
+The <i>command</i> may contain special variables $1, $2, etc, which will be
+replaced by the values of "capturing groups" in the match pattern.
+A capturing group is a part of the regular expression enclosed in parentheses
+which is matched with text in the target message. In this way, commands may be
+constructed which contain substrings extracted from the message which
+triggered the command.
+<p>
+The following special variables are recognized:
+<ul>
+<li><code>$1</code> to <code>$9</code> - 
+    the text which matched the 1st to 9th capturing
+    group in the target regular expression
+<li><code>$`</code> - the text preceding the regular expression match
+<li><code>$'</code> - the text following the regular expression match
+<li><code>$$</code> - replaced by a single dollar sign
+</ul>
+<p>
+Note that substitution of a $<i>n</i> variable does not occur if there are
+fewer than <i>n</i> capturing groups in the regular expression.
+<p>
+As an example, the rule below issues the command 'i 001F' in response to
+the message HHCTE014I 3270 device 001F client 127.0.0.1 connection reset:
+<pre>
+   hao tgt HHCTE014I 3270 device ([0-9A-F]{3,4})
+   hao cmd i $1
+</pre>
+<p>
+Another example, shown below, illustrates how the dot matrix display of a
+3480 tape unit might be used to implement an automatic tape library:
+<pre>
+   hao tgt HHCTA010I ([0-9A-F]{4}): Now Displays: (?:".{8}" / )?"M([A-Z0-9]{1,6})\s*S"
+   hao cmd devinit $1 /u/tapes/$2.awstape
+</pre>
 
 <h5>Other commands and limitations</h5>
 <p>
 To delete a fully or partially defined HAO rule, first use the 'hao list'
 command to list all of the defined (or partially defined) rules, and then use
-the 'hao del <i>nnn</i>' command to delete the specific rule identified by <i>nnn</i>.
-(All rules are assigned numbers as they are defined and are thus identified
-by their numeric value). Optionally, one may delete ALL defined or partially
-defined rules by issuing the command 'hao clear'.
+the 'hao del <i>nnn</i>' command to delete the specific rule identified by
+<i>nnn</i> (all rules are assigned numbers as they are defined and are thus
+identified by their numeric value). Optionally, you can delete all defined or
+partially defined rules by issuing the command 'hao clear'.
 <p>
-The current implementation limits the total number of defined rules to 64. If
-you need to define more than 64 rules you will either have to build Hercules
-for yourself (increasing the value of the HAO_MAXRULE constant in hao.c) or
-else beg one of the Hercules developers to please do it for you.
+The current implementation limits the total number of defined rules to 64.
+This limit may be raised by  increasing the value of the HAO_MAXRULE
+constant in hao.c and rebuilding Hercules.
 <p>
-Note that there is currently no way to define a command whose arguments vary
-based on actual message text. That is to say, there is currently no way to say
-<blockquote>
-<p>
-   "Reply with the command 'devinit <i>cuu</i> filename'
-   in response to message text 'HHCXXnnnI Device <i>cuu</i>
-   intervention required.' where <i>cuu</i> is whatever cuu
-    was identified in the message."
-</blockquote>
-<p>
-The HAO is <i><b>not</b></i> that sophisticated (yet). Only simple plain-text commands may
-be defined and issued. No automatic substitution is done based on message text
-(although normal 'DEFSYM' symbol substitution <i><b>is</b></i> supported however, as that
-is a normal panel-command feature supported separately from the HAO). This may
-possibly change in the future however, depending on user need/demand.
-<p>
-<i><b>All</b></i> defined rules are checked for a match each time Hercules issues a message.
+All defined rules are checked for a match each time Hercules issues a message.
 There is no way to specify "stop processing subsequent rules". If a message is
 issued that matches two or more rules, each associated command is then issued
-in sequence. Thus the advice to choose your rules' target patterns carefully
-very much applies here.
+in sequence.
 <p>
 
 <p><hr><a name="support"></a>
 <h2>Technical Support</h2>
 
 <P>
-For technical support, please see our <a href="hercsupp.html">Technical Support</a> web page.
+For technical support, please see the <a href="hercsupp.html">Hercules Technical Support</a> page.
 </P>
 
 <p><center><hr width=15% noshade><p>

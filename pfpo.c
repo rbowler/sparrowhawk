@@ -1,9 +1,8 @@
-/* PFPO.C       (c) Copyright Roger Bowler, 2009                     */
-/*              (c) Copyright Bernard van der Helm, 2009             */
-/*              Noordwijkerhout, The Netherlands                     */ 
+/* PFPO.C       (c) Copyright Roger Bowler, 2007                     */
 /*              Perform Floating Point Operation instruction         */
 
-// $Id$
+/*              (c) Copyright Bernard van der Helm, 2009             */
+/*              Noordwijkerhout, The Netherlands                     */
 
 /*-------------------------------------------------------------------*/
 /* This module implements the Perform Floating Point Operation       */
@@ -48,13 +47,13 @@ typedef struct
   unsigned class;
   char str[256];
 }
-FLOAT;
+PFPO_FLOAT;
 
 /*-------------------------------------------------------------------*/
-/* Binairy floating point routines                                   */
+/* Binary floating point routines                                    */
 /*-------------------------------------------------------------------*/
 
-void BFPshortGet(FLOAT *f, U32 r)
+static void BFPshortGet(PFPO_FLOAT *f, U32 r)
 {
   unsigned exp;
   U32 frac;
@@ -138,7 +137,7 @@ void BFPshortGet(FLOAT *f, U32 r)
   }
 }
 
-void BFPlongGet(FLOAT *f, U64 r)
+static void BFPlongGet(PFPO_FLOAT *f, U64 r)
 {
   unsigned exp;
   U64 frac;
@@ -222,7 +221,7 @@ void BFPlongGet(FLOAT *f, U64 r)
   }
 }
 
-void BFPextGet(FLOAT *f, U64 h, U64 l)
+static void BFPextGet(PFPO_FLOAT *f, U64 h, U64 l)
 {
   unsigned exp;
   U64 frach;
@@ -321,9 +320,8 @@ void BFPextGet(FLOAT *f, U64 h, U64 l)
 /* Decimal floating point routines                                   */
 /*-------------------------------------------------------------------*/
 
-void DFPshortGet(FLOAT *f, U32 r)
+static void DFPshortGet(PFPO_FLOAT *f, U32 r)
 {
-  unsigned class;
   decimal32 dec32;
   unsigned i;
   U32 temp;
@@ -351,9 +349,8 @@ void DFPshortGet(FLOAT *f, U32 r)
     f->class = CLASS_NORMAL;
 }
 
-void DFPlongGet(FLOAT *f, U64 r)
+static void DFPlongGet(PFPO_FLOAT *f, U64 r)
 {
-  unsigned class;
   decimal64 dec64;
   unsigned i;
   U64 temp;
@@ -381,9 +378,8 @@ void DFPlongGet(FLOAT *f, U64 r)
     f->class = CLASS_NORMAL;
 }
 
-void DFPextGet(FLOAT *f, U64 h, U64 l)
+static void DFPextGet(PFPO_FLOAT *f, U64 h, U64 l)
 {
-  unsigned class;
   decimal128 dec128;
   unsigned i;
   U64 temph;
@@ -415,12 +411,12 @@ void DFPextGet(FLOAT *f, U64 h, U64 l)
   else
     f->class = CLASS_NORMAL;
 }
- 
+
 /*-------------------------------------------------------------------*/
 /* Hexadecimal floating point routines                               */
 /*-------------------------------------------------------------------*/
 
-void HFPshortGet(FLOAT *f, U32 r)
+static void HFPshortGet(PFPO_FLOAT *f, U32 r)
 {
   unsigned exp;
   U32 frac;
@@ -461,9 +457,8 @@ void HFPshortGet(FLOAT *f, U32 r)
   }
 }
 
-void HFPlongGet(FLOAT *f, U64 r)
+static void HFPlongGet(PFPO_FLOAT *f, U64 r)
 {
-  unsigned class;
   unsigned exp;
   U64 frac;
   unsigned i;
@@ -480,7 +475,7 @@ void HFPlongGet(FLOAT *f, U64 r)
     f->class = CLASS_NORMAL;
 
   f->base = 16;
-  switch(class)
+  switch(f->class)
   {
     case CLASS_ZERO:
       strcpy(f->str, "0");
@@ -503,9 +498,8 @@ void HFPlongGet(FLOAT *f, U64 r)
   }
 }
 
-void HFPextGet(FLOAT *f, U64 h, U64 l)
+static void HFPextGet(PFPO_FLOAT *f, U64 h, U64 l)
 {
-  unsigned class;
   unsigned exp;
   U64 frach;
   U64 fracl;

@@ -5,8 +5,6 @@
 /* files which are not dependent on the mainframe architectural      */
 /* features selected and thus are eligible for precompilation        */
 
-// $Id$
-
 #ifndef _HSTDINC_H
 #define _HSTDINC_H
 
@@ -174,18 +172,6 @@
 #endif
 #ifdef HAVE_ICONV
   #include <iconv.h>
-#endif
-#ifdef ENABLE_NLS
-  #ifdef HAVE_LOCALE_H
-    #include <locale.h>
-  #else
-    #error ENABLE_NLS requires <locale.h>
-  #endif
-  #ifdef HAVE_LIBINTL_H
-    #include <libintl.h>
-  #else
-    #error ENABLE_NLS requires <libintl.h>
-  #endif
 #endif
 #ifdef HAVE_INTTYPES_H
   #include <inttypes.h>

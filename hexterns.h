@@ -1,13 +1,5 @@
-/*-------------------------------------------------------------------*/
-/*  HEXTERNS.H            Hercules function prototypes...            */
-/*-------------------------------------------------------------------*/
-
-//      This header auto-#included by 'hercules.h'...
-//
-//      The <config.h> header and other required headers are
-//      presumed to have already been #included ahead of it...
-
-// $Id$
+/* HEXTERNS.H   (c) Copyright Roger Bowler, 1999-2009                */
+/*              Hercules function prototypes                         */
 
 #ifndef _HEXTERNS_H
 #define _HEXTERNS_H
@@ -196,7 +188,7 @@ CONF_DLL_IMPORT int  group_device(DEVBLK *dev, int members);
 int  configure_cpu (int cpu);
 int  deconfigure_cpu (int cpu);
 BLDC_DLL_IMPORT int parse_args (char* p, int maxargc, char** pargv, int* pargc);
-#define MAX_ARGS  12                    /* Max argv[] array size     */
+#define MAX_ARGS  128                   /* Max argv[] array size     */
 int parse_and_attach_devices(const char *devnums,const char *devtype,int ac,char **av);
 CONF_DLL_IMPORT int parse_single_devnum(const char *spec, U16 *lcss, U16 *devnum);
 int parse_single_devnum_silent(const char *spec, U16 *lcss, U16 *devnum);

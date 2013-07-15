@@ -2,8 +2,6 @@
 /*              (c) Copyright Enrico Sorichetti, 2012                */
 /*              ESA/390 Line Printer Device Handler                  */
 
-// $Id$
-
 /*-------------------------------------------------------------------*/
 /* This module contains device handling functions for emulated       */
 /* System/370 line printer devices with fcb support and more         */
@@ -660,7 +658,7 @@ static void printer_query_device (DEVBLK *dev, char **class,
 {
     BEGIN_DEVICE_CLASS_QUERY( "PRT", dev, class, buflen, buffer );
 
-    snprintf (buffer, buflen, "*printer.c* %s%s%s%s%s%s%s",
+    snprintf (buffer, buflen, "%s%s%s%s%s%s%s",
                  dev->filename,
                 (dev->bs         ? " sockdev"      : ""),
                 (dev->crlf       ? " crlf"         : ""),

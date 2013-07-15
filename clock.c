@@ -1,25 +1,10 @@
 /* CLOCK.C      (c) Copyright Jan Jaeger, 2000-2009                  */
 /*              TOD Clock functions                                  */
 
-// $Id$
-
+/*-------------------------------------------------------------------*/
 /* The emulated hardware clock is based on the host clock, adjusted  */
 /* by means of an offset and a steering rate.                        */
-
-// $Log$
-// Revision 1.43  2008/08/22 04:43:50  fish
-// Fix TOD clock race condition identified by Fred
-// Feucht -- by Marcin Cieslak [saper@system.pl]
-//
-// Revision 1.42  2007/11/21 22:55:49  fish
-// (untab)
-//
-// Revision 1.41  2007/06/23 00:04:04  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.40  2006/12/08 09:43:18  jj
-// Add CVS message log
-//
+/*-------------------------------------------------------------------*/
 
 #include "hstdinc.h"
 
@@ -341,6 +326,7 @@ int pending = 0;
     {
         ON_IC_ITIMER(regs);
         pending = 1;
+        regs->old_timer=itimer;
     }
 #if defined(_FEATURE_ECPSVM)
     if(regs->ecps_vtmrpt)
@@ -526,46 +512,21 @@ static void ARCH_DEP(_store_int_timer_2) (REGS *regs,int getlock)
 S32 itimer;
 S32 vtimer=0;
 
-    FETCH_FW(itimer, regs->psa->inttimer);
     if(getlock)
     {
         OBTAIN_INTLOCK(regs->hostregs?regs:NULL);
     }
-    if(itimer != regs->old_timer)
-    {
-// ZZ       logmsg(D_("Interval timer out of sync, core=%8.8X, internal=%8.8X\n"), itimer, regs->old_timer);
-        set_int_timer(regs, itimer);
-    }
-    else
-    {
-        itimer=int_timer(regs);
-    }
+    itimer=int_timer(regs);
     STORE_FW(regs->psa->inttimer, itimer);
 #if defined(FEATURE_ECPSVM)
     if(regs->ecps_vtmrpt)
     {
-        FETCH_FW(vtimer, regs->ecps_vtmrpt);
-        if(vtimer != regs->ecps_oldtmr)
-        {
-// ZZ       logmsg(D_("ECPS vtimer out of sync, core=%8.8X, internal=%8.8X\n"), itimer, regs->ecps_vtimer);
-            set_ecps_vtimer(regs, itimer);
-        }
-        else
-        {
-            vtimer=ecps_vtimer(regs);
-        }
+        vtimer=ecps_vtimer(regs);
         STORE_FW(regs->ecps_vtmrpt, itimer);
     }
 #endif /*defined(FEATURE_ECPSVM)*/
 
-    /* ISW : Invoke chk_int_timer *before* setting old_timer */
-    /*       however, the value must be one fetched *before* */
-    /*       chk_int_timer was invoked otherwise a window    */
-    /*       exists during which the interval timer could go */
-    /*       negative undetected                             */
-
     chk_int_timer(regs);
-    regs->old_timer = itimer;
 #if defined(FEATURE_ECPSVM)
     if(regs->ecps_vtmrpt)
     {

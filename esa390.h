@@ -4,14 +4,12 @@
 /* Interpretive Execution - (c) Copyright Jan Jaeger, 1999-2009      */
 /* z/Architecture support - (c) Copyright Jan Jaeger, 1999-2009      */
 
-// $Id$
-
 #ifndef _ESA390_H
 #define _ESA390_H
 
 /* Platform-independent storage operand definitions */
 
-#include "htypes.h"         // (need Hercules fixed-size data types)
+#include "htypes.h"
 
 #if defined(WORDS_BIGENDIAN)
 
@@ -203,7 +201,7 @@ typedef struct _DAT {
       } DAT;
 
 /* Bit definitions for control register 0 */
-#define CR0_MCX_AUTH    0x0001000000000000 /* Measurement Counter 
+#define CR0_MCX_AUTH    0x0001000000000000 /* Measurement Counter
                                            Extraction Authority      */
 #define CR0_BMPX        0x80000000      /* Block multiplex ctl  S/370*/
 #define CR0_SSM_SUPP    0x40000000      /* SSM suppression control   */
@@ -1297,19 +1295,19 @@ typedef struct _MBK {
 #define PLO_CSTSTX              23      /* C/S/TS              ESAME */
 
 /* Perform Frame Management Function definitions */
-#define PFMF_FMFI            0x000f0000 
+#define PFMF_FMFI            0x000f0000 /* Frame mgmt function indic */
 #define PFMF_FMFI_RESV       0x000c0000 /* Reserved must be zero     */
 #define PFMF_FMFI_SK         0x00020000 /* Set-Key Control           */
 #define PFMF_FMFI_CF         0x00010000 /* Clear-Frame Control       */
-#define PFMF_FMFI_UI         0x00008000 /* Usage Indication          */
-#define PFMF_FMFI_FSC        0x00007000 /* Frame-Size Code           */
-#define PFMF_FMFI_FSC_4K     0x00000000 /* 4K                        */
-#define PFMF_FMFI_FSC_1M     0x00001000 /* 1M                        */
-#define PFMF_FMFI_FSC_RESV   0x00006000 /* Reserved                  */
-#define PFMF_FMFI_NQ         0x00000800 /* Quiesce (SK must be one)  */
-#define PFMF_FMFI_MR         0x00000400 /* Reference Bit Update Mask */
-#define PFMF_FMFI_MC         0x00000200 /* Change Bit Update Mask    */
-#define PFMF_FMFI_KEY        0x000000F7 /* Storage Key               */
+#define PFMF_UI              0x00008000 /* Usage Indication          */
+#define PFMF_FSC             0x00007000 /* Frame-Size Code           */
+#define PFMF_FSC_4K          0x00000000 /* 4K                        */
+#define PFMF_FSC_1M          0x00001000 /* 1M                        */
+#define PFMF_FSC_RESV        0x00006000 /* Reserved                  */
+#define PFMF_NQ              0x00000800 /* Quiesce (SK must be one)  */
+#define PFMF_MR              0x00000400 /* Reference Bit Update Mask */
+#define PFMF_MC              0x00000200 /* Change Bit Update Mask    */
+#define PFMF_KEY             0x000000F7 /* Storage Key               */
 #define PFMF_RESERVED        0xFFF00101 /* Reserved                  */
 
 /* Bit definitions for Store Facilities List instruction */
@@ -1404,6 +1402,17 @@ typedef struct _MBK {
 #define STFL_5_CMPSC_ENH        0x01    /* CMPSC-enhancement
                                            Facility installed     810*/
 /* Byte STFL_6: STFLE bits 48-55 */
+#define STFL_6_DFP_ZONED_CONV   0x80    /* DFP zoned-conversion
+                                           facility is installed  912*/
+#define STFL_6_MISC_INST_EXT    0x40    /* Execution-hint,load-and-trap
+                                           misc-inst-ext,processor-asst
+                                           facilities installed   912*/
+#define STFL_6_CONSTRAINED_TEF  0x20    /* Constrained-transactn-execn
+                                           facility is installed  912*/
+#define STFL_6_LOCAL_TLB_CLEAR  0x10    /* Local-TLB-clearing
+                                           facility is installed  912*/
+#define STFL_6_INTERLOCK_ACC_2  0x08    /* Interlocked-access
+                                           facility 2 installed   912*/
 /* Byte STFL_7: STFLE bits 56-63 */
 /* Byte STFL_8: STFLE bits 64-71 */
 #define STFL_8_RES_REF_BITS_MUL 0x20    /* Reset-Reference-Bits-Multiple
@@ -1413,12 +1422,16 @@ typedef struct _MBK {
 #define STFL_8_CPU_MEAS_SAMPLNG 0x08    /* CPU-measurement sampling
                                            facility installed (ESAME)*/
 /* Byte STFL_9: STFLE bits 72-79 */
+#define STFL_9_TRANSACT_EXEC    0x40    /* Transactional execution    
+                                           facility is installed  912*/
 #define STFL_9_ACC_EX_FS_INDIC  0x10    /* Access-exception fetch/store
                                            indication facility    810*/
 #define STFL_9_MSA_EXTENSION_3  0x08    /* Message Security Assist
                                            Extension 3 installed  810*/
 #define STFL_9_MSA_EXTENSION_4  0x04    /* Message Security Assist
                                            Extension 4 installed  810*/
+#define STFL_9_ENHANCED_DAT_2   0x02    /* Enhanced-DAT facility 2
+                                           is installed           912*/
 
 /* Bit definitions for the Vector Facility */
 #define VSR_M    0x0001000000000000ULL  /* Vector mask mode bit      */
@@ -2208,11 +2221,11 @@ typedef struct _PTFFQSI {               /* Query Steering Information*/
 #define MAEIP_ISDBTE      0x80000000   /* Incorrect sample-data-block-
                                           table entry                */
 #define MAEIP_PRA         0x20000000   /* Program request alert      */
-#define MAEIP_SACA        0x00800000   /* Sampling authorisation 
+#define MAEIP_SACA        0x00800000   /* Sampling authorisation
                                           change alert               */
 #define MAEIP_LSDA        0x00400000   /* Loss of sample data alert  */
-#define MAEIP_CACA        0x00000080   /* Counter Authorisation 
+#define MAEIP_CACA        0x00000080   /* Counter Authorisation
                                           change alert               */
 #define MAEIP_LCDA        0x00000040   /* Loss of counter data alert */
-                                          
+
 #endif // _ESA390_H

@@ -12,48 +12,6 @@
 //
 //////////////////////////////////////////////////////////////////////////////////////////
 
-// $Id$
-//
-// $Log$
-// Revision 1.33  2008/11/23 22:27:43  rbowler
-// Fix win64 type conversion warnings in w32util.c
-//
-// Revision 1.32  2008/08/29 07:08:41  fish
-// Fix parsing bug/issue in "w32_parse_piped_process_stdxxx_data" function
-//
-// Revision 1.31  2007/11/30 14:54:34  jmaynard
-// Changed conmicro.cx to hercules-390.org or conmicro.com, as needed.
-//
-// Revision 1.30  2007/08/04 19:04:33  fish
-// gethostid
-//
-// Revision 1.29  2007/06/23 00:04:19  ivan
-// Update copyright notices to include current year (2007)
-//
-// Revision 1.28  2007/01/11 19:54:34  fish
-// Addt'l keep-alive mods: create associated supporting config-file stmt and panel command where individual customer-preferred values can be specified and/or dynamically modified.
-//
-// Revision 1.27  2007/01/10 15:12:11  rbowler
-// Console keepalive for Unix
-//
-// Revision 1.26  2007/01/10 09:32:39  fish
-// Enable connection keep-alive to try and detect 3270 clients that have died (MSVC only right now; don't know how to do it on *nix)
-//
-// Revision 1.25  2007/01/03 22:02:31  fish
-// Minor correction to PR# build_msc/103 fix
-//
-// Revision 1.24  2006/12/30 18:48:11  fish
-// PR# build_msc/103: fix MSVC diag 8 'sh' capture
-//
-// Revision 1.23  2006/12/28 15:49:35  fish
-// Use _beginthreadex/_endthreadex instead of CreateThread/ExitThread in continuing effort to try and resolve our still existing long-standing 'errno' issue...
-//
-// Revision 1.22  2006/12/28 04:04:33  fish
-// (just a very minor update to some comments)
-//
-// Revision 1.21  2006/12/08 09:43:34  jj
-// Add CVS message log
-//
 
 #include "hstdinc.h"
 
@@ -2960,10 +2918,13 @@ DLL_EXPORT void w32_set_thread_name( TID tid, char* name )
 // w32_hopen is called instead of hopen in MSVC environment (see hercwind.h)
 // Its purpose is to prevent a file from being opened for output by two
 // Hercules instances at the same time.
+// _SH_DENYRW prevents all access to the file from other processes;
+// _SH_DENYWR permits other processes to read the file but not to write;
 // _SH_SECURE opens the file in _SH_DENYRW mode if oflag specifies write
 // access, or _SH_DENYWR mode if oflag specifies read-only.
 DLL_EXPORT int w32_hopen( const char* path, int oflag, ... )
 {
+    int shflag = (oflag & _O_RDWR) ? _SH_DENYRW : _SH_DENYWR;
     int pmode = 0;
     if (oflag & _O_CREAT)
     {
@@ -2971,7 +2932,7 @@ DLL_EXPORT int w32_hopen( const char* path, int oflag, ... )
         va_start( vargs, oflag );
         pmode = va_arg( vargs, int );
     }
-    return _sopen( path, oflag, _SH_SECURE, pmode );
+    return _sopen( path, oflag, shflag, pmode );
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
