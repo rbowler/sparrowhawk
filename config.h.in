@@ -162,9 +162,6 @@
 /* Define to 1 if the fdatasync function is supported. */
 #undef HAVE_FDATASYNC_SUPPORTED
 
-/* Define to 1 if you have the <fenv.h> header file. */
-#undef HAVE_FENV_H
-
 /* Define to 1 if you have the `fmodl' function. */
 #undef HAVE_FMODL
 
@@ -574,9 +571,6 @@
 
 /* Define to disable assembler routines for byte swapping */
 #undef NO_ASM_BYTESWAP
-
-/* Define to disable IEEE floating point support */
-#undef NO_IEEE_SUPPORT
 
 /* Define to disable setuid operation */
 #undef NO_SETUID

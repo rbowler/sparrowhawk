@@ -233,7 +233,8 @@ hdtqeth_la_LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) \
 	$(hdtqeth_la_LDFLAGS) $(LDFLAGS) -o $@
 @OPTION_DYNAMIC_LOAD_TRUE@am_hdtqeth_la_rpath = -rpath $(modexecdir)
 libherc_la_DEPENDENCIES = libhercs.la libhercu.la libherct.la \
-	libhercd.la decNumber/libdecNumber.la $(am__DEPENDENCIES_1)
+	libhercd.la decNumber/libdecNumber.la \
+	softfloat/libsoftfloat.la $(am__DEPENDENCIES_1)
 am__libherc_la_SOURCES_DIST = hconsole.c w32util.c strsignal.c impl.c \
 	config.c bldcfg.c panel.c history.c fillfnam.c ipl.c assist.c \
 	dat.c stack.c cpu.c vstore.c general1.c general2.c general3.c \
@@ -674,9 +675,9 @@ top_srcdir = @top_srcdir@
 AUTOMAKE_OPTIONS = foreign 1.5
 ACLOCAL_AMFLAGS = -I m4 -I autoconf
 lns = @LN_S@
-SUBDIRS = decNumber m4 util html man . crypto
+SUBDIRS = decNumber softfloat m4 util html man . crypto
 LDADD = @LIBS@
-AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/decNumber
+AM_CPPFLAGS = -I$(top_srcdir) -I$(top_srcdir)/decNumber -I$(top_srcdir)/softfloat
 @BUILD_HERCIFC_FALSE@HERCIFC = 
 @BUILD_HERCIFC_TRUE@HERCIFC = hercifc
 @BUILD_SHARED_FALSE@HERCLIN = 
@@ -977,6 +978,7 @@ libherc_la_LIBADD = libhercs.la     \
                       libherct.la     \
                       libhercd.la     \
                       decNumber/libdecNumber.la \
+                      softfloat/libsoftfloat.la \
                       $(LDADD)
 
 @BUILD_SHARED_FALSE@@OPTION_DYNAMIC_LOAD_TRUE@HLDFLAGS = -dlopen self         \
@@ -1116,7 +1118,6 @@ EXTRA_DIST = autoconf/config.rpath \
              hercules.cnf          \
              cckdfix.c             \
              README.COMMADPT       \
-             README.SVN            \
              README.DYNMOD         \
              README.ECPSVM         \
              README.HDL            \
@@ -1189,8 +1190,6 @@ noinst_HEADERS = hostinfo.h     \
                  w32ctca.h      \
                  tt32api.h      \
                  linklist.h     \
-                 ieee-sol.h     \
-                 ieee-w32.h     \
                  httpmisc.h     \
                  devtype.h      \
                  codepage.h     \

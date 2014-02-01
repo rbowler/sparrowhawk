@@ -142,6 +142,10 @@
  #define _FEATURE_ENHANCED_DAT_FACILITY
 #endif
 
+#if defined(FEATURE_ENHANCED_DAT_FACILITY_2)
+ #define _FEATURE_ENHANCED_DAT_FACILITY_2
+#endif
+
 #if defined(FEATURE_SENSE_RUNNING_STATUS)
  #define _FEATURE_SENSE_RUNNING_STATUS
 #endif
@@ -434,6 +438,11 @@
  #error ESA/390 SIE must be defined when defining ESAME SIE
 #endif
 
+#if defined(FEATURE_ENHANCED_DAT_FACILITY_2) \
+  && !defined(FEATURE_ENHANCED_DAT_FACILITY)
+ #error Enhanced DAT facility 2 requires enhanced DAT facility
+#endif
+
 #if defined(FEATURE_MULTIPLE_CONTROLLED_DATA_SPACE) \
  && !defined(FEATURE_INTERPRETIVE_EXECUTION)
  #error MCDS only supported with SIE
@@ -496,12 +505,6 @@
 #if defined(FEATURE_ESAME) \
  && defined(FEATURE_VECTOR_FACILITY)
  #error Vector Facility not supported in ESAME mode
-#endif
-
-#if defined(FEATURE_BINARY_FLOATING_POINT) \
- && defined(NO_IEEE_SUPPORT)
- #undef FEATURE_BINARY_FLOATING_POINT
- #undef FEATURE_FPS_EXTENSIONS
 #endif
 
 #if defined(FEATURE_BINARY_FLOATING_POINT) \
@@ -603,7 +606,7 @@
 #if defined(FEATURE_CPU_MEASUREMENT_COUNTER_FACILITY)\
     || defined(FEATURE_CPU_MEASUREMENT_SAMPLING_FACILITY)
   #if !defined(FEATURE_LOAD_PROGRAM_PARAMETER_FACILITY)
-    #error CPU Measurement facilities requires Load Program Parameter facility 
+    #error CPU Measurement facilities requires Load Program Parameter facility
   #endif
 #endif
 

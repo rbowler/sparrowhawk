@@ -26,6 +26,7 @@
 /*      ESAME BSA instruction - Roger Bowler                    v209c*/
 /*      ASN-and-LX-reuse facility - Roger Bowler            June 2004*/
 /*      SIGP orders 11,12.2,13,15 - Fish                     Oct 2005*/
+/*      Configuration topology facility fixes by PaoloG      Oct 2013*/
 /*-------------------------------------------------------------------*/
 
 #include "hstdinc.h"
@@ -3114,10 +3115,10 @@ CREG    savecr12 = 0;                   /* CR12 save                 */
         {
             /* since ASN trace might be made already, need to save
                current CR12 and use newcr12 for this second entry */
-            if (!newcr12) 
+            if (!newcr12)
                 newcr12 = regs->CR(12);
             savecr12 = regs->CR(12);
-            regs->CR(12) = newcr12; 
+            regs->CR(12) = newcr12;
             newcr12 = ARCH_DEP(trace_ms) (0, 0, regs);
             regs->CR(12) = savecr12;
         }
@@ -5593,7 +5594,7 @@ static char *ordername[] = {
     if ((order > LOG_SIGPORDER && order != SIGP_SENSE_RUNNING_STATE)
         || !IS_CPU_ONLINE(cpad))
     {
-        log_sigp = snprintf ( log_buf, sizeof(log_buf), 
+        log_sigp = snprintf ( log_buf, sizeof(log_buf),
                 "CPU%4.4X: SIGP %s (%2.2X) CPU%4.4X, PARM "F_GREG,
                 regs->cpuad,
                 order >= sizeof(ordername) / sizeof(ordername[0]) ?
@@ -6562,9 +6563,13 @@ SYSIBVMDB *sysib322;                    /* VM description block      */
 #endif
 #if defined(FEATURE_CONFIGURATION_TOPOLOGY_FACILITY)
 SYSIB1512 *sysib1512;                   /* Configuration Topology    */
+BYTE      *tle;                         /* Pointer to next TLE       */
+TLECNTNR  *tlecntnr;                    /* Container TLE pointer     */
 TLECPU    *tlecpu;                      /* CPU TLE Type              */
 U64        cpumask;                     /* work                      */
 int        cputype;                     /* work                      */
+U16        cpuad;                       /* CPU address               */
+BYTE       cntnrid;                     /* Container ID              */
 #endif /*defined(FEATURE_CONFIGURATION_TOPOLOGY_FACILITY)*/
 
                            /*  "0    1    2    3    4    5    6    7" */
@@ -6628,7 +6633,7 @@ static BYTE hexebcdic[16] = { 0xF0,0xF1,0xF2,0xF3,0xF4,0xF5,0xF6,0xF7,
 
     /* Return with cc3 if selector codes invalid */
     /*
-      Func-          
+      Func-
       tion  Selec- Selec-
       Code  tor 1  tor 2  Information Requested about
       ----  -----  -----  ----------------------------
@@ -6846,16 +6851,26 @@ static BYTE hexebcdic[16] = { 0xF0,0xF1,0xF2,0xF3,0xF4,0xF5,0xF6,0xF7,
                 sysib1512 = (SYSIB1512 *)(m);
                 memset(sysib1512, 0x00, sizeof(SYSIB1512));
 
-                // PROGRAMMING NOTE: we only support horizontal polarization,
-                // not vertical.
+                sysib1512->mnest = 2;
+                sysib1512->mag[4] = 1; /*added by PaoloG 25-10-13*/
+                sysib1512->mag[5] = MAX_CPU;
 
-                sysib1512->mnest = 1;
-                sysib1512->mag[5] = sysblk.cpus;
-                tlecpu = (TLECPU *)(sysib1512->tles);
+                tle = sysib1512->tles;
+                cntnrid = 1;
+                cpuad = 0;
 
-                /* For each type of CPU... */
+                /* Build a container TLE */
+                tlecntnr = (TLECNTNR *)tle;
+                memset(tlecntnr, 0x00, sizeof(TLECNTNR));
+                tlecntnr->nl = 1;
+                tlecntnr->cntnrid = cntnrid;
+                tle += sizeof(TLECNTNR);
+
+                /* For each type of CPU */
                 for (cputype = 0; cputype <= SCCB_PTYP_MAX; cputype++)
                 {
+                    tlecpu = (TLECPU *)tle;
+
                     /* For each CPU of this type */
                     cpumask = 0;
                     for (i=0; i < sysblk.hicpu; i++)
@@ -6871,8 +6886,12 @@ static BYTE hexebcdic[16] = { 0xF0,0xF1,0xF2,0xF3,0xF4,0xF5,0xF6,0xF7,
                             {
                                 memset(tlecpu, 0x00, sizeof(TLECPU));
                                 tlecpu->nl = 0;
-                                tlecpu->flags = CPUTLE_FLAG_DEDICATED;
-                                tlecpu->cpuadorg = 0;
+                                if (sysblk.topology == TOPOLOGY_VERT) {
+                                    tlecpu->flags = CPUTLE_FLAG_VERTMED;
+                                } else {
+                                    tlecpu->flags = CPUTLE_FLAG_HORIZ;
+                                }
+                                tlecpu->cpuadorg = cpuad;
                                 tlecpu->cputype = cputype;
                             }
                             /* Update CPU mask field for this type */
@@ -6883,12 +6902,12 @@ static BYTE hexebcdic[16] = { 0xF0,0xF1,0xF2,0xF3,0xF4,0xF5,0xF6,0xF7,
                     if (cpumask)
                     {
                         STORE_DW( &tlecpu->cpumask, cpumask );
-                        tlecpu++;
+                        tle += sizeof(TLECPU);
                     }
                 }
 
                 /* Save the length of this System Information Block */
-                STORE_HW(sysib1512->len,(U16)((BYTE*)tlecpu - (BYTE*)sysib1512));
+                STORE_HW(sysib1512->len,(U16)(tle - (BYTE*)sysib1512));
 
                 /* Successful completion */
                 regs->psw.cc = 0;
@@ -6930,7 +6949,7 @@ static BYTE hexebcdic[16] = { 0xF0,0xF1,0xF2,0xF3,0xF4,0xF5,0xF6,0xF7,
         logmsg("+%2.2X %2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X "
                 "%2.2X%2.2X%2.2X%2.2X %2.2X%2.2X%2.2X%2.2X *%s*\n",
                 i,m[0],m[1],m[2],m[3],m[4],m[5],m[6],m[7],
-                m[8],m[9],m[10],m[11],m[12],m[13],m[14],m[15],s); 
+                m[8],m[9],m[10],m[11],m[12],m[13],m[14],m[15],s);
     }
 #endif /*DEBUG_STSI*/
 
@@ -7229,7 +7248,7 @@ BYTE    akey;                           /* Access key                */
         /* Translate to real address - eventually using an access
            register if the guest is in XC mode */
         if (SIE_TRANSLATE_ADDR (regs->sie_mso + aaddr,
-                                b1>0 && 
+                                b1>0 &&
                                   MULTIPLE_CONTROLLED_DATA_SPACE(regs) ?
                                     b1 : USE_PRIMARY_SPACE,
                                 regs->hostregs, ACCTYPE_SIE))

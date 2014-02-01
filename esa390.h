@@ -352,9 +352,16 @@ typedef struct _DAT {
 
 /* Region table entry bit definitions (ESAME mode) */
 #define REGTAB_TO       0xFFFFFFFFFFFFF000ULL /* Table origin        */
+#define REGTAB_RFAA     0xFFFFFFFF80000000ULL /* Region addr    EDAT2*/
+#define REGTAB_AV       0x10000         /* ACCF validity bit    EDAT2*/
+#define REGTAB_ACC      0xF000          /* Access control bits  EDAT2*/
+#define REGTAB_F        0x800           /* Fetch protect bit    EDAT2*/
+#define REGTAB_FC       0x400           /* Format control bit   EDAT2*/
 #define REGTAB_P        0x200           /* DAT Protection bit    EDAT*/
+#define REGTAB_CO       0x100           /* Change override bit  EDAT2*/
 #define REGTAB_TF       0x0C0           /* Table offset              */
 #define REGTAB_I        0x020           /* Region invalid            */
+#define REGTAB_CR       0x010           /* Common region bit    EDAT2*/
 #define REGTAB_TT       0x00C           /* Table type                */
 #define REGTAB_TL       0x003           /* Table length              */
 #define REGTAB_RESV     0xD10           /* Reserved bits - ignored   */
@@ -1303,7 +1310,7 @@ typedef struct _MBK {
 #define PFMF_FSC             0x00007000 /* Frame-Size Code           */
 #define PFMF_FSC_4K          0x00000000 /* 4K                        */
 #define PFMF_FSC_1M          0x00001000 /* 1M                        */
-#define PFMF_FSC_RESV        0x00006000 /* Reserved                  */
+#define PFMF_FSC_2G          0x00002000 /* 2G                        */
 #define PFMF_NQ              0x00000800 /* Quiesce (SK must be one)  */
 #define PFMF_MR              0x00000400 /* Reference Bit Update Mask */
 #define PFMF_MC              0x00000200 /* Change Bit Update Mask    */
@@ -2075,9 +2082,12 @@ typedef struct _TLECPU {                /* CPU TLE                   */
         DW      cpumask;                /* CPU Mask                  */
     }   TLECPU;
 
-#define CPUTLE_FLAG_RESERVED    0xF8
-#define CPUTLE_FLAG_DEDICATED   0x04
-#define CPUTLE_FLAG_VPOLARMASK  0x03
+/* Bit definitions for TLECPU flag byte */
+#define CPUTLE_FLAG_DEDICATED   0x04    /* Dedicated CPU             */
+#define CPUTLE_FLAG_HORIZ       0x00    /* Horizontally polarized    */
+#define CPUTLE_FLAG_VERTLOW     0x01    /* Vertical low entitlement  */
+#define CPUTLE_FLAG_VERTMED     0x02    /* Vertical med entitlement  */
+#define CPUTLE_FLAG_VERTHIGH    0x03    /* Vertical high entitlement */
 
 typedef struct _SYSIBVMDB {             /* Virtual Machine Desc Block*/
         BYTE    resv1[4*1];             /* Reserved                  */
