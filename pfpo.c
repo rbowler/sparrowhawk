@@ -49,6 +49,7 @@ typedef struct
 }
 PFPO_FLOAT;
 
+#if 0 // PFPO not yet implemented
 /*-------------------------------------------------------------------*/
 /* Binary floating point routines                                    */
 /*-------------------------------------------------------------------*/
@@ -489,7 +490,7 @@ static void HFPlongGet(PFPO_FLOAT *f, U64 r)
       mask = 0x00ff000000000000;
       for(i = 0; i < 7; i++)
       {
-        sprintf(&f->str[strlen(f->str)], "%02x", (r & mask) >> (48 - (i * 8)));
+        sprintf(&f->str[strlen(f->str)], "%02"I64_FMT"x", (r & mask) >> (48 - (i * 8)));
         mask >>= 8;
       }
       strcat(f->str, "@");
@@ -532,13 +533,13 @@ static void HFPextGet(PFPO_FLOAT *f, U64 h, U64 l)
       mask = 0x00ff000000000000;
       for(i = 0; i < 7; i++)
       {
-        sprintf(&f->str[strlen(f->str)], "%02x", (h & mask) >> (48 - (i * 8)));
+        sprintf(&f->str[strlen(f->str)], "%02"I64_FMT"x", (h & mask) >> (48 - (i * 8)));
         mask >>= 8;
       }
       mask = 0x00ff000000000000;
       for(i = 0; i < 7; i++)
       {
-        sprintf(&f->str[strlen(f->str)], "%02x", (l & mask) >> (48 - (i * 8)));
+        sprintf(&f->str[strlen(f->str)], "%02"I64_FMT"x", (l & mask) >> (48 - (i * 8)));
         mask >>= 8;
       }
       strcat(f->str, "@");
@@ -546,6 +547,7 @@ static void HFPextGet(PFPO_FLOAT *f, U64 h, U64 l)
       break;
   }
 }
+#endif // PFPO not yet implemented
 
 /*-------------------------------------------------------------------*/
 /* 010A PFPO  - Perform Floating Point Operation                 [E] */

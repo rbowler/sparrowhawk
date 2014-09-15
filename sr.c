@@ -42,7 +42,7 @@ DEVBLK *dev;
 int suspend_cmd(int argc, char *argv[],char *cmdline)
 {
 char    *fn = SR_DEFAULT_FILENAME;
-SR_FILE *file;
+SR_FILE  file;
 CPU_BITMAP started_mask;
 struct   timeval tv;
 time_t   tt;
@@ -313,7 +313,7 @@ sr_error_exit:
 int resume_cmd(int argc, char *argv[],char *cmdline)
 {
 char    *fn = SR_DEFAULT_FILENAME;
-SR_FILE *file;
+SR_FILE  file;
 U32      key = 0, len = 0;
 CPU_BITMAP started_mask = 0;
 int      i, rc;
@@ -321,7 +321,7 @@ REGS    *regs = NULL;
 U16      devnum=0;
 U16      lcss=0;
 U16      hw;
-int      devargc;
+int      devargc=0;
 char    *devargv[16];
 int      devargx=0;
 DEVBLK  *dev = NULL;
@@ -673,6 +673,8 @@ S64      dreg;
                 rc = z900_load_psw(regs, (BYTE *)&buf);
                 break;
 #endif
+            default: /* regs->arch_mode not valid (should not occur) */
+                rc = 99;
             } /* switch (regs->arch_mode) */
             if (rc != 0 && memcmp(buf, zeros, len))
             {
@@ -1295,6 +1297,8 @@ S64      dreg;
                                     z900_execute_ccw_chain, dev, "device thread");
                 break;
 #endif
+            default: /* sysblk.arch_mode not valid (should not occur) */
+                rc = 99;
             } /* switch (sysblk.arch_mode) */
             if (rc != 0)
             {
