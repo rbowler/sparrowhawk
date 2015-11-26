@@ -1,4 +1,4 @@
-/* CMPSC.C      (c) Bernard van der Helm, 2000-2014                  */
+/* CMPSC.C      (c) Bernard van der Helm, 2000-2015                  */
 /*              S/390 compression call instruction                   */
 
 /*----------------------------------------------------------------------------*/
@@ -18,7 +18,7 @@
 /*   Compression dead end determination and elimination.                      */
 /*   Proactive dead end determination and elimination.                        */
 /*                                                                            */
-/*                              (c) Copyright Bernard van der Helm, 2000-2014 */
+/*                              (c) Copyright Bernard van der Helm, 2000-2015 */
 /*                              Noordwijkerhout, The Netherlands.             */
 /*                                                                            */
 /*----------------------------------------------------------------------------*/
@@ -184,6 +184,7 @@
 struct cc                              /* Compress context                    */
 {
   BYTE *cce;                           /* Character entry under investigation */
+  int cr;                              /* Characters read to check #261       */
   unsigned dctsz;                      /* Dictionary size                     */
   BYTE deadadm[8192][0x100 / 8];       /* Dead end administration             */
   BYTE deadend;                        /* Dead end indicator                  */
@@ -313,9 +314,6 @@ DEF_INST(compression_call)
     regs->psw.cc = 1;
     return;
   }
-
-  /* Set possible Data Exception code */
-  regs->dxc = DXC_DECIMAL;
 
   /* Initialize intermediate registers */
   INITREGS(&iregs, regs, r1, r2);
@@ -503,9 +501,10 @@ static void ARCH_DEP(cmpsc_compress)(int r1, int r2, REGS *regs, REGS *iregs)
       logmsg("fetch_ch : %02X at " F_VADR "\n", *cc.src, GR_A(cc.r2, cc.iregs));
 #endif /* #ifdef OPTION_CMPSC_DEBUG */
 
-      /* Set the alphabet entry and adjust registers */
+      /* Set the alphabet entry, adjust registers and initiate charcters read */
       is = *cc.src;
       ADJUSTREGSC(&cc, cc.r2, cc.regs, cc.iregs, 1);
+      cc.cr = 1;
 
       /* Check for alphabet entry ch dead end combination */
       if(unlikely(!(cc.src && BIT_get(cc.deadadm, is, *cc.src))))
@@ -602,9 +601,10 @@ static int ARCH_DEP(cmpsc_compress_single_is)(struct cc *cc)
   logmsg("fetch_ch : %02X at " F_VADR "\n", *cc->src, GR_A(cc->r2, cc->iregs));
 #endif /* #ifdef OPTION_CMPSC_DEBUG */
 
-  /* Set the alphabet entry and adjust registers */
+  /* Set the alphabet entry, adjust registers and initiate characters read */
   is = *cc->src;
   ADJUSTREGSC(cc, cc->r2, cc->regs, cc->iregs, 1);
+  cc->cr = 1;
 
   /* Search for child when no src and no dead end combination */
   if(unlikely(!(cc->src && BIT_get(cc->deadadm, is, *cc->src))))
@@ -687,19 +687,28 @@ static BYTE *ARCH_DEP(cmpsc_fetch_cce)(struct cc *cc, unsigned index)
   if(cct < 2)
   {
     if(unlikely(CCE_act(cce) > 4))
+    {
+      cc->regs->dxc = DXC_DECIMAL;
       ARCH_DEP(program_interrupt)(cc->regs, PGM_DATA_EXCEPTION);
+    }
   }
   else
   {
     if(!CCE_d(cce))
     {
       if(unlikely(cct == 7))
+      {
+        cc->regs->dxc = DXC_DECIMAL;
         ARCH_DEP(program_interrupt)(cc->regs, PGM_DATA_EXCEPTION);
+      }
     }
     else
     {
       if(unlikely(cct > 5))
+      {
+        cc->regs->dxc = DXC_DECIMAL;
         ARCH_DEP(program_interrupt)(cc->regs, PGM_DATA_EXCEPTION);
+      }
     }
   }
   return(cce);
@@ -892,6 +901,19 @@ static int ARCH_DEP(cmpsc_search_cce)(struct cc *cc, U16 *is)
     logmsg("fetch_ch : %02X at " F_VADR "\n", *cc->src, GR_A(cc->r2, cc->iregs));
 #endif /* #ifdef OPTION_CMPSC_DEBUG */
 
+    /* Check for reading character 261 */
+    cc->cr++;
+    if(unlikely(cc->cr > 260))
+    {
+
+#ifdef OPTION_CMPSC_DEBUG
+      logmsg("Trying to read character #%d\n", cc->cr);
+#endif /* #ifdef OPTION_CMPSC_DEBUG */
+
+      cc->regs->dxc = DXC_DECIMAL;
+      ARCH_DEP(program_interrupt)(cc->regs, PGM_DATA_EXCEPTION);
+    }    
+    
     memset(cc->searchadm, 0, sizeof(cc->searchadm));
     cc->deadend = 1;
     ind_search_siblings = 1;
@@ -975,13 +997,11 @@ static int ARCH_DEP(cmpsc_search_sd)(struct cc *cc, U16 *is)
   BYTE *sd1;                           /* Sibling descriptor fmt-0|1 part 1   */
   BYTE *sd2 = NULL;                    /* Sibling descriptor fmt-1 part 2     */
   int sd_ptr;                          /* Pointer to sibling descriptor       */
-  int searched;                        /* Number of children searched         */
   int y_in_parent;                     /* Indicator if y bits are in parent   */
 
   /* Initialize values */
   ind_search_siblings = 1;
   sd_ptr = CCE_ccs(cc->cce);
-  searched = sd_ptr;
   y_in_parent = 1;
 
   do
@@ -1009,7 +1029,10 @@ static int ARCH_DEP(cmpsc_search_sd)(struct cc *cc, U16 *is)
 
       /* Check for data exception */
       if(unlikely(!SD1_sct(sd1)))
+      {
+        cc->regs->dxc = DXC_DECIMAL;
         ARCH_DEP(program_interrupt)((cc->regs), PGM_DATA_EXCEPTION);
+      }
     }
 
 #ifdef OPTION_CMPSC_DEBUG    
@@ -1064,11 +1087,6 @@ static int ARCH_DEP(cmpsc_search_sd)(struct cc *cc, U16 *is)
 
     /* Next sibling follows last possible child */
     sd_ptr += scs + 1;
-
-    /* test for searching child 261 */
-    searched += scs;
-    if(unlikely(searched > 260))
-      ARCH_DEP(program_interrupt)((cc->regs), PGM_DATA_EXCEPTION);
 
     /* We get the next sibling descriptor, no y bits in parent for him */
     y_in_parent = 0;
@@ -1351,8 +1369,25 @@ static int ARCH_DEP(cmpsc_test_ec)(struct cc *cc, BYTE *cce)
     src = buf;
   }
 
-  /* Return results compare */
-  return(memcmp(src, &CCE_ec(cce, 0), CCE_ecs(cce)));
+  /* Compare additional extension characters */
+  if(!memcmp(src, &CCE_ec(cce, 0), CCE_ecs(cce)))
+  {
+    /* Check for reading character 261 */
+    cc->cr += CCE_ecs(cce);
+    if(unlikely(cc->cr > 260))
+    {
+
+#ifdef OPTION_CMPSC_DEBUG
+      logmsg("Trying to read character #%d\n", cc->cr);
+#endif /* #ifdef OPTION_CMSPC_DEBUG */
+
+      cc->regs->dxc = DXC_DECIMAL;
+      ARCH_DEP(program_interrupt)(cc->regs, PGM_DATA_EXCEPTION);
+    }
+    return(0);
+  }
+  else
+    return(1);
 }
 
 /*============================================================================*/
@@ -1520,7 +1555,16 @@ static void ARCH_DEP(cmpsc_expand_is)(struct ec *ec, U16 is)
     /* Count and check for writing child 261 and check valid psl */
     cw += psl;
     if(unlikely(cw > 260 || psl > 5))
+    {
+
+#ifdef OPTION_CMPSC_DEBUG
+      if(cw > 260)
+        logmsg("Trying to write character #%d\n", cw);
+#endif /* #ifdef OPTION_CMPSC_DEBUG */
+
+      ec->regs->dxc = DXC_DECIMAL;
       ARCH_DEP(program_interrupt)((ec->regs), PGM_DATA_EXCEPTION);
+    }
 
     /* Process extension characters in preceded entry */
     memcpy(&ec->oc[ec->ocl + ECE_ofst(ece)], &ece[2], psl);
@@ -1545,7 +1589,16 @@ static void ARCH_DEP(cmpsc_expand_is)(struct ec *ec, U16 is)
   csl = ECE_csl(ece);
   cw += csl;
   if(unlikely(cw > 260 || !csl || ECE_bit34(ece)))
+  {
+
+#ifdef OPTION_CMPSC_DEBUG
+    if(cw > 260)
+      logmsg("Trying to write character #%d\n", cw);
+#endif /* #ifdef OPTION_CMPSC_DEBUG */
+
+    ec->regs->dxc = DXC_DECIMAL;
     ARCH_DEP(program_interrupt)((ec->regs), PGM_DATA_EXCEPTION);
+  }
 
   /* Process extension characters in unpreceded entry */
   memcpy(&ec->oc[ec->ocl], &ece[1], csl);
