@@ -1411,7 +1411,24 @@ BYTE    old;                            /* Old value                 */
     old = *main2;
 
     /* Attempt to exchange the values */
-    while (cmpxchg1(&old, 255, main2));
+    /*  The WHILE statement that follows could lead to a        @PJJ */
+    /*  TS-style lock release never being noticed, because      @PJJ */
+    /*  because such release statements are implemented using   @PJJ */
+    /*  regular instructions such as MVI or even ST which set   @PJJ */
+    /*  [the most significant bit of] the mem_lockbyte to zero; @PJJ */
+    /*  these are NOT being protected using _MAINLOCK.  In the  @PJJ */
+    /*  absence of a machine assist for "cmpxchg1" it is then   @PJJ */
+    /*  possible that this reset occurs in between the test     @PJJ */
+    /*  IF (old == mem_lockbyte), and the updating of           @PJJ */
+    /*  mem_lockbyte = 255;  As this update in the case         @PJJ */
+    /*  old == 255 is not needed to start with, we have         @PJJ */
+    /*  inserted the test IF (old != 255) in front of the       @PJJ */
+    /*  original WHILE statement.                               @PJJ */
+    /*  (The above bug WAS experienced running VM on an ARM     @PJJ */
+    /*  Raspberry PI; this correction fixed it.)                @PJJ */
+    /*                              (Peter J. Jansen, May 2015) @PJJ */
+    if (old != 255)
+        while (cmpxchg1(&old, 255, main2));
     regs->psw.cc = old >> 7;
 
     /* Release main-storage access lock */
@@ -2191,10 +2208,10 @@ DEF_INST(convert_utf8_to_utf32)
 
     /* Write and commit registers */
     ARCH_DEP(vstorec)(utf32, 3, dest, r1, regs);
-    SET_GR_A(r1, regs, (dest + 4) & ADDRESS_MAXWRAP(regs));
-    SET_GR_A(r1 + 1, regs, destlen - 4);
-    SET_GR_A(r2, regs, (srce + read) & ADDRESS_MAXWRAP(regs));
-    SET_GR_A(r2 + 1, regs, srcelen - read);
+    SET_GR_A(r1, regs, (dest += 4) & ADDRESS_MAXWRAP(regs));
+    SET_GR_A(r1 + 1, regs, destlen -= 4);
+    SET_GR_A(r2, regs, (srce += read) & ADDRESS_MAXWRAP(regs));
+    SET_GR_A(r2 + 1, regs, srcelen -= read);
 
     xlated += read;
   }
@@ -2308,10 +2325,10 @@ DEF_INST(convert_utf16_to_utf32)
 
     /* Write and commit registers */
     ARCH_DEP(vstorec)(utf32, 3, dest, r1, regs);
-    SET_GR_A(r1, regs, (dest + 4) & ADDRESS_MAXWRAP(regs));
-    SET_GR_A(r1 + 1, regs, destlen - 4);
-    SET_GR_A(r2, regs, (srce + read) & ADDRESS_MAXWRAP(regs));
-    SET_GR_A(r2 + 1, regs, srcelen - read);
+    SET_GR_A(r1, regs, (dest += 4) & ADDRESS_MAXWRAP(regs));
+    SET_GR_A(r1 + 1, regs, destlen -= 4);
+    SET_GR_A(r2, regs, (srce += read) & ADDRESS_MAXWRAP(regs));
+    SET_GR_A(r2 + 1, regs, srcelen -= read);
 
     xlated += read;
   }
@@ -2444,10 +2461,10 @@ DEF_INST(convert_utf32_to_utf8)
 
     /* Write and commit registers */
     ARCH_DEP(vstorec)(utf8, write - 1, dest, r1, regs);
-    SET_GR_A(r1, regs, (dest + write) & ADDRESS_MAXWRAP(regs));
-    SET_GR_A(r1 + 1, regs, destlen - write);
-    SET_GR_A(r2, regs, (srce + 4) & ADDRESS_MAXWRAP(regs));
-    SET_GR_A(r2 + 1, regs, srcelen - 4);
+    SET_GR_A(r1, regs, (dest += write) & ADDRESS_MAXWRAP(regs));
+    SET_GR_A(r1 + 1, regs, destlen -= write);
+    SET_GR_A(r2, regs, (srce += 4) & ADDRESS_MAXWRAP(regs));
+    SET_GR_A(r2 + 1, regs, srcelen -= 4);
 
     xlated += 4;
   }
@@ -2541,10 +2558,10 @@ DEF_INST(convert_utf32_to_utf16)
 
     /* Write and commit registers */
     ARCH_DEP(vstorec)(utf16, write - 1, dest, r1, regs);
-    SET_GR_A(r1, regs, (dest + write) & ADDRESS_MAXWRAP(regs));
-    SET_GR_A(r1 + 1, regs, destlen - write);
-    SET_GR_A(r2, regs, (srce + 4) & ADDRESS_MAXWRAP(regs));
-    SET_GR_A(r2 + 1, regs, srcelen - 4);
+    SET_GR_A(r1, regs, (dest += write) & ADDRESS_MAXWRAP(regs));
+    SET_GR_A(r1 + 1, regs, destlen -= write);
+    SET_GR_A(r2, regs, (srce += 4) & ADDRESS_MAXWRAP(regs));
+    SET_GR_A(r2 + 1, regs, srcelen -= 4);
 
     xlated += 4;
   }
